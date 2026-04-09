@@ -1,0 +1,33 @@
+.github/ISSUE_TEMPLATE/spec_change.md
+  17b22aa60e0667fc 1-48
+.github/pull_request_template.md
+  17b22aa60e0667fc 1-36
+.github/ISSUE_TEMPLATE/bug_report.md
+  17b22aa60e0667fc 1-42
+.github/ISSUE_TEMPLATE/documentation.md
+  17b22aa60e0667fc 1-28
+.github/ISSUE_TEMPLATE/config.yml
+  17b22aa60e0667fc 1-5
+.github/ISSUE_TEMPLATE/feature_request.md
+  17b22aa60e0667fc 1-39
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.6",
+  "base_commit_sha": "1788f93084f6d8eed934b16f69a49c948777607d",
+  "prompts": {
+    "17b22aa60e0667fc": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "05b1ee53-9efd-4451-9cf9-d6d8ce018603",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "StreamDemon",
+      "messages": [],
+      "total_additions": 198,
+      "total_deletions": 0,
+      "accepted_lines": 198,
+      "overriden_lines": 0
+    }
+  }
+}
