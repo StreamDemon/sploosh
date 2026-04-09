@@ -15,19 +15,29 @@ const MAX_RETRIES: u32 = 3;     // compile-time constant
 ```
 i8  i16  i32  i64  i128    // Signed integers
 u8  u16  u32  u64  u128    // Unsigned integers
+u256                        // 256-bit unsigned integer (all targets, checked arithmetic)
 f32  f64                    // Floating point
 bool                        // true | false
 char                        // Unicode scalar value
 str                         // String slice (immutable reference)
 String                      // Owned, growable string
+Address                     // 32-byte blockchain address (no arithmetic)
 ()                          // Unit type (void equivalent)
+```
+
+`u256` is a 256-bit unsigned integer available on all targets. Arithmetic is always checked (overflow traps). Use the `u256` literal suffix: `1000u256`.
+
+`Address` is a 32-byte blockchain address type. It supports equality comparison but no arithmetic operations. Construct one from a hex string:
+
+```sploosh
+let addr = Address::from_hex("0x00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff");
 ```
 
 ## Default Numeric Types
 
 - Unsuffixed integer literals default to `i64`
 - Unsuffixed float literals default to `f64`
-- Use suffixes to override: `42u32`, `3.14f32`
+- Use suffixes to override: `42u32`, `3.14f32`, `1000u256`
 
 ```sploosh
 let x = 42;            // i64 (default)
@@ -44,6 +54,7 @@ let list: Vec<i64> = vec![1, 2, 3];      // Growable list
 let pair: (String, i64) = ("age".into(), 30);  // Tuple
 let map: Map<String, i64> = Map::new();  // Hash map
 let set: Set<i64> = Set::new();          // Hash set
+let boxed: Box<i64> = Box::new(42);      // Heap-allocated single-owner pointer
 ```
 
 ## Option and Result

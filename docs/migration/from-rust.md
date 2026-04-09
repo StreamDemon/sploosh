@@ -18,7 +18,7 @@
 | `format!("...", x)` | `format("...", x)` | Compiler intrinsic, not a macro |
 | `#[derive(...)]` | `@derive(...)` | `@` instead of `#[]` for attributes |
 | `#[test]` | `@test` | Same semantics, different syntax |
-| Lifetime elision | No elision | All lifetimes must be explicit |
+| Lifetime elision (3 rules) | Minimal elision (single-source rule) | Only elides when there is exactly one input lifetime |
 | `pub(crate)`, `pub(super)` | Just `pub` | Two visibility levels only |
 | `static mut` | Not available | All mutable state lives in actors |
 | Threads + `Arc<Mutex<T>>` | Actors + `Handle<T>` | Actor model instead of shared-memory concurrency |
@@ -28,6 +28,12 @@
 | Macros (`macro_rules!`) | Not available | No macro system |
 | `HashMap`, `HashSet` | `Map`, `Set` | Shorter names |
 | `println!("...")` | `print("...")` | Not a macro |
+| `x as u32` | `x as u32` | Numeric casts work the same way |
+| `unsafe { ... }` | Not available | Use `extern "C"` with safe wrappers instead |
+| `Rc<T>` / `Arc<T>` | `Handle<T>` | Use typed actor handles, not reference counting |
+| Unbounded `mpsc::channel` | `Channel::new(cap)` | Bounded MPSC only; returns `(Sender<T>, Receiver<T>)` |
+| Unbounded actor channels | Bounded actor mailboxes | Mailboxes have a fixed capacity with backpressure |
+| Checked arithmetic (debug only) | Checked arithmetic (all modes) | Overflow always panics, no silent wrapping in release |
 
 ## New Concepts for Rust Developers
 - **Actors** (`actor`, `spawn`, `send`, `Handle<T>`) -- structured concurrency primitive

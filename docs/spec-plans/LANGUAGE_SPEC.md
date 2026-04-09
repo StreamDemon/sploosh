@@ -1,4 +1,4 @@
-# SPLOOSH Language Specification v0.3.0-draft
+# SPLOOSH Language Specification v0.4.0-draft
 
 > **AI-Native · Systems-Grade · Web2/Web3 Dual-Target**
 >
@@ -35,16 +35,16 @@ Source files are UTF-8. All keywords, operators, and identifiers use ASCII only.
 
 Block comments are intentionally omitted. One way to comment.
 
-### 2.3 Keywords (38 total)
+### 2.3 Keywords (40 total)
 
 **Declarations:**
-`fn` `let` `const` `type` `struct` `enum` `trait` `impl` `mod` `use` `pub`
+`fn` `let` `const` `type` `struct` `enum` `trait` `impl` `mod` `use` `pub` `extern`
 
 **Control Flow:**
 `if` `else` `match` `for` `in` `while` `loop` `break` `continue` `return`
 
 **Types & Values:**
-`self` `Self` `true` `false` `none`
+`self` `Self` `true` `false` `none` `as`
 
 **Concurrency:**
 `actor` `send` `recv` `spawn` `async` `await` `select`
@@ -61,7 +61,7 @@ Block comments are intentionally omitted. One way to comment.
 |------|-------------|----------------------------|-------|
 | 14   | `.`          | Field/method access        | Left  |
 | 13   | `()`  `[]`   | Call, Index                | Left  |
-| 12   | `?`          | Error propagation          | Post  |
+| 12   | `?` `as`     | Error propagation, Numeric cast | Post  |
 | 11   | `!`          | Logical NOT                | Pre   |
 | 10   | `*` `/` `%`  | Multiply, Divide, Modulo   | Left  |
 | 9    | `+` `-`      | Add, Subtract              | Left  |
@@ -95,13 +95,22 @@ Block comments are intentionally omitted. One way to comment.
 ```
 i8  i16  i32  i64  i128    // Signed integers
 u8  u16  u32  u64  u128    // Unsigned integers
+u256                        // 256-bit unsigned integer (checked arithmetic always)
 f32  f64                    // Floating point
 bool                        // true | false
 char                        // Unicode scalar value
 str                         // String slice (immutable)
 String                      // Owned, growable string
+Address                     // Blockchain address (32 bytes, not an integer)
 ()                          // Unit type (void equivalent)
 ```
+
+**`u256`**: 256-bit unsigned integer. Available on all targets. Literal suffix: `0u256`,
+hex: `0xFF00u256`. Always uses checked arithmetic regardless of build mode.
+
+**`Address`**: 32-byte blockchain address. No arithmetic operations. Supports `==`, `!=`,
+`Display`, `Debug`, `Clone`, `Copy`, `Hash`, `Eq`, `Ord`. Construct via `Address::from_hex("0x...")`.
+Maps to 20 bytes on EVM (right-padded), 32 bytes on SVM.
 
 ### 3.2 Compound Types
 
@@ -111,9 +120,13 @@ String                      // Owned, growable string
 Vec<T>              // Growable list
 Map<K, V>           // Hash map
 Set<T>              // Hash set
+Box<T>              // Heap-allocated owned value
 (T, U, V)           // Tuple
 Option<T>           // Some(T) | None
 Result<T, E>        // Ok(T) | Err(E)
+Channel<T>          // Bounded MPSC channel (via Channel::new(cap))
+Sender<T>           // Channel send endpoint (Clone + Send)
+Receiver<T>         // Channel receive endpoint (not Clone)
 ```
 
 ### 3.3 Custom Types
@@ -192,6 +205,25 @@ impl Loggable for User {
 ```
 
 Multiple supertraits use `+`: `trait Storable: Serialize + Clone + Send { }`
+
+**Associated types:** Traits can declare associated types that implementors must specify:
+
+```sploosh
+trait Iter {
+    type Item;    // Associated type — implementors specify the concrete type
+    fn next(&mut self) -> Option<Self::Item>;
+}
+
+impl Iter for NumberRange {
+    type Item = i64;    // Concrete type for this implementation
+    fn next(&mut self) -> Option<i64> { /* ... */ }
+}
+```
+
+Associated type rules:
+- Declared with `type Name;` inside a trait definition.
+- Implementors provide `type Name = ConcreteType;` in their `impl` block.
+- Trait bounds can constrain associated types: `T: Iter<Item = String>`.
 
 ### 3.6 Trait Bounds
 
@@ -320,6 +352,79 @@ for shape in shapes.iter() {
 - `dyn Trait` — runtime dispatch, one copy of code. Use for heterogeneous collections,
   plugin architectures, or when the concrete type is unknowable at compile time.
 
+### 3.10 Standard Traits
+
+Sploosh defines the following standard traits. All are in the prelude.
+
+**Marker traits** (no methods, auto-implemented):
+
+| Trait | Purpose | Rules |
+|---|---|---|
+| `Copy` | Bitwise duplicate on assignment | Requires `Clone`. Mutually exclusive with `Drop`. |
+| `Send` | Can be transferred between threads/actors | Auto-implemented for types with all `Send` fields. |
+| `Sync` | Safe to share via `&T` across threads | Auto-implemented for types with all `Sync` fields. |
+
+**Core traits** (derivable with `@derive`):
+
+| Trait | Method | Purpose |
+|---|---|---|
+| `Clone` | `fn clone(&self) -> Self` | Deep copy |
+| `Debug` | `fn fmt_debug(&self) -> String` | Debug representation for `{:?}` |
+| `Eq` | `fn eq(&self, other: &Self) -> bool` | Structural equality (also generates `!=`) |
+| `Ord` | `fn cmp(&self, other: &Self) -> Ordering` | Total ordering. Requires `Eq`. Enables `<` `>` `<=` `>=` |
+| `Hash` | `fn hash(&self) -> u64` | Hash value. Required for `Map` keys and `Set` elements |
+| `Serialize` | `fn serialize(&self) -> Vec<u8>` | Binary serialization |
+| `Deserialize` | `fn deserialize(bytes: &[u8]) -> Result<Self, DeserializeError>` | Binary deserialization |
+
+**Conversion traits:**
+
+| Trait | Method | Purpose |
+|---|---|---|
+| `From<T>` | `fn from(value: T) -> Self` | Infallible conversion |
+| `Into<T>` | (auto from `From`) | `val.into()` calls `T::from(val)` |
+| `TryFrom<T>` | `fn try_from(value: T) -> Result<Self, Self::Error>` | Fallible conversion |
+| `TryInto<T>` | (auto from `TryFrom`) | Fallible `.try_into()` |
+| `Display` | `fn to_string(&self) -> String` | Human-readable format for `{}` |
+
+**Error and cleanup traits:**
+
+| Trait | Method | Purpose |
+|---|---|---|
+| `Error` | `fn message(&self) -> String` | Supertrait: `Error: Display`. Base for all error types |
+| `Drop` | `fn drop(&mut self)` | Deterministic cleanup when value goes out of scope |
+
+`Drop` rules:
+- Drop order within a scope: reverse of declaration order.
+- Struct fields drop in declaration order.
+- `Drop` and `Copy` are mutually exclusive — a type cannot implement both.
+- Implement `Drop` for custom cleanup (file handles, network connections).
+
+**Closure traits** (already defined in §4.5):
+`Fn(Args) -> Ret`, `FnMut(Args) -> Ret`, `FnOnce(Args) -> Ret`
+
+**Iterator traits:**
+- `Iter` — defined in §7.1.
+- `FromIter` — `fn from_iter(iter: impl Iter<Item = T>) -> Self`. Used by `collect()`.
+
+### 3.11 Numeric Casting with `as`
+
+The `as` keyword performs numeric type conversions only.
+
+```sploosh
+let x: i32 = 42;
+let y: i64 = x as i64;         // widening — always safe
+let z: u8 = 256u16 as u8;      // narrowing — truncates (result: 0)
+let w: i64 = 3.7f64 as i64;    // float to int — truncates toward zero (result: 3)
+let f: f64 = 42i64 as f64;     // int to float
+```
+
+**Rules:**
+- `as` works between integer types, between float types, and between integer and float.
+- Narrowing conversions truncate (same as two's complement for integers).
+- Float-to-int truncates toward zero. Out-of-range values saturate to the target type's bounds.
+- `as` does NOT work for non-numeric conversions. Use `From`/`Into` for those.
+- `as` is NOT a reference coercion or type alias. It is purely numeric.
+
 ---
 
 ## 4. Ownership & Borrowing
@@ -359,15 +464,55 @@ let user = User { name: "Alice".into(), age: 30, role: Role::Viewer };
 greet(&user.name);
 ```
 
-### 4.4 Explicit Lifetimes
+### 4.4 Heap Allocation with Box\<T\>
+
+`Box<T>` allocates a value on the heap with single-owner semantics:
 
 ```sploosh
+let boxed: Box<i64> = Box::new(42);    // heap-allocated
+let val: i64 = *boxed;                  // deref to inner value
+```
+
+- `Box<T>` is dropped when the owner goes out of scope (calling `Drop` if implemented).
+- `Box<T>` is `Send` if `T: Send`. `Clone` if `T: Clone`.
+- Primary use: trait objects (`Box<dyn Trait>`), large values, recursive types.
+
+**No `Rc<T>` or `Arc<T>` in Sploosh.** Use `Handle<T>` for sharing state across actors.
+Use `Map<Id, T>` with integer IDs for graph-like structures within a single actor.
+
+### 4.5 Lifetimes
+
+Lifetime annotations specify how long references are valid. They are required when
+a function **returns a reference** and has multiple reference parameters.
+
+**Rules:**
+1. If a function does not return a reference, no lifetime annotations are needed.
+2. **Single-source rule:** When a function has exactly one reference parameter
+   (including `&self`/`&mut self`) and returns a reference, the output lifetime
+   equals the input lifetime. No annotation needed.
+3. When multiple reference parameters exist and a reference is returned, explicit
+   lifetime annotations are required.
+
+```sploosh
+// No reference return — no annotations needed
+fn greet(name: &str) -> String { format("Hello, {}", name) }
+
+// Single source — elided (output lifetime = input lifetime)
+fn first_word(s: &str) -> &str { /* ... */ }
+
+// &self is the single source — elided
+fn name(&self) -> &str { &self.name }
+
+// Multiple sources — explicit lifetime required
 fn longest<'a>(a: &'a str, b: &'a str) -> &'a str {
     if a.len() > b.len() { a } else { b }
 }
+
+// One source matters, others ignored — explicit required
+fn pick<'a>(a: &'a str, b: &str) -> &'a str { a }
 ```
 
-### 4.5 Closures and Capture Semantics
+### 4.6 Closures and Capture Semantics
 
 Closures capture variables from their enclosing scope. Capture mode is determined by usage:
 
@@ -418,7 +563,7 @@ let double = |n: i64| n * 2;
 let result = apply(double, 21);  // 42
 ```
 
-### 4.6 Constants
+### 4.7 Constants
 
 ```sploosh
 // Module-level constants — value must be computable at compile time
@@ -438,6 +583,71 @@ const EMPTY: Vec<i32> = Vec::new();     // constructors of known types allowed
 - No `const fn` — keep it simple. If you need computed values, use `let` in a function.
 - No `static` keyword — there is no module-level mutable state.
   All mutable state lives in actors. One way to do it.
+
+### 4.8 Integer Overflow
+
+All integer arithmetic (`+`, `-`, `*`) is **checked by default** in all build modes
+and on all targets. Overflow causes:
+- **In actors**: the actor dies (supervisor restarts if configured).
+- **In non-actor code**: the program aborts with an error.
+- **On-chain**: the transaction reverts.
+
+**Explicit wrapping and saturating operations** are provided as methods on all integer types
+for cases where wrapping is intentional (cryptography, hashing, bit manipulation):
+
+```sploosh
+let a: u8 = 200;
+let b: u8 = 100;
+
+// These would abort (checked overflow):
+// let c = a + b;                        // 300 > 255 — overflow!
+
+// Intentional wrapping:
+let c = a.wrapping_add(b);               // 44 (two's complement)
+
+// Saturating:
+let d = a.saturating_add(b);             // 255 (clamped at max)
+
+// Checked (returns Option):
+let e: Option<u8> = a.checked_add(b);    // None
+```
+
+Available on all integer types (`i8`..`i128`, `u8`..`u128`, `u256`):
+`wrapping_add`, `wrapping_sub`, `wrapping_mul`,
+`saturating_add`, `saturating_sub`,
+`checked_add`, `checked_sub`, `checked_mul`.
+
+The `@overflow(wrapping)` attribute opts a function into wrapping arithmetic:
+
+```sploosh
+@overflow(wrapping)
+fn hash_combine(a: u64, b: u64) -> u64 {
+    a * 6364136223846793005 + b    // wrapping is intentional
+}
+```
+
+`@overflow(wrapping)` is a **compile error inside `onchain` modules**. On-chain
+arithmetic is always checked — no exceptions.
+
+### 4.9 Foreign Function Interface (extern)
+
+Sploosh has no `unsafe` keyword. Foreign functions are declared with `extern "C"` blocks,
+and the compiler generates safe wrappers automatically:
+
+```sploosh
+extern "C" {
+    fn c_open(path: &str, flags: i32) -> Result<i32, FfiError>;
+    fn c_close(fd: i32) -> Result<(), FfiError>;
+}
+```
+
+**FFI rules:**
+- `extern "C"` blocks are only allowed at module top level (not inside functions or actors).
+- The compiler generates safe wrapper code. No raw pointer types are exposed to user code.
+- Null pointers from C are converted to `Option::None`. Non-null becomes `Some(&T)`.
+- C functions that can fail are wrapped to return `Result<T, FfiError>`.
+- `extern` blocks are not available inside `onchain` modules (compile error).
+- There are no raw pointer types (`*const T`, `*mut T`) in the language.
 
 ---
 
@@ -1021,20 +1231,49 @@ fn main() -> Result<(), AppError> {
 }
 ```
 
-### 8.5 Select (multiplexed receive)
+### 8.5 Channels
+
+`Channel<T>` is a typed, bounded, multi-producer single-consumer (MPSC) queue.
+Distinct from actor mailboxes — channels are for explicit data flow between tasks.
+
+```sploosh
+let (tx, rx): (Sender<String>, Receiver<String>) = Channel::new(100);  // capacity 100
+
+// Sending (blocks if full, returns Err if receiver dropped)
+tx.send("hello".into())?;
+
+// Receiving (blocks until message available, returns Err if all senders dropped)
+let msg = rx.recv()?;
+```
+
+**Channel rules:**
+- `Channel::new(capacity)` returns `(Sender<T>, Receiver<T>)`.
+- `Sender<T>` implements `Clone` and `Send`. Multiple producers can hold clones.
+- `Receiver<T>` does NOT implement `Clone`. Single consumer only.
+- When the channel is full, `send` blocks the sender until space is available (backpressure).
+- `send_timeout(tx.send(val), duration_ms)` returns `Result<(), SendError::Timeout>`.
+
+### 8.6 Select (multiplexed receive)
+
+`select` waits on multiple channel receivers and timeouts simultaneously:
 
 ```sploosh
 select {
-    msg = recv channel_a => handle_a(msg),
-    msg = recv channel_b => handle_b(msg),
+    msg = rx1.recv() => handle_a(msg),
+    msg = rx2.recv() => handle_b(msg),
     _ = timeout(5000) => return Err(AppError::Timeout),
 }
 ```
 
-### 8.6 Supervision
+**Select rules:**
+- Arms are evaluated in order. The first arm with an available message wins.
+- If no arms are ready, `select` blocks until one becomes available or a timeout fires.
+- `timeout(ms)` is a compiler intrinsic usable only inside `select` arms.
+
+### 8.7 Supervision
 
 ```sploosh
-@supervisor(strategy: "one_for_one", max_restarts: 3)
+@supervisor(strategy: "one_for_one", max_restarts: 5, window_secs: 60)
 actor WorkerPool {
     children: Vec<Handle<Worker>>,
 
@@ -1047,9 +1286,23 @@ actor WorkerPool {
 }
 ```
 
-### 8.7 Actor Failure and Recovery
+**Supervision strategies:**
 
-Actors can fail due to runtime errors (out-of-bounds access, integer overflow in debug mode,
+| Strategy | Behavior |
+|---|---|
+| `one_for_one` | Restart only the failed child |
+| `one_for_all` | Restart all children when one fails |
+| `rest_for_one` | Restart the failed child and all children started after it |
+
+**Parameters:**
+- `max_restarts`: maximum restarts within `window_secs` before the supervisor itself dies (default: 5).
+- `window_secs`: time window for counting restarts (default: 60).
+- When a supervisor dies, it propagates to ITS supervisor (cascading failure).
+- If the top-level supervisor dies, the runtime returns an error from `main()`.
+
+### 8.8 Actor Failure and Recovery
+
+Actors can fail due to runtime errors (out-of-bounds access, integer overflow,
 explicit `assert` failures). When an actor fails:
 
 1. **The actor dies.** Its state is dropped. Its handle becomes dead.
@@ -1089,7 +1342,7 @@ failed assertions), not from explicit panic calls. The "no panics in safe code" 
 means the language has no user-callable panic — runtime checks are the only source of
 actor death.
 
-### 8.8 Async/Await (for non-actor async)
+### 8.9 Async/Await (for non-actor async)
 
 ```sploosh
 async fn fetch_data(url: &str) -> Result<Response, NetError> {
@@ -1098,6 +1351,83 @@ async fn fetch_data(url: &str) -> Result<Response, NetError> {
     Ok(response)
 }
 ```
+
+**Async task spawning** (non-actor):
+
+```sploosh
+let handle: JoinHandle<String> = spawn async {
+    let data = fetch_data("https://api.example.com").await?;
+    Ok(data.body)
+};
+
+let result = handle.await?;   // wait for task completion
+```
+
+### 8.10 Async-Actor Integration
+
+`.await` is allowed inside actor message handlers. While awaiting, the actor does
+NOT process other messages — it remains "busy" on the current message. This preserves
+the single-threaded-per-actor guarantee.
+
+```sploosh
+actor DataFetcher {
+    cache: Map<String, String>,
+    fn init() -> Self { DataFetcher { cache: Map::new() } }
+
+    pub async fn fetch(&mut self, url: String) -> Result<String, AppError> {
+        if let Some(cached) = self.cache.get(&url) {
+            return Ok(cached.clone());
+        }
+        let data = net::get(&url).await?;    // actor is busy during await
+        self.cache.insert(url, data.clone());
+        Ok(data)
+    }
+}
+```
+
+**Rules:**
+- While an actor is awaiting, its mailbox is not drained. Messages queue up.
+- If an actor needs concurrent I/O and message processing, spawn a separate async task
+  and `send` results back.
+- Async functions cannot hold `&mut` borrows across `.await` points (borrow checker enforced).
+
+### 8.11 Runtime Architecture
+
+The actor runtime is the execution engine for all actors and async tasks.
+
+**Scheduler:** M:N work-stealing model.
+- One scheduler thread per available CPU core (configurable: `[runtime] threads = N` in `sploosh.toml`).
+- Each thread has a bounded, lock-free local run queue (default: 256 tasks).
+- Idle schedulers steal tasks from busy queues in FIFO order (oldest tasks first).
+- Actors are green threads. An actor processes one message handler to completion, then yields.
+- Non-actor async tasks share the same scheduler pool.
+- WASM target uses a single-threaded cooperative scheduler (no OS threads in browser).
+
+**Observable guarantees:**
+- Messages from the same sender to the same actor are processed in send order (per-sender FIFO).
+- Messages from different senders have no ordering guarantee.
+- `spawn` returns a `Handle<T>` immediately. The actor's `init` function runs
+  asynchronously on the scheduler — it does not block the spawner.
+
+**Mailboxes:**
+- Each actor has a bounded, lock-free MPSC mailbox. Default capacity: 1024 messages.
+- Configurable per actor with `@mailbox(capacity: N)`.
+- When full: `send` (fire-and-forget) blocks the sender until space is available (backpressure).
+- `send_timeout(handle.method(args), duration_ms)` returns `Result<(), SendError::Timeout>`.
+- Sending to a dead actor: `send` drops immediately (no block). Request/reply returns
+  `Err(ActorError::Dead)` immediately.
+
+**Memory model:**
+- No garbage collector. Deterministic drop via ownership.
+- Default allocator: system allocator on native, linear memory on WASM, bump allocator on-chain.
+- Actor messages are moved (zero-copy). The sender gives up ownership; the receiver takes it.
+
+**Runtime lifecycle:**
+- The runtime starts when `main()` begins and shuts down when `main()` returns.
+- `Ok(())`: graceful shutdown — supervisors notified, actors finish current message
+  (configurable timeout, default 30 seconds).
+- `Err(e)`: immediate shutdown — all actors killed, pending messages dropped.
+- There is no explicit `Runtime::new()`. The `main` function is the entry point.
 
 ---
 
@@ -1234,6 +1564,26 @@ use crate::models::{User, Role, Permission};
 - (no modifier) — private to the module
 
 Two levels only. No `protected`, no `internal`, no `pub(crate)`. One way to do it.
+
+### 10.4 File Resolution
+
+- `mod foo;` (with semicolon) — look for `foo.sp` adjacent to the current file,
+  then `foo/mod.sp`. First match wins.
+- `mod foo { ... }` (with body) — inline definition. No file lookup.
+- `crate::` — refers to the crate root (`src/main.sp` or `src/lib.sp`).
+- `self::` — refers to the current module.
+- `super::` — refers to the parent module.
+- `pub use crate::models::User;` — re-export for cleaner public APIs.
+
+### 10.5 Trait Coherence (Orphan Rules)
+
+You can only implement a trait for a type if you defined **the trait** or **the type**
+(or both) in your crate.
+
+- You CAN implement your trait for a foreign type.
+- You CAN implement a foreign trait for your type.
+- You CANNOT implement a foreign trait for a foreign type.
+- Blanket impls (`impl<T: Foo> Bar for T`) are allowed only if you own `Bar`.
 
 ---
 
@@ -1396,6 +1746,8 @@ sploosh build --target svm           # on-chain → Solana SBF
 | `@payable` | On-chain: function accepts native tokens |
 | `@reentrant` | On-chain: opt-in to reentrancy (discouraged) |
 | `@supervisor(...)` | Mark an actor as a supervisor |
+| `@mailbox(capacity: N)` | Set actor mailbox capacity (default: 1024) |
+| `@overflow(wrapping)` | Opt function into wrapping arithmetic (compile error on-chain) |
 
 ### 12.2 Derive Macros
 
@@ -1482,18 +1834,75 @@ postgres = ["sploosh_db"]
 
 ## 13. Standard Library (Core)
 
+### 13.0 Compiler Intrinsics
+
+Compiler intrinsics are built-in functions and constructs that look like regular code but
+are implemented by the compiler. They are not part of the standard library and cannot be
+user-defined.
+
+**General intrinsics:**
+
+| Intrinsic | Signature | Context | Purpose |
+|---|---|---|---|
+| `format(template, ...)` | Variadic, compile-time checked | All | String formatting |
+| `print(value)` | `fn(impl Display)` | native, wasm | Write to stdout + newline |
+| `assert(cond)` | `fn(bool)` | native, wasm | Abort/actor death on false |
+| `assert(cond, msg)` | `fn(bool, &str)` | native, wasm | Assert with message |
+| `vec![a, b, c]` | `-> Vec<T>` | All | Vec literal |
+| `vec![val; count]` | `(T: Clone, usize) -> Vec<T>` | All | Vec repeat |
+
+**Concurrency intrinsics:**
+
+| Intrinsic | Signature | Context | Purpose |
+|---|---|---|---|
+| `spawn expr` | `ActorInit -> Handle<T>` | not onchain | Spawn actor |
+| `spawn async { block }` | `-> JoinHandle<T>` | not onchain | Spawn async task |
+| `send expr` | `ActorMethod -> ()` | not onchain | Fire-and-forget message |
+| `send_timeout(expr, ms)` | `-> Result<(), SendError>` | not onchain | Bounded send |
+| `select { arms }` | Special syntax | not onchain | Multiplexed receive |
+| `timeout(ms)` | `fn(u64) -> TimeoutFuture` | not onchain | Timeout in select |
+
+**On-chain intrinsics:**
+
+| Intrinsic | Return Type | Context | Purpose |
+|---|---|---|---|
+| `emit Event { fields }` | `()` | onchain | Emit blockchain event |
+| `ctx::caller()` | `Address` | onchain | Transaction caller |
+| `ctx::self_address()` | `Address` | onchain | Contract address |
+| `ctx::timestamp()` | `u256` | onchain | Block timestamp |
+| `ctx::block_number()` | `u256` | onchain | Block number |
+| `ctx::value()` | `u256` | onchain, EVM, @payable | ETH sent (wei) |
+| `ctx::gas_remaining()` | `u256` | onchain, EVM | Remaining gas |
+| `ctx::chain_id()` | `u256` | onchain, EVM | Chain ID |
+| `ctx::lamports()` | `u64` | onchain, SVM | SOL sent |
+| `ctx::program_id()` | `Address` | onchain, SVM | Program address |
+| `ctx::signer()` | `Address` | onchain, SVM | Transaction signer |
+| `storage::get(field, key)` | Varies | onchain | Read persistent state |
+| `storage::set(field, key, val)` | `()` | onchain | Write persistent state |
+| `chain::call(addr, fn, args)` | `Result<T, E>` | onchain | Cross-contract call |
+
+**Notes:**
+- `vec![]` uses `![]` syntax. This is the only intrinsic with this form. No other "macros" exist.
+- `format()` template strings are validated at compile time — mismatched `{}` count is an error.
+- `print()` and `assert()` are not available in `onchain` modules (compile error).
+- `assert()` failure in an actor causes actor death. In non-actor code, it aborts the program.
+
 ### 13.1 Prelude (auto-imported)
 
 ```
 Option, Some, None
 Result, Ok, Err
-String, Vec, Map, Set
+String, Vec, Map, Set, Box
 print, format, assert
 Display, Debug, Clone, Copy, Eq, Hash, Ord
+From, Into, TryFrom, TryInto
+Drop, Error
 Fn, FnMut, FnOnce
 Iter, FromIter
 Send, Sync
-Handle
+Handle, JoinHandle
+Channel, Sender, Receiver
+Address, u256
 ```
 
 ### 13.2 Core Modules
@@ -1637,9 +2046,9 @@ async fn transfer_tokens(req: &Request, state: &AppState) -> Result<Response, Ap
 program        = { item } ;
 item           = fn_def | struct_def | enum_def | trait_def
                | impl_block | mod_def | use_stmt | actor_def
-               | onchain_mod | const_def | type_alias ;
+               | onchain_mod | const_def | type_alias | extern_block ;
 
-fn_def         = [ "pub" ] [ "async" ] "fn" IDENT [ generics ] "(" params ")"
+fn_def         = [ attrs ] [ "pub" ] [ "async" ] "fn" IDENT [ generics ] "(" params ")"
                  [ "->" type ] block ;
 params         = [ param { "," param } ] ;
 param          = IDENT ":" type ;
@@ -1653,9 +2062,10 @@ variants       = variant { "," variant } [ "," ] ;
 variant        = IDENT [ "(" types ")" | "{" fields "}" ] ;
 
 trait_def      = [ "pub" ] "trait" IDENT [ generics ] [ ":" bounds ] "{" { trait_item } "}" ;
-trait_item     = fn_sig [ block ] ";" ;
+trait_item     = fn_sig [ block ] ";" | "type" IDENT [ ":" bounds ] ";" ;
 
-impl_block     = "impl" [ generics ] [ trait "for" ] type "{" { fn_def } "}" ;
+impl_block     = "impl" [ generics ] [ trait "for" ] type "{" { impl_item } "}" ;
+impl_item      = fn_def | "type" IDENT "=" type ";" ;
 
 actor_def      = [ attrs ] "actor" IDENT [ generics ] "{" { actor_item } "}" ;
 actor_item     = field_def | fn_def ;
@@ -1667,30 +2077,36 @@ onchain_mod    = "onchain" "mod" IDENT "{" { onchain_item } "}" ;
 onchain_item   = storage_block | fn_def | event_def ;
 storage_block  = "storage" "{" fields "}" ;
 
-type           = prim_type | IDENT [ generics ] | "&" [ "mut" ] type
+extern_block   = "extern" STRING "{" { extern_fn } "}" ;
+extern_fn      = "fn" IDENT "(" params ")" [ "->" type ] ";" ;
+
+type           = prim_type | IDENT [ generics ] | "&" [ lifetime ] [ "mut" ] type
                | "[" type ";" EXPR "]" | "[" type "]"
                | "(" [ type { "," type } ] ")" | "fn" "(" types ")" "->" type
-               | "dyn" IDENT [ generics ] | "Box" "<" "dyn" IDENT ">" ;
+               | "dyn" IDENT [ generics ] ;
 generics       = "<" type_params ">" ;
 type_params    = type_param { "," type_param } ;
-type_param     = IDENT [ ":" bounds ] ;
+type_param     = IDENT [ ":" bounds ] | lifetime ;
 bounds         = bound { "+" bound } ;
 bound          = IDENT [ generics ] | lifetime ;
 
 block          = "{" { statement } [ expr ] "}" ;
-statement      = let_stmt | expr_stmt | return_stmt ;
+statement      = let_stmt | expr_stmt | return_stmt | emit_stmt ;
 let_stmt       = "let" [ "mut" ] pattern [ ":" type ] "=" expr ";" ;
 const_def      = [ "pub" ] "const" IDENT ":" type "=" expr ";" ;
 return_stmt    = "return" [ expr ] ";" ;
+emit_stmt      = "emit" IDENT "{" field_inits "}" ";" ;
 expr_stmt      = expr ";" ;
 
 expr           = literal | IDENT | path_expr
                | expr "." IDENT | expr "(" args ")"  | expr "[" expr "]"
-               | expr BINOP expr | UNOP expr | expr "?"
+               | expr BINOP expr | UNOP expr | expr "?" | expr "as" type
                | if_expr | if_let_expr | match_expr | block | closure
                | expr "|>" expr
-               | "spawn" expr | "send" expr | "recv" expr
+               | "spawn" expr | "spawn" "async" block
+               | "send" expr | "recv" expr
                | expr ".await"
+               | select_expr
                | "for" pattern "in" expr block
                | "while" expr block | while_let_expr | "loop" block ;
 
@@ -1699,6 +2115,8 @@ if_let_expr    = "if" "let" pattern "=" expr block [ "else" block ] ;
 while_let_expr = "while" "let" pattern "=" expr block ;
 match_expr     = "match" expr "{" { match_arm } "}" ;
 match_arm      = pattern [ "if" expr ] "=>" ( expr "," | block ) ;
+select_expr    = "select" "{" { select_arm } "}" ;
+select_arm     = pattern "=" expr "=>" ( expr "," | block ) ;
 closure        = [ "move" ] "|" params "|" ( expr | block ) ;
 
 pattern        = "_" | literal | IDENT | [ "ref" ] IDENT
@@ -1708,8 +2126,12 @@ pattern        = "_" | literal | IDENT | [ "ref" ] IDENT
 literal        = INT_LIT [ type_suffix ] | FLOAT_LIT [ type_suffix ]
                | STRING_LIT | CHAR_LIT
                | "true" | "false" | "none" ;
+type_suffix    = "i8" | "i16" | "i32" | "i64" | "i128"
+               | "u8" | "u16" | "u32" | "u64" | "u128" | "u256"
+               | "f32" | "f64" ;
 
 attrs          = { "@" IDENT [ "(" attr_args ")" ] } ;
+directives     = { "#[" IDENT [ "(" dir_args ")" ] "]" } ;
 ```
 
 ---
@@ -1748,6 +2170,19 @@ attrs          = { "@" IDENT [ "(" attr_args ")" ] } ;
 | `.sp` file extension | Short, unique, no conflicts with existing languages. |
 | Explicit lifetimes (no elision) | LLMs generate more correct code when lifetimes are visible. |
 | Two visibility levels only | `pub` or private. No decision fatigue for the model. |
+| Checked arithmetic everywhere | LLMs should generate correct code. `wrapping_*`/`saturating_*` for intentional use. Safety-first. |
+| No `unsafe`, safe `extern "C"` | LLMs misuse `unsafe` as escape hatch. Compiler generates safe FFI wrappers. No raw pointers. |
+| Minimal lifetime elision | Single-source rule covers 95% of cases. Spec examples already follow this pattern. |
+| Bounded mailboxes + backpressure | Unbounded causes OOM. Blocking sender is explicit. `send_timeout` for escape hatch. |
+| M:N work-stealing scheduler | BEAM-proven architecture. Lock-free bounded queues. Per-core scheduling. |
+| No `Rc<T>`/`Arc<T>` in v0.4 | Actors replace shared ownership. `Handle<T>` is the sharing mechanism. Simpler LLM surface. |
+| `as` for numeric casts only | Deeply trained from Rust/C. Scoped to numerics to prevent misuse as type coercion. |
+| `vec![]` as compiler intrinsic | No macro system. Single intrinsic simpler than a macro mechanism. Deeply trained from Rust. |
+| Channels as bounded MPSC | Go channel mental model. Typed, bounded, backpressure. Distinct from actor mailboxes. |
+| Three supervision strategies | Erlang/OTP proven set: `one_for_one`, `one_for_all`, `rest_for_one`. |
+| `u256` and `Address` as primitives | Available on all targets. `u256` always checked. `Address` is not an integer. |
+| `Box<T>` with `Drop` trait | RAII pattern. Deterministic cleanup. `Drop` + `Copy` mutually exclusive. |
+| Standard orphan rule | Match Rust's coherence rule. Deeply trained. Prevents conflicting impls. |
 
 ---
 
@@ -1814,8 +2249,9 @@ Source (.sp)
 | v0.1.0 | Initial draft. Core syntax, types, ownership, actors, web3. |
 | v0.2.0 | Added: closure capture semantics (§4.5), type unification & pattern binding rules (§3.7), `Handle<T>` actor handle types (§8.2), generic actors (§8.3), pipe + error propagation rules (§5.5), format specifiers (§9), self-matching in impls (§5.2), `ctx` API surface (§11.2), `@payable` and reentrancy (§11.3), cross-contract calls (§11.4), iterator protocol and collection methods (§7), `@error` derive macro (§6.3), error context/chaining (§6.4), derive macro reference (§12.2). EBNF updated for `move` closures, `ref` patterns, generic actors. Keyword count 37→38 (`move`). |
 | v0.3.0 | Added: pipe argument position rules (§5.6), actor message ownership — no references in pub methods (§8.2), type inference rules with default i64/f64 (§3.8), dynamic dispatch / `dyn Trait` / `Box<dyn Trait>` with object safety rules (§3.9), actor failure and recovery / `ActorError` (§8.7), constant evaluation rules / no `static` (§4.6), string methods on `str`/`String` / no `+` concat (§9.5), conditional compilation `cfg` flags and onchain stdlib restrictions (§12.3), supertrait syntax and struct generic bounds (§3.5-3.6), destructuring in `let` bindings (§5.3), `if let` and `while let` (§5.4), destructuring in `for` loops (§5.5). EBNF updated for `if_let_expr`, `while_let_expr`, `dyn` types, `..` rest pattern, numeric literal suffixes. Stdlib table now includes target availability. Feature flags in sploosh.toml. |
+| v0.4.0 | **Runtime Specification** (§8.10-8.11): M:N work-stealing scheduler, bounded lock-free mailboxes with backpressure, per-sender FIFO ordering, async-actor integration, runtime lifecycle. **Type System**: `u256`/`Address` primitives (§3.1), `Box<T>` heap allocation (§4.4), `Channel<T>`/`Sender<T>`/`Receiver<T>` (§3.2, §8.5), `Drop` trait (§3.10), associated types in traits (§3.5), standard traits catalog — 30+ traits formally defined (§3.10), `as` numeric casting (§3.11). **Safety**: checked arithmetic everywhere (§4.8), `@overflow(wrapping)` opt-out, `wrapping_*`/`saturating_*`/`checked_*` methods on all integer types. **Ownership**: lifetime elision — single-source rule (§4.5), `Box<T>` with RAII drop semantics, no `Rc<T>`/`Arc<T>`. **FFI**: `extern "C"` with safe wrappers, no `unsafe` keyword, no raw pointers (§4.9). **Concurrency**: typed bounded channels (§8.5), `select` formalized (§8.6), `spawn async {}` for non-actor tasks (§8.9), three supervision strategies (§8.7), `@mailbox(capacity)` attribute, `send_timeout` intrinsic. **Modules**: file resolution rules (§10.4), `pub use` re-exports, trait coherence/orphan rules (§10.5). **Compiler intrinsics catalog** (§13.0): all 25+ intrinsics formally specified with signatures and contexts. **Grammar**: `as` cast, `select_expr`, `spawn async`, `emit_stmt`, `extern_block`, associated `type` in traits/impls, `type_suffix` with `u256`. Keywords 38→40 (`as`, `extern`). |
 
 ---
 
 *Working title: Sploosh. Name subject to change.*
-*This spec is a living document. v0.3.0-draft — April 2026.*
+*This spec is a living document. v0.4.0-draft — April 2026.*

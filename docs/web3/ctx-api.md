@@ -43,3 +43,7 @@ onchain mod vault {
 ```
 
 Calling `ctx::value()` in a non-`@payable` function is a compile-time error.
+
+## Implementation Note
+
+All `ctx::*` functions, `storage::get`/`storage::set`, `chain::call`, and `emit` are **compiler intrinsics**, not regular library functions. They are only available inside `onchain` modules -- using them outside `onchain` is a compile-time error.
