@@ -32,9 +32,12 @@ type           = prim_type | IDENT [ generics ] | "&" [ "mut" ] type
                | "[" type ";" EXPR "]" | "[" type "]"
                | "(" [ type { "," type } ] ")" | "fn" "(" types ")" "->" type
                | "dyn" IDENT [ generics ] ;
+literal        = INT_LIT [ type_suffix ] | FLOAT_LIT [ type_suffix ]
+               | STRING_LIT | CHAR_LIT
+               | "true" | "false" | "none" ;
 type_suffix    = "i8" | "i16" | "i32" | "i64" | "i128"
                | "u8" | "u16" | "u32" | "u64" | "u128" | "u256"
-               | "f32" | "f64" | "bool" | "char" | "str" ;
+               | "f32" | "f64" ;
 
 block          = "{" { statement } [ expr ] "}" ;
 statement      = let_stmt | expr_stmt | return_stmt | emit_stmt ;

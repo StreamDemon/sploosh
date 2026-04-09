@@ -82,11 +82,10 @@ let msg: String = rx.recv();       // blocks until a message is available
 `Sender<T>` and `Receiver<T>` are the two halves of a channel. Both implement `Send` so they can be passed to other actors.
 
 ```sploosh
-// With timeout
-match tx.send_timeout("hello".into(), Duration::from_ms(500)) {
+// With timeout (send_timeout is a compiler intrinsic)
+match send_timeout(tx.send("hello".into()), 500) {
     Ok(()) => { /* sent */ }
-    Err(SendTimeoutError::Timeout(msg)) => { /* channel full, msg returned */ }
-    Err(SendTimeoutError::Disconnected(msg)) => { /* receiver dropped */ }
+    Err(SendError::Timeout) => { /* channel full after 500ms */ }
 }
 ```
 

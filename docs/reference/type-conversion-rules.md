@@ -27,7 +27,7 @@ float types, and integer-to-float or float-to-integer.
 
 ```sploosh
 let x: i64 = 42_i32 as i64;       // widening: 42
-let y: i32 = 100_000_i64 as i32;  // narrowing: truncates to lower 32 bits
+let y: i32 = 3_000_000_000_i64 as i32;  // narrowing: truncates to lower 32 bits (-1294967296)
 let z: i32 = 3.9_f64 as i32;      // float-to-int: truncates toward zero -> 3
 let w: f64 = 7_i32 as f64;        // int-to-float: 7.0
 let v: f32 = 3.14_f64 as f32;     // float narrowing: rounds to nearest f32

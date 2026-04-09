@@ -90,7 +90,7 @@ struct TempFile {
 
 impl Drop for TempFile {
     fn drop(&mut self) {
-        fs::remove(self.path);
+        fs::remove(&self.path);
     }
 }
 ```

@@ -43,7 +43,7 @@ Closures: `Fn`, `FnMut`, `FnOnce`. Iterators: `Iter { type Item; }`, `FromIter`.
 
 ## Integer Overflow
 - Checked arithmetic everywhere by default. Overflow = actor death / program abort.
-- `wrapping_add`, `saturating_add`, `checked_add` for intentional wrapping.
+- `wrapping_add` (wraps), `saturating_add` (clamps), `checked_add` (returns Option) for explicit overflow control.
 - `@overflow(wrapping)` opts a function into wrapping. Compile error on-chain.
 - On-chain: always checked. No exceptions.
 

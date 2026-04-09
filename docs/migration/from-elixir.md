@@ -22,7 +22,7 @@
 | `defmodule` | `mod` / `struct` + `impl` | Separate type and behavior |
 | `Supervisor` | `@supervisor` attribute | Attribute on actor definition |
 | `case`/`cond` | `match`/`if` | Similar but with type checking |
-| Untyped process mailbox | `Channel<T>` | Typed, bounded MPSC channel with backpressure |
+| Untyped process mailbox | Typed actor mailbox | Messages arrive via `send handle.method(args)` with type-checked params. `Channel<T>` is a separate primitive for explicit data flow. |
 | Unbounded mailboxes | Bounded actor mailboxes | Fixed capacity; senders block when full |
 | `:one_for_one`, `:one_for_all`, `:rest_for_one` | `one_for_one`, `one_for_all`, `rest_for_one` | Same three supervision strategies as OTP |
 

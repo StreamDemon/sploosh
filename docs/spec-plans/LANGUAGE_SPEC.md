@@ -61,7 +61,8 @@ Block comments are intentionally omitted. One way to comment.
 |------|-------------|----------------------------|-------|
 | 14   | `.`          | Field/method access        | Left  |
 | 13   | `()`  `[]`   | Call, Index                | Left  |
-| 12   | `?` `as`     | Error propagation, Numeric cast | Post  |
+| 12   | `?`          | Error propagation          | Post  |
+| 12   | `as`         | Numeric cast               | Left  |
 | 11   | `!`          | Logical NOT                | Pre   |
 | 10   | `*` `/` `%`  | Multiply, Divide, Modulo   | Left  |
 | 9    | `+` `-`      | Add, Subtract              | Left  |
@@ -165,12 +166,12 @@ fn first<T>(items: &[T]) -> Option<&T> {
 ### 3.5 Trait System
 
 ```sploosh
-trait Serialize {
+trait Encode {
     fn to_bytes(&self) -> Vec<u8>;
     fn size_hint(&self) -> u64 { 0 }   // Default implementation
 }
 
-impl Serialize for User {
+impl Encode for User {
     fn to_bytes(&self) -> Vec<u8> {
         // ...
     }
@@ -2168,11 +2169,10 @@ directives     = { "#[" IDENT [ "(" dir_args ")" ] "]" } ;
 | No operator overloading | `+` always means addition. No hidden behavior. |
 | ASCII-only syntax | Max tokenizer efficiency. Zero multi-byte operator ambiguity. |
 | `.sp` file extension | Short, unique, no conflicts with existing languages. |
-| Explicit lifetimes (no elision) | LLMs generate more correct code when lifetimes are visible. |
+| Minimal lifetime elision (single-source rule) | One ref in + one ref out = same lifetime. Explicit when multiple sources. Covers 95% of cases. |
 | Two visibility levels only | `pub` or private. No decision fatigue for the model. |
 | Checked arithmetic everywhere | LLMs should generate correct code. `wrapping_*`/`saturating_*` for intentional use. Safety-first. |
 | No `unsafe`, safe `extern "C"` | LLMs misuse `unsafe` as escape hatch. Compiler generates safe FFI wrappers. No raw pointers. |
-| Minimal lifetime elision | Single-source rule covers 95% of cases. Spec examples already follow this pattern. |
 | Bounded mailboxes + backpressure | Unbounded causes OOM. Blocking sender is explicit. `send_timeout` for escape hatch. |
 | M:N work-stealing scheduler | BEAM-proven architecture. Lock-free bounded queues. Per-core scheduling. |
 | No `Rc<T>`/`Arc<T>` in v0.4 | Actors replace shared ownership. `Handle<T>` is the sharing mechanism. Simpler LLM surface. |

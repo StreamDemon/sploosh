@@ -6,7 +6,8 @@
 |------|----------|---------|-------|
 | 14 | `.` | Field/method access | Left |
 | 13 | `()` `[]` | Call, Index | Left |
-| 12 | `?` `as` | Error propagation, Numeric cast | Post |
+| 12 | `?` | Error propagation | Post |
+| 12 | `as` | Numeric cast | Left |
 | 11 | `!` | Logical NOT | Pre |
 | 10 | `*` `/` `%` | Multiply, Divide, Modulo | Left |
 | 9 | `+` `-` | Add, Subtract | Left |
