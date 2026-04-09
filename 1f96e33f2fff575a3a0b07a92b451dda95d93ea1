@@ -1,0 +1,25 @@
+.github/ISSUE_TEMPLATE/feature_request.md
+  17b22aa60e0667fc 27
+.github/ISSUE_TEMPLATE/spec_change.md
+  17b22aa60e0667fc 11
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.6",
+  "base_commit_sha": "1f96e33f2fff575a3a0b07a92b451dda95d93ea1",
+  "prompts": {
+    "17b22aa60e0667fc": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "05b1ee53-9efd-4451-9cf9-d6d8ce018603",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "StreamDemon",
+      "messages": [],
+      "total_additions": 2,
+      "total_deletions": 2,
+      "accepted_lines": 2,
+      "overriden_lines": 0
+    }
+  }
+}
