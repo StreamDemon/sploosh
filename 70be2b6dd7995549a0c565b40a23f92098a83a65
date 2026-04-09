@@ -1,0 +1,37 @@
+docs/reference/operator-precedence.md
+  17b22aa60e0667fc 9-10
+docs/reference/type-conversion-rules.md
+  17b22aa60e0667fc 30
+docs/migration/from-elixir.md
+  17b22aa60e0667fc 25
+docs/reference/grammar.md
+  17b22aa60e0667fc 35-37,40
+docs/guide/actors-and-concurrency.md
+  17b22aa60e0667fc 85-86,88
+docs/guide/ownership-and-borrowing.md
+  17b22aa60e0667fc 93
+docs/spec-plans/LANGUAGE_SPEC_PROMPT.md
+  17b22aa60e0667fc 46
+docs/spec-plans/LANGUAGE_SPEC.md
+  17b22aa60e0667fc 64-65,169,174,2172
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.6",
+  "base_commit_sha": "70be2b6dd7995549a0c565b40a23f92098a83a65",
+  "prompts": {
+    "17b22aa60e0667fc": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "05b1ee53-9efd-4451-9cf9-d6d8ce018603",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "StreamDemon",
+      "messages": [],
+      "total_additions": 18,
+      "total_deletions": 15,
+      "accepted_lines": 18,
+      "overriden_lines": 0
+    }
+  }
+}
