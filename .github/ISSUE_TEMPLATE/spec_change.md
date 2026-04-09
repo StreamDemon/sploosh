@@ -8,7 +8,7 @@ assignees: ''
 
 ## Spec Section
 
-Which section(s) of the [Language Spec](docs/spec-plans/LANGUAGE_SPEC.md) does this change? (e.g., "Section 3.5 - Trait System")
+Which section(s) of the [Language Spec](https://github.com/StreamDemon/sploosh/blob/main/docs/spec-plans/LANGUAGE_SPEC.md) does this change? (e.g., "Section 3.5 - Trait System")
 
 ## Current Behavior
 

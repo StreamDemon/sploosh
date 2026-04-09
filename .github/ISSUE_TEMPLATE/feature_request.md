@@ -24,7 +24,7 @@ Show how the feature would look in Sploosh code:
 
 ## Spec Section
 
-Which section(s) of the [Language Spec](docs/spec-plans/LANGUAGE_SPEC.md) does this relate to? (e.g., "Section 8 - Concurrency")
+Which section(s) of the [Language Spec](https://github.com/StreamDemon/sploosh/blob/main/docs/spec-plans/LANGUAGE_SPEC.md) does this relate to? (e.g., "Section 8 - Concurrency")
 
 ## Alternatives Considered
 
