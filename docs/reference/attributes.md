@@ -13,6 +13,8 @@
 | `@payable` | On-chain: function accepts native tokens |
 | `@reentrant` | On-chain: opt-in to reentrancy (discouraged) |
 | `@supervisor(...)` | Mark an actor as a supervisor |
+| `@mailbox(capacity: N)` | Set actor mailbox capacity (default 1024) |
+| `@overflow(wrapping)` | Opt function into wrapping arithmetic (compile error on-chain) |
 
 ## Derive Macros
 

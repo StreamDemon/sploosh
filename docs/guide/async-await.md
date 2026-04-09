@@ -28,7 +28,60 @@ async fn fetch(url: &str) -> Result<Response, NetError> {
 }
 ```
 
-<!-- TODO: Expand with runtime details, task spawning, and interaction with actor system once implemented -->
+## Spawn Async (Non-Actor Tasks)
+
+Use `spawn async` to run an async function as a standalone task that is not an actor. It returns a `JoinHandle<T>` that you can `.await` to get the result.
+
+```sploosh
+let handle: JoinHandle<Result<Response, NetError>> = spawn async fetch_data("https://example.com");
+
+// Do other work...
+
+let response = handle.await?;   // wait for the task to finish
+```
+
+Multiple tasks can run concurrently:
+
+```sploosh
+let h1 = spawn async fetch_data("https://api.one.com");
+let h2 = spawn async fetch_data("https://api.two.com");
+
+let (r1, r2) = (h1.await?, h2.await?);
+```
+
+## Async in Actors
+
+`.await` is allowed inside actor message handlers. While an actor is awaiting, it stays **busy** -- it does not process other messages in its mailbox until the `.await` completes.
+
+```sploosh
+actor Fetcher {
+    cache: Map<String, String>,
+
+    fn init() -> Self { Fetcher { cache: Map::new() } }
+
+    pub async fn get(&mut self, url: String) -> Result<String, NetError> {
+        if let Some(cached) = self.cache.get(&url) {
+            return Ok(cached.clone());
+        }
+        let body = net::get(&url).await?.text();   // actor is busy during this await
+        self.cache.insert(url, body.clone());
+        Ok(body)
+    }
+}
+```
+
+Keep awaits short to avoid starving the actor's mailbox. For long-running I/O, consider using `spawn async` and sending the result back via a message.
+
+**Important:** `&mut` borrows cannot be held across `.await` points. The compiler will reject code that tries to keep a mutable reference alive over a suspend.
+
+```sploosh
+pub async fn bad_example(&mut self) {
+    let entry = self.cache.get_mut("key");   // &mut borrow starts
+    // COMPILE ERROR: &mut borrow held across .await
+    // net::get("https://example.com").await?;
+    // Use the entry, then await separately instead.
+}
+```
 
 ## Next Steps
 

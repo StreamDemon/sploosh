@@ -1,8 +1,8 @@
-# Keywords (38 Total)
+# Keywords (40 Total)
 
 > All reserved words in Sploosh.
 
-## Declarations (11)
+## Declarations (12)
 | Keyword | Purpose |
 |---------|---------|
 | `fn` | Function definition |
@@ -16,6 +16,7 @@
 | `mod` | Module definition |
 | `use` | Import |
 | `pub` | Public visibility |
+| `extern` | Foreign function interface |
 
 ## Control Flow (10)
 | Keyword | Purpose |
@@ -31,7 +32,7 @@
 | `continue` | Skip to next iteration |
 | `return` | Early return |
 
-## Types & Values (5)
+## Types & Values (6)
 | Keyword | Purpose |
 |---------|---------|
 | `self` | Current instance |
@@ -39,6 +40,7 @@
 | `true` | Boolean true |
 | `false` | Boolean false |
 | `none` | No value |
+| `as` | Numeric type cast |
 
 ## Concurrency (7)
 | Keyword | Purpose |

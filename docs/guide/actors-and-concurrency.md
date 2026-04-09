@@ -65,6 +65,47 @@ actor Cache<K: Hash + Eq + Send, V: Clone + Send> {
 }
 ```
 
+## Channels
+
+Channels provide typed, bounded communication between actors or async tasks.
+
+```sploosh
+let (tx, rx) = Channel::new(16);   // bounded channel with capacity 16
+
+// Sender side
+tx.send("hello".into());           // blocks if the channel is full
+
+// Receiver side
+let msg: String = rx.recv();       // blocks until a message is available
+```
+
+`Sender<T>` and `Receiver<T>` are the two halves of a channel. Both implement `Send` so they can be passed to other actors.
+
+```sploosh
+// With timeout (send_timeout is a compiler intrinsic)
+match send_timeout(tx.send("hello".into()), 500) {
+    Ok(()) => { /* sent */ }
+    Err(SendError::Timeout) => { /* channel full after 500ms */ }
+}
+```
+
+## Mailbox Configuration
+
+Every actor has a bounded mailbox. Use the `@mailbox` attribute to configure its capacity. The default capacity is 1024. When the mailbox is full, the sender blocks until space is available.
+
+```sploosh
+@mailbox(capacity: 256)
+actor Logger {
+    state: Vec<String>,
+
+    fn init() -> Self { Logger { state: Vec::new() } }
+
+    pub fn log(&mut self, msg: String) {
+        self.state.push(msg);
+    }
+}
+```
+
 ## Select (Multiplexed Receive)
 
 ```sploosh
@@ -77,11 +118,33 @@ select {
 
 ## Supervision
 
+Supervisors monitor child actors and apply a restart strategy when a child fails. Three strategies are available:
+
+- **one_for_one** -- only the failed child is restarted.
+- **one_for_all** -- all children are stopped and restarted when any child fails.
+- **rest_for_one** -- the failed child and all children started after it are restarted.
+
+Each strategy accepts `max_restarts` (maximum restart count) and `window_secs` (the time window in seconds for counting restarts). If `max_restarts` is exceeded within `window_secs`, the supervisor itself fails.
+
 ```sploosh
-@supervisor(strategy: "one_for_one", max_restarts: 3)
+@supervisor(strategy: "one_for_one", max_restarts: 5, window_secs: 60)
 actor WorkerPool {
     children: Vec<Handle<Worker>>,
     fn init(size: u32) -> Self { /* spawn children */ }
+}
+
+@supervisor(strategy: "one_for_all", max_restarts: 3, window_secs: 30)
+actor Pipeline {
+    reader: Handle<Reader>,
+    processor: Handle<Processor>,
+    writer: Handle<Writer>,
+    fn init() -> Self { /* spawn children */ }
+}
+
+@supervisor(strategy: "rest_for_one", max_restarts: 4, window_secs: 60)
+actor StagedPipeline {
+    stages: Vec<Handle<Stage>>,
+    fn init() -> Self { /* spawn ordered stages */ }
 }
 ```
 

@@ -41,4 +41,24 @@ The following modules are compile-time errors inside `onchain`:
 - Events via `emit` keyword
 - Blockchain context via `ctx` module
 
+## Checked Arithmetic on Chain
+
+All integer arithmetic inside `onchain` modules is **always checked**, regardless of build mode (debug or release). An overflow or underflow will cause the transaction to **revert**.
+
+- `@overflow(wrapping)` is a **compile error** inside `onchain` modules -- wrapping arithmetic is never permitted on chain.
+- `u256` arithmetic is always checked, just like every other integer type.
+
+This ensures deterministic, safe behavior for all on-chain financial calculations.
+
+## Compiler Intrinsics
+
+The following on-chain APIs are **compiler intrinsics**, not regular function calls:
+
+- `ctx::*` -- blockchain context (caller, value, block info, etc.)
+- `storage::*` -- persistent storage reads and writes
+- `chain::call` -- cross-contract calls
+- `emit` -- event emission
+
+The compiler lowers these directly to the target bytecode (EVM/SVM). They cannot be imported, re-exported, or passed as function pointers.
+
 <!-- TODO: Expand with compilation model details once EVM/SVM backends are implemented -->

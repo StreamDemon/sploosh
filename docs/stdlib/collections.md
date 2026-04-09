@@ -32,4 +32,27 @@ Hash set.
 
 **Methods:** `insert`, `remove`, `contains`, `len`, `is_empty`, `union`, `intersection`, `difference`, `iter`, `clear`
 
+## Channel\<T\>
+
+Bounded MPSC (multi-producer, single-consumer) channel.
+
+**Constructor:** `Channel::new(capacity)` returns `(Sender<T>, Receiver<T>)`.
+
+- `Sender<T>` is `Clone + Send` -- multiple producers can hold clones of the same sender.
+- `Receiver<T>` is **not** `Clone` -- only a single consumer can own the receiver.
+- `tx.send(val)?` blocks if the channel is full.
+- `rx.recv()?` blocks until a value is available.
+
+```sploosh
+let (tx, rx) = Channel::new(16);  // bounded queue, capacity 16
+
+// Producer side (tx is Clone, so it can be shared)
+let tx2 = tx.clone();
+tx.send(42)?;
+tx2.send(43)?;
+
+// Consumer side (rx cannot be cloned)
+let val = rx.recv()?;  // 42
+```
+
 <!-- TODO: Add detailed API signatures and examples as stdlib is implemented -->
