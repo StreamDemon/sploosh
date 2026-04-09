@@ -1,0 +1,53 @@
+docs/spec-plans/LANGUAGE_SPEC.md
+  17b22aa60e0667fc 1,38,41,47,64,98,104,108-113,123,127-129,209-227,355-427,467,469-494,497-506,510-512,515,566,587-650,1234,1236-1258,1262-1263,1268-1271,1273,1276,1289,1291-1301,1303,1305,1345,1355-1430,1568-1587,1749-1750,1837-1889,1895,1898-1899,1903-1905,2049,2051,2065,2067-2068,2080-2083,2086,2089,2094,2098,2103,2106-2107,2109,2118-2119,2129-2131,2134,2173-2185,2252,2257
+docs/guide/actors-and-concurrency.md
+  17b22aa60e0667fc 68-109,122-129,131,136-148
+docs/reference/keywords.md
+  17b22aa60e0667fc 1,5,19,35,43
+docs/guide/async-await.md
+  17b22aa60e0667fc 31-84
+docs/reference/type-conversion-rules.md
+  17b22aa60e0667fc 15-45
+docs/stdlib/collections.md
+  17b22aa60e0667fc 35-57
+docs/spec-plans/LANGUAGE_SPEC_PROMPT.md
+  17b22aa60e0667fc 1,8-9,12-14,17,21-26,32,37-40,44-49,65,76,93,95-110,138-146,153,155-156,160-161
+docs/web3/ctx-api.md
+  17b22aa60e0667fc 46-49
+docs/reference/attributes.md
+  17b22aa60e0667fc 16-17
+docs/migration/from-rust.md
+  17b22aa60e0667fc 21,31-36
+docs/web3/onchain-overview.md
+  17b22aa60e0667fc 44-63
+docs/reference/operator-precedence.md
+  17b22aa60e0667fc 9
+docs/guide/basic-types-and-variables.md
+  17b22aa60e0667fc 18,24,28-33,40,57
+docs/reference/grammar.md
+  17b22aa60e0667fc 8,11,21-23,28-29,34-37,40,43,47-48,50,55-57,65
+docs/migration/from-elixir.md
+  17b22aa60e0667fc 25-27
+docs/guide/ownership-and-borrowing.md
+  17b22aa60e0667fc 5,38,40,43-69,82-108
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.6",
+  "base_commit_sha": "ff199b16b53541cd059ce072ee4271b3712be55c",
+  "prompts": {
+    "17b22aa60e0667fc": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "05b1ee53-9efd-4451-9cf9-d6d8ce018603",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "StreamDemon",
+      "messages": [],
+      "total_additions": 827,
+      "total_deletions": 114,
+      "accepted_lines": 826,
+      "overriden_lines": 0
+    }
+  }
+}
