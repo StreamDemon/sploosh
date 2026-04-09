@@ -1,0 +1,23 @@
+.gitignore
+  17b22aa60e0667fc 1-23
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.6",
+  "base_commit_sha": "31c24df23038f1019cb26782bb0b59771f02a6e4",
+  "prompts": {
+    "17b22aa60e0667fc": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "05b1ee53-9efd-4451-9cf9-d6d8ce018603",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "StreamDemon",
+      "messages": [],
+      "total_additions": 23,
+      "total_deletions": 0,
+      "accepted_lines": 23,
+      "overriden_lines": 0
+    }
+  }
+}
