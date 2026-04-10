@@ -8,7 +8,8 @@ The authoritative grammar is in [LANGUAGE_SPEC.md](../spec-plans/LANGUAGE_SPEC.m
 
 ```ebnf
 program        = { item } ;
-item           = fn_def | struct_def | enum_def | trait_def
+item           = [ directives ] item_kind ;
+item_kind      = fn_def | struct_def | enum_def | trait_def
                | impl_block | mod_def | use_stmt | actor_def
                | onchain_mod | const_def | type_alias | extern_block ;
 
@@ -26,7 +27,7 @@ variants       = variant { "," variant } [ "," ] ;
 variant        = IDENT [ "(" types ")" | "{" fields "}" ] ;
 
 trait_def      = [ "pub" ] "trait" IDENT [ generics ] [ ":" bounds ] "{" { trait_item } "}" ;
-trait_item     = fn_sig [ block ] ";" | "type" IDENT [ ":" bounds ] ";" ;
+trait_item     = fn_sig ( block | ";" ) | "type" IDENT [ ":" bounds ] ";" ;
 
 impl_block     = "impl" [ generics ] [ trait_ref "for" ] type "{" { impl_item } "}" ;
 impl_item      = fn_def | "type" IDENT "=" type ";" ;
