@@ -1,0 +1,23 @@
+docs/spec-plans/LANGUAGE_SPEC_PROMPT.md
+  b71394b686352d29 1,50-80,169,192
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8",
+  "base_commit_sha": "0cd1cec4ffdced5153c4eb41160f09af1a3c169d",
+  "prompts": {
+    "b71394b686352d29": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d7dd39c9-8e98-4716-ad01-d468db11a837",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "StreamDemon",
+      "messages": [],
+      "total_additions": 399,
+      "total_deletions": 367,
+      "accepted_lines": 199,
+      "overriden_lines": 0
+    }
+  }
+}
