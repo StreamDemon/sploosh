@@ -1,0 +1,23 @@
+docs/stdlib/math.md
+  b71394b686352d29 5,7-290
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8",
+  "base_commit_sha": "0ac252a0d1185e93446a21f78cfb29c17f64af85",
+  "prompts": {
+    "b71394b686352d29": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d7dd39c9-8e98-4716-ad01-d468db11a837",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "StreamDemon",
+      "messages": [],
+      "total_additions": 2740,
+      "total_deletions": 2273,
+      "accepted_lines": 285,
+      "overriden_lines": 0
+    }
+  }
+}
