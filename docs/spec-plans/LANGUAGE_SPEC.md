@@ -1923,13 +1923,20 @@ Available inside `onchain`: `std::math` (integer math only — `abs`, `min`, `ma
 `pow`, `isqrt`, `ilog2`, `count_ones`, and the other methods listed in §4.10),
 `std::crypto`, `std::chain`, `std::collections`, and all core types.
 
-**Forbidden inside `onchain`:** all floating-point math methods (`sin`, `cos`, `sqrt`,
-`exp`, `log`, `powf`, and every other `f32`/`f64` method from §4.10) are compile errors
-inside `onchain` modules. Transcendentals are not bit-reproducible across LLVM versions,
-platforms, and fast-math settings, and any drift would break on-chain consensus. The
-`@fast_math` attribute is similarly forbidden in `onchain` for the same reason (§12.1).
-`f32`/`f64` values may still be stored, compared, and passed around inside `onchain`
-code — only the transcendental and rounding method calls are rejected.
+**Forbidden inside `onchain`:** every floating-point math method listed in §4.10 is a
+compile error inside `onchain` modules — classification (`is_nan`, `is_finite`, ...),
+sign and absolute value (`abs`, `signum`, `copysign`), rounding (`floor`, `ceil`, `round`,
+`trunc`, `fract`), min/max/clamp, power/root (`sqrt`, `cbrt`, `powi`, `powf`, `hypot`,
+`recip`), exp/log, trig, hyperbolic, `mul_add`, and angle conversion. The rule is
+intentionally uniform: even the IEEE 754-deterministic methods (e.g., `sqrt`, `min`,
+`max`, `abs`) are banned on-chain so that implementers and auditors never have to
+reason about which subset is safe. Transcendentals are not bit-reproducible across
+LLVM versions, platforms, and fast-math settings, and any drift would break on-chain
+consensus. The `@fast_math` attribute is similarly forbidden in `onchain` for the same
+reason (§12.1). `f32`/`f64` values themselves may still be stored in fields, compared
+with `==`/`<`/`>`, and passed as arguments inside `onchain` code — only the §4.10
+method calls are rejected. Use the integer math methods from §4.10 for all on-chain
+numeric work.
 
 **Portable code pattern:**
 
@@ -2061,6 +2068,12 @@ intrinsics. Where a direct LLVM intrinsic exists (e.g., `llvm.asin`, `llvm.atan2
 | `uN.swap_bytes()` | `fn(uN) -> uN` | `llvm.bswap.iN` | All |
 | `uN.isqrt()` | `fn(uN) -> uN` | Compiler-provided | All |
 | `uN.ilog2()` | `fn(uN) -> u32` | Derived from `ctlz` | All |
+
+Remaining integer methods from §4.10 (`abs`, `min`, `max`, `clamp`, `pow`, `ilog10`,
+`count_zeros`, `to_be`, `to_le`, `from_be`, `from_le`) are also compiler intrinsics on
+every integer type, available on all targets including `onchain`. They are
+compiler-provided without a 1:1 LLVM intrinsic mapping — the compiler emits the
+equivalent sequence of primitive operations and lets the optimizer handle the rest.
 
 **Notes:**
 - `vec![]` uses `![]` syntax. This is the only intrinsic with this form. No other "macros" exist.
