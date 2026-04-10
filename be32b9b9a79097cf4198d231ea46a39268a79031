@@ -1,0 +1,27 @@
+docs/spec-plans/LANGUAGE_SPEC.md
+  b71394b686352d29 1,90-228,253-269,580-588,592-599,2411-2416,2440,2453,2457,2460-2466,2502-2511,2515-2524,2534-2535,2537,2540-2603,2720,2725
+docs/spec-plans/LANGUAGE_SPEC_PROMPT.md
+  b71394b686352d29 1
+docs/reference/grammar.md
+  b71394b686352d29 5,7,10,15,21-23,25-27,29-31,33,35-36,39,41-45,47-48,51,53-62,68-70,73,75,77-78,80,84-88,90,93-95,97-102,106-122,125-171,174-180,182
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8",
+  "base_commit_sha": "be32b9b9a79097cf4198d231ea46a39268a79031",
+  "prompts": {
+    "b71394b686352d29": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d7dd39c9-8e98-4716-ad01-d468db11a837",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "StreamDemon",
+      "messages": [],
+      "total_additions": 8935,
+      "total_deletions": 5900,
+      "accepted_lines": 5992,
+      "overriden_lines": 11
+    }
+  }
+}
