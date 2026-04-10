@@ -1,4 +1,4 @@
-# SPLOOSH Language Specification v0.4.1-draft
+# SPLOOSH Language Specification v0.4.2-draft
 
 > **AI-Native · Systems-Grade · Web2/Web3 Dual-Target**
 >
@@ -87,6 +87,145 @@ Block comments are intentionally omitted. One way to comment.
 | `::`  | Path separator / type access  |
 | `:`   | Type annotation               |
 
+### 2.6 Literals
+
+#### 2.6.1 Numeric Literals
+
+**Integer literals** may be written in four bases:
+
+```sploosh
+let dec = 42;          // decimal
+let hex = 0xFF;        // hexadecimal
+let oct = 0o755;       // octal
+let bin = 0b1010_0101; // binary
+```
+
+**Underscore separators** are permitted anywhere between digits for readability:
+
+```sploosh
+let million   = 1_000_000;
+let max_u64   = 0xFFFF_FFFF_FFFF_FFFF;
+let addr_mask = 0b1111_1111_0000_0000;
+```
+
+Underscores must appear between two digits — leading, trailing, or consecutive underscores
+in a numeric body are a compile error (e.g., `_1`, `1_`, `1__2` are all invalid).
+
+**Type suffixes** bind a literal to a specific numeric type:
+
+```sploosh
+let a = 42u32;     // u32
+let b = 0xFFu8;    // u8
+let c = 3.14f32;   // f32
+let d = 0u256;     // u256
+```
+
+Suffixes: `i8 i16 i32 i64 i128 u8 u16 u32 u64 u128 u256 f32 f64`. An integer literal
+with a float suffix (e.g., `42f64`) is equivalent to `42.0f64`.
+
+**Literal overflow is a compile error.** If a literal value does not fit in its declared
+or inferred type, the compiler rejects it at parse time:
+
+```sploosh
+let a: u8  = 256;     // compile error: 256 does not fit in u8
+let b      = 256u8;   // compile error: 256 does not fit in u8
+let c: i32 = 0x8000_0000i32;  // compile error: out of i32 range
+```
+
+**Float literals** require either a decimal point or an exponent (or both):
+
+```sploosh
+let pi    = 3.14;
+let big   = 1e10;        // 1.0 × 10^10
+let small = 1.5e-3;      // 1.5 × 10^-3
+let typed = 2.5e2f32;    // 250.0 as f32
+```
+
+A bare integer sequence is never parsed as a float — `42` is `i64` (or inferred),
+`42.0` or `42f64` is `f64`. The forms `42.` and `.5` are rejected to avoid ambiguity
+with method call syntax and range operators.
+
+#### 2.6.2 String Literals
+
+String literals are double-quoted UTF-8 text:
+
+```sploosh
+let greeting = "Hello, world!";
+let multi    = "line one\nline two";
+let unicode  = "café \u{1F600}";
+```
+
+**Escape sequences** recognized inside string and character literals:
+
+| Escape | Meaning |
+|---|---|
+| `\n` | newline (U+000A) |
+| `\r` | carriage return (U+000D) |
+| `\t` | horizontal tab (U+0009) |
+| `\\` | backslash |
+| `\"` | double quote |
+| `\'` | single quote |
+| `\0` | null (U+0000) |
+| `\xNN` | ASCII byte escape, `NN` is two hex digits, value must be `0x00`–`0x7F` |
+| `\u{H...}` | Unicode scalar value, 1–6 hex digits, must be a valid scalar (no surrogates `D800`–`DFFF`) |
+
+Any other backslash sequence is a compile error. Raw string literals (`r"..."`,
+`r#"..."#`) are deferred to a future version — use escape sequences in v0.4.
+
+String literals may span multiple source lines; a literal newline inside the string
+becomes `\n` in the value. To continue a long string without embedding a newline,
+end each line with `\` immediately before the newline — the backslash, the newline,
+and any leading whitespace on the next line are all elided.
+
+#### 2.6.3 Character Literals
+
+Character literals are single-quoted and represent a single Unicode scalar value:
+
+```sploosh
+let a      = 'a';
+let tab    = '\t';
+let quote  = '\'';
+let emoji  = '\u{1F600}';
+```
+
+The body is exactly one Unicode scalar value written either directly (`'a'`, `'é'`)
+or via an escape sequence from the table above. A character literal cannot contain
+a raw single quote, a raw backslash, a raw newline, or a surrogate code point.
+`char` is the type of a Unicode scalar value, not a byte or a UTF-16 code unit.
+
+### 2.7 Identifiers
+
+An identifier starts with an ASCII letter or underscore and continues with any number
+of ASCII letters, digits, or underscores:
+
+```
+IDENT = [A-Za-z_] [A-Za-z0-9_]*
+```
+
+Identifiers are ASCII-only (per §2.1). Unicode identifiers are not supported — the
+design goal is zero tokenizer ambiguity and maximum LLM accuracy.
+
+**Keyword priority.** If an identifier matches any keyword in §2.3, it is tokenized
+as that keyword, not as an identifier. Raw identifiers (`r#keyword`) are deferred to
+a future version.
+
+**The wildcard binding.** A single underscore `_` is not a regular identifier — it is
+a wildcard binding that discards its value and does not introduce a name. Each `_` in
+a scope is fresh and cannot be referenced:
+
+```sploosh
+let _ = compute();          // discard the result
+let (x, _, z) = triple();   // keep first and third, discard middle
+```
+
+Identifiers that begin with `_` followed by at least one other character (e.g.,
+`_unused`, `_tmp`) are regular identifiers — they introduce a binding and can be
+referenced, but the compiler suppresses the usual "unused variable" warning as a
+convention.
+
+**Length.** Identifiers have no formal length limit. Implementations should accept at
+least 1024 characters. Tooling may warn on identifiers longer than 64 characters.
+
 ---
 
 ## 3. Type System
@@ -111,7 +250,23 @@ hex: `0xFF00u256`. Always uses checked arithmetic regardless of build mode.
 
 **`Address`**: 32-byte blockchain address. No arithmetic operations. Supports `==`, `!=`,
 `Display`, `Debug`, `Clone`, `Copy`, `Hash`, `Eq`, `Ord`. Construct via `Address::from_hex("0x...")`.
-Maps to 20 bytes on EVM (right-padded), 32 bytes on SVM.
+
+**In-memory representation:** always exactly 32 bytes, stored big-endian. This
+representation is identical on every target (native, wasm, EVM, SVM) so values can be
+passed across module and target boundaries without conversion.
+
+**EVM serialization:** when an `Address` is written to EVM storage, used as an event
+topic, or passed across an EVM ABI boundary, the 32-byte value is **left-padded** to
+match Solidity's convention — the low 20 bytes are the address proper and the high 12
+bytes are zeros. Sploosh rejects any `Address` value whose high 12 bytes are non-zero
+when serializing to EVM (this can only happen if the value was constructed from an
+SVM-specific 32-byte public key).
+
+**SVM serialization:** the full 32 bytes are used as-is (Solana public keys are
+32 bytes natively). No padding, no truncation.
+
+No-padding behavior is observable only at the serialization boundary; user code
+always sees a uniform 32-byte value.
 
 ### 3.2 Compound Types
 
@@ -422,9 +577,25 @@ let f: f64 = 42i64 as f64;     // int to float
 **Rules:**
 - `as` works between integer types, between float types, and between integer and float.
 - Narrowing conversions truncate (same as two's complement for integers).
-- Float-to-int truncates toward zero. Out-of-range values saturate to the target type's bounds.
+- Float-to-int truncates toward zero. Out-of-range finite values saturate to the target type's bounds.
+- **NaN and infinity.** When casting a floating-point value to an integer type via `as`:
+  - `NaN` → `0`
+  - positive infinity → the target type's `MAX`
+  - negative infinity → the target type's `MIN` (for signed types) or `0` (for unsigned types)
+
+  This matches WebAssembly's `trunc_sat` semantics and avoids the undefined behavior
+  that plagues C and early Rust float-to-int casts. The behavior is identical on every
+  target — no implementation-defined drift.
 - `as` does NOT work for non-numeric conversions. Use `From`/`Into` for those.
 - `as` is NOT a reference coercion or type alias. It is purely numeric.
+
+```sploosh
+let nan     = f64::NAN as i32;            // 0
+let pos_inf = f64::INFINITY as u32;       // u32::MAX
+let neg_inf = f64::NEG_INFINITY as i32;   // i32::MIN
+let neg_u   = f64::NEG_INFINITY as u32;   // 0
+let huge    = 1e20f64 as i32;             // i32::MAX (saturates)
+```
 
 ---
 
@@ -2237,7 +2408,12 @@ async fn transfer_tokens(req: &Request, state: &AppState) -> Result<Response, Ap
 
 ---
 
-## 16. Grammar (EBNF Summary)
+## 16. Grammar (EBNF)
+
+The grammar is split into **syntactic productions** (below) and **lexical productions**
+(§16.1). Together they form the complete formal grammar of Sploosh. Every non-terminal
+used on the right-hand side of any production has a definition either in this section
+or in §16.1.
 
 ```ebnf
 program        = { item } ;
@@ -2261,7 +2437,7 @@ variant        = IDENT [ "(" types ")" | "{" fields "}" ] ;
 trait_def      = [ "pub" ] "trait" IDENT [ generics ] [ ":" bounds ] "{" { trait_item } "}" ;
 trait_item     = fn_sig [ block ] ";" | "type" IDENT [ ":" bounds ] ";" ;
 
-impl_block     = "impl" [ generics ] [ trait "for" ] type "{" { impl_item } "}" ;
+impl_block     = "impl" [ generics ] [ trait_ref "for" ] type "{" { impl_item } "}" ;
 impl_item      = fn_def | "type" IDENT "=" type ";" ;
 
 actor_def      = [ attrs ] "actor" IDENT [ generics ] "{" { actor_item } "}" ;
@@ -2274,13 +2450,20 @@ onchain_mod    = "onchain" "mod" IDENT "{" { onchain_item } "}" ;
 onchain_item   = storage_block | fn_def | event_def ;
 storage_block  = "storage" "{" fields "}" ;
 
-extern_block   = "extern" STRING "{" { extern_fn } "}" ;
+extern_block   = "extern" STRING_LIT "{" { extern_fn } "}" ;
 extern_fn      = "fn" IDENT "(" params ")" [ "->" type ] ";" ;
 
 type           = prim_type | IDENT [ generics ] | "&" [ lifetime ] [ "mut" ] type
-               | "[" type ";" EXPR "]" | "[" type "]"
+               | "[" type ";" expr "]" | "[" type "]"
                | "(" [ type { "," type } ] ")" | "fn" "(" types ")" "->" type
                | "dyn" IDENT [ generics ] ;
+prim_type      = "i8" | "i16" | "i32" | "i64" | "i128"
+               | "u8" | "u16" | "u32" | "u64" | "u128" | "u256"
+               | "f32" | "f64" | "bool" | "char" | "str" | "String"
+               | "Address" | "()" ;
+types          = [ type { "," type } [ "," ] ] ;
+type_alias     = [ "pub" ] "type" IDENT [ generics ] "=" type ";" ;
+trait_ref      = IDENT [ generics ] ;
 generics       = "<" type_params ">" ;
 type_params    = type_param { "," type_param } ;
 type_param     = IDENT [ ":" bounds ] | lifetime ;
@@ -2316,9 +2499,29 @@ select_expr    = "select" "{" { select_arm } "}" ;
 select_arm     = pattern "=" expr "=>" ( expr "," | block ) ;
 closure        = [ "move" ] "|" params "|" ( expr | block ) ;
 
+path_expr      = IDENT { "::" IDENT } ;
+path           = [ "crate" | "super" | "self" ] { "::" IDENT } ;
+args           = [ expr { "," expr } [ "," ] ] ;
+
+BINOP          = "+" | "-" | "*" | "/" | "%"
+               | "==" | "!=" | "<" | ">" | "<=" | ">="
+               | "&&" | "||"
+               | ".." | "..=" ;
+UNOP           = "!" | "-" ;
+
 pattern        = "_" | literal | IDENT | [ "ref" ] IDENT
                | IDENT "(" patterns ")" | IDENT "{" field_pats [ ".." ] "}"
                | "(" patterns ")" | pattern "|" pattern ;
+patterns       = [ pattern { "," pattern } [ "," ] ] ;
+field_pats     = [ field_pat { "," field_pat } [ "," ] ] ;
+field_pat      = IDENT [ ":" pattern ] ;
+field_inits    = [ field_init { "," field_init } [ "," ] ] ;
+field_init     = IDENT [ ":" expr ] ;
+idents         = IDENT { "," IDENT } ;
+
+fn_sig         = [ "pub" ] [ "async" ] "fn" IDENT [ generics ] "(" params ")" [ "->" type ] ;
+field_def      = [ "pub" ] IDENT ":" type ;
+event_def      = [ attrs ] "enum" IDENT "{" variants "}" ;
 
 literal        = INT_LIT [ type_suffix ] | FLOAT_LIT [ type_suffix ]
                | STRING_LIT | CHAR_LIT
@@ -2328,8 +2531,75 @@ type_suffix    = "i8" | "i16" | "i32" | "i64" | "i128"
                | "f32" | "f64" ;
 
 attrs          = { "@" IDENT [ "(" attr_args ")" ] } ;
+attr_args      = attr_arg { "," attr_arg } ;
+attr_arg       = IDENT [ ":" expr | "=" expr | "(" expr ")" ] | expr ;
 directives     = { "#[" IDENT [ "(" dir_args ")" ] "]" } ;
+dir_args       = attr_args ;
 ```
+
+### 16.1 Lexical Productions
+
+The syntactic grammar above uses the terminals `IDENT`, `INT_LIT`, `FLOAT_LIT`,
+`STRING_LIT`, `CHAR_LIT`, and `lifetime`. Their lexical grammar is defined here.
+Whitespace and comments (see §2.2) may appear between any two tokens and are
+discarded by the lexer.
+
+```ebnf
+(* Identifiers *)
+IDENT          = ASCII_ALPHA_US { ASCII_ALNUM_US } ;
+ASCII_ALPHA_US = "A" ... "Z" | "a" ... "z" | "_" ;
+ASCII_ALNUM_US = ASCII_ALPHA_US | DIGIT ;
+
+(* Keywords take precedence over IDENT — see §2.3 and §2.7. *)
+
+(* Lifetime annotations *)
+lifetime       = "'" IDENT ;
+
+(* Integer literals *)
+INT_LIT        = dec_lit | hex_lit | oct_lit | bin_lit ;
+dec_lit        = DIGIT { DIGIT | "_" } ;
+hex_lit        = "0x" HEX_DIGIT { HEX_DIGIT | "_" } ;
+oct_lit        = "0o" OCT_DIGIT { OCT_DIGIT | "_" } ;
+bin_lit        = "0b" BIN_DIGIT { BIN_DIGIT | "_" } ;
+
+(* Float literals *)
+FLOAT_LIT      = dec_lit "." dec_lit [ exp_part ]
+               | dec_lit exp_part ;
+exp_part       = ( "e" | "E" ) [ "+" | "-" ] dec_lit ;
+
+(* String and character literals *)
+STRING_LIT     = '"' { str_body_char } '"' ;
+str_body_char  = UNICODE_SCALAR_EXCEPT_BACKSLASH_QUOTE | escape
+               | "\" NEWLINE WHITESPACE ;   (* line continuation *)
+CHAR_LIT       = "'" ( UNICODE_SCALAR_EXCEPT_BACKSLASH_APOS | escape ) "'" ;
+
+escape         = "\" ( simple_escape | hex_escape | unicode_escape ) ;
+simple_escape  = "n" | "r" | "t" | "\" | '"' | "'" | "0" ;
+hex_escape     = "x" HEX_DIGIT HEX_DIGIT ;            (* value must be 0x00..0x7F *)
+unicode_escape = "u" "{" HEX_DIGIT { HEX_DIGIT } "}" ; (* 1..6 hex digits, must be a valid Unicode scalar *)
+
+(* Digit classes *)
+DIGIT          = "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" ;
+HEX_DIGIT      = DIGIT | "a" ... "f" | "A" ... "F" ;
+OCT_DIGIT      = "0" ... "7" ;
+BIN_DIGIT      = "0" | "1" ;
+```
+
+**Lexical constraints enforced by the lexer beyond the EBNF above:**
+
+- Underscores in numeric literals must appear between two digits — leading, trailing,
+  and consecutive underscores are a compile error.
+- `hex_escape` values must be in the range `0x00`–`0x7F` (ASCII only). Use
+  `unicode_escape` for values ≥ `0x80`.
+- `unicode_escape` values must be a valid Unicode scalar value — surrogate code points
+  `0xD800`–`0xDFFF` are rejected, as are values above `0x10FFFF`.
+- Literal overflow (the integer value does not fit in its declared or inferred numeric
+  type) is a compile error at parse time, not a runtime check.
+- `CHAR_LIT` contains exactly one Unicode scalar value. Empty character literals and
+  multi-character character literals are compile errors.
+
+See §2.6 for worked examples of each literal form and §2.7 for the identifier rules
+in prose.
 
 ---
 
@@ -2447,8 +2717,9 @@ Source (.sp)
 | v0.3.0 | Added: pipe argument position rules (§5.6), actor message ownership — no references in pub methods (§8.2), type inference rules with default i64/f64 (§3.8), dynamic dispatch / `dyn Trait` / `Box<dyn Trait>` with object safety rules (§3.9), actor failure and recovery / `ActorError` (§8.7), constant evaluation rules / no `static` (§4.6), string methods on `str`/`String` / no `+` concat (§9.5), conditional compilation `cfg` flags and onchain stdlib restrictions (§12.3), supertrait syntax and struct generic bounds (§3.5-3.6), destructuring in `let` bindings (§5.3), `if let` and `while let` (§5.4), destructuring in `for` loops (§5.5). EBNF updated for `if_let_expr`, `while_let_expr`, `dyn` types, `..` rest pattern, numeric literal suffixes. Stdlib table now includes target availability. Feature flags in sploosh.toml. |
 | v0.4.0 | **Runtime Specification** (§8.10-8.11): M:N work-stealing scheduler, bounded lock-free mailboxes with backpressure, per-sender FIFO ordering, async-actor integration, runtime lifecycle. **Type System**: `u256`/`Address` primitives (§3.1), `Box<T>` heap allocation (§4.4), `Channel<T>`/`Sender<T>`/`Receiver<T>` (§3.2, §8.5), `Drop` trait (§3.10), associated types in traits (§3.5), standard traits catalog — 30+ traits formally defined (§3.10), `as` numeric casting (§3.11). **Safety**: checked arithmetic everywhere (§4.8), `@overflow(wrapping)` opt-out, `wrapping_*`/`saturating_*`/`checked_*` methods on all integer types. **Ownership**: lifetime elision — single-source rule (§4.5), `Box<T>` with RAII drop semantics, no `Rc<T>`/`Arc<T>`. **FFI**: `extern "C"` with safe wrappers, no `unsafe` keyword, no raw pointers (§4.9). **Concurrency**: typed bounded channels (§8.5), `select` formalized (§8.6), `spawn async {}` for non-actor tasks (§8.9), three supervision strategies (§8.7), `@mailbox(capacity)` attribute, `send_timeout` intrinsic. **Modules**: file resolution rules (§10.4), `pub use` re-exports, trait coherence/orphan rules (§10.5). **Compiler intrinsics catalog** (§13.0): all 25+ intrinsics formally specified with signatures and contexts. **Grammar**: `as` cast, `select_expr`, `spawn async`, `emit_stmt`, `extern_block`, associated `type` in traits/impls, `type_suffix` with `u256`. Keywords 38→40 (`as`, `extern`). |
 | v0.4.1 | **std::math module** (§4.10, `stdlib/math.md`): comprehensive IEEE 754 surface on `f32`/`f64` as method-syntax compiler intrinsics that lower directly to LLVM intrinsics (`llvm.sin`, `llvm.sqrt`, `llvm.fma`, `llvm.sincos`, `llvm.pow`, `llvm.log`, etc.), unlocking constant folding, auto-vectorization, and sin+cos fusion. Method categories: classification, sign, rounding, min/max/clamp, power/root (`sqrt`, `cbrt`, `powi`, `powf`, `hypot`, `recip`), exp/log (`exp`, `exp2`, `exp_m1`, `ln`, `ln_1p`, `log2`, `log10`), trig (`sin`, `cos`, `tan`, inverses, `atan2`, `sin_cos`), hyperbolic, `mul_add` (correctly rounded FMA), `to_degrees`/`to_radians`. Constants as associated consts: `f64::PI`, `f64::TAU`, `f64::E`, `f64::EPSILON`, `f64::INFINITY`, `f64::NAN`, etc. **Integer math methods** (§4.10) on all integer types: `abs`, `min`, `max`, `clamp`, `pow` (checked), `isqrt`, `ilog2`, `ilog10`, `count_ones`, `count_zeros`, `leading_zeros`, `trailing_zeros`, `rotate_left`, `rotate_right`, `swap_bytes`. **`@fast_math(flags)` attribute** (§12.1): granular LLVM fast-math flags — `contract`, `afn`, `reassoc`, `arcp`, `nnan`, `ninf`, `nsz`; bare `@fast_math` defaults to the safe subset `contract + afn`; per-function scope, not inherited. **On-chain restriction** (§12.3, §4.10): floating-point math methods and `@fast_math` are compile errors inside `onchain` modules — only integer math is available, for bit-level determinism across LLVM versions and platforms. **§13.0 Compiler Intrinsics**: new Math intrinsics and Integer math intrinsics tables with LLVM lowering targets. No grammar changes — method call and attribute syntax already in §16. Keyword count unchanged (40). |
+| v0.4.2 | **Lexical foundation** (new §2.6 Literals, new §2.7 Identifiers): formal prose and grammar for numeric literal formats (decimal, hex `0x`, octal `0o`, binary `0b`, underscore digit separators, exponent notation, type suffixes), string literals with a complete escape sequence table (`\n`, `\r`, `\t`, `\\`, `\"`, `\'`, `\0`, `\xNN` for ASCII, `\u{H...}` for Unicode scalar values, plus `\<newline>` line continuation), character literals (single-quoted Unicode scalar values, surrogates rejected), and identifier grammar (ASCII `[A-Za-z_][A-Za-z0-9_]*`, keyword priority, `_` as wildcard binding, `_name` allowed for intentionally-unused bindings). **Literal overflow is now a compile error** — integer literals that do not fit their declared or inferred type are rejected at parse time. **Float-to-int cast edge cases** (§3.11): NaN → 0, +∞ → target `MAX`, −∞ → target `MIN` (signed) or 0 (unsigned), matching WebAssembly `trunc_sat` semantics. No more undefined behavior on exotic float values. **Address representation** (§3.1): clarified as always 32 bytes big-endian in memory on every target; EVM serialization left-pads the low 20 bytes with 12 zero high bytes (Solidity-compatible); non-zero high bytes are rejected at EVM serialization time; SVM uses the full 32 bytes unchanged. **§16 Grammar completeness**: new §16.1 Lexical Productions block with formal EBNF for `IDENT`, `INT_LIT`, `FLOAT_LIT`, `STRING_LIT`, `CHAR_LIT`, `lifetime`, `escape`, and digit classes. Previously-undefined non-terminals now defined in §16: `path_expr`, `path`, `args`, `types`, `patterns`, `field_pats`, `field_pat`, `field_inits`, `field_init`, `idents`, `fn_sig`, `field_def`, `event_def`, `attr_args`, `attr_arg`, `dir_args`, `prim_type`, `type_alias`, `trait_ref`, `BINOP`, `UNOP`. Case normalization: `EXPR` → `expr` in the array type production. No feature changes — this is a completeness pass unblocking tokenizer and parser implementation. No new keywords (still 40). |
 
 ---
 
 *Working title: Sploosh. Name subject to change.*
-*This spec is a living document. v0.4.1-draft — April 2026.*
+*This spec is a living document. v0.4.2-draft — April 2026.*
