@@ -1,4 +1,4 @@
-# SPLOOSH Quick Reference — LLM System Prompt Edition (v0.4.0)
+# SPLOOSH Quick Reference — LLM System Prompt Edition (v0.4.1)
 
 Sploosh: AI-native language. Rust safety + Elixir concurrency + web3 targeting.
 
@@ -46,6 +46,37 @@ Closures: `Fn`, `FnMut`, `FnOnce`. Iterators: `Iter { type Item; }`, `FromIter`.
 - `wrapping_add` (wraps), `saturating_add` (clamps), `checked_add` (returns Option) for explicit overflow control.
 - `@overflow(wrapping)` opts a function into wrapping. Compile error on-chain.
 - On-chain: always checked. No exceptions.
+
+## Math
+Method syntax on numeric types. All math methods are compiler intrinsics lowering to LLVM intrinsics (enables constant folding, auto-vectorization, sin+cos fusion).
+
+**Float methods on `f32`/`f64`** (**NOT available on-chain** — compile error):
+- Classification: `is_nan`, `is_finite`, `is_infinite`, `is_normal`, `is_sign_positive`, `is_sign_negative`, `classify` → `FpCategory`
+- Sign: `abs`, `signum`, `copysign`
+- Rounding: `floor`, `ceil`, `round`, `trunc`, `fract`
+- Min/max: `min`, `max`, `clamp`
+- Power/root: `sqrt`, `cbrt`, `powi`, `powf`, `hypot`, `recip`
+- Exp/log: `exp`, `exp2`, `exp_m1`, `ln`, `ln_1p`, `log`, `log2`, `log10`
+- Trig: `sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `atan2`, `sin_cos`
+- Hyperbolic: `sinh`, `cosh`, `tanh`, `asinh`, `acosh`, `atanh`
+- FMA: `mul_add` (correctly rounded). Angle: `to_degrees`, `to_radians`.
+
+**Float constants:** `f64::PI`, `f64::TAU`, `f64::E`, `f64::SQRT_2`, `f64::LN_2`, `f64::LN_10`, `f64::LOG2_E`, `f64::LOG10_E`, `f64::INFINITY`, `f64::NEG_INFINITY`, `f64::NAN`, `f64::MIN`, `f64::MAX`, `f64::MIN_POSITIVE`, `f64::EPSILON`. Same names on `f32`.
+
+**Integer methods** (all targets **including on-chain**): `abs` (signed), `min`, `max`, `clamp`, `pow` (checked), `isqrt`, `ilog2`, `ilog10`, `count_ones`, `count_zeros`, `leading_zeros`, `trailing_zeros`, `rotate_left`, `rotate_right`, `swap_bytes`, `to_be`, `to_le`, `from_be`, `from_le`.
+
+**`@fast_math(flags)`** enables LLVM fast-math flags: `contract`, `afn`, `reassoc`, `arcp`, `nnan`, `ninf`, `nsz`. Bare `@fast_math` = `@fast_math(contract, afn)` (safe subset: FMA fusion + approximate transcendentals, no NaN/Inf UB). Per-function scope, not inherited. **Compile error on-chain.**
+
+**On-chain rule:** every `f32`/`f64` math method from §4.10 is a compile error inside `onchain` modules — even deterministic ones like `sqrt`, `min`, `abs`. Float *values* (fields, `==`/`<`/`>`, arguments) are still allowed; only method *calls* are rejected. Use integer math on-chain.
+
+```sploosh
+fn distance(a: (f64, f64), b: (f64, f64)) -> f64 {
+    let dx = a.0 - b.0; let dy = a.1 - b.1;
+    dx.hypot(dy)                              // overflow-safe
+}
+let (s, c) = theta.sin_cos();                 // fuses to llvm.sincos
+let n = 1000u64.ilog2();                      // on-chain OK
+```
 
 ## Closures
 Capture by usage: `&T` (read), `&mut T` (modify), `move` (take ownership).
@@ -135,7 +166,7 @@ onchain mod token {
 `ctx` API: `caller()`, `self_address()`, `timestamp()`, `block_number()`.
 EVM: `ctx::value()` (requires `@payable`), `ctx::gas_remaining()`, `ctx::chain_id()`.
 SVM: `ctx::lamports()`, `ctx::program_id()`, `ctx::signer()`.
-Non-reentrant by default. `onchain` cannot use: `std::fs`, `std::net`, `std::io`, `std::db`, `std::web`, `std::env`.
+Non-reentrant by default. `onchain` cannot use: `std::fs`, `std::net`, `std::io`, `std::db`, `std::web`, `std::env`. `onchain` cannot call `f32`/`f64` math methods or use `@fast_math` (see Math section).
 
 ## FFI
 ```sploosh
@@ -158,6 +189,7 @@ Orphan rule: impl trait for type only if you own the trait or the type.
 ## Attributes & Derives
 `@test` `@derive(Serialize, Clone, Debug)` `@inline` `@error` `@payable`
 `@supervisor(strategy: "one_for_one")` `@mailbox(capacity: 2048)` `@overflow(wrapping)`
+`@fast_math(contract, afn)` (compile error on-chain)
 `#[target(evm)]` `#[cfg(test)]`
 Derives: `Debug`, `Clone`, `Copy`, `Eq`, `Hash`, `Serialize`, `Deserialize`, `Ord`.
 

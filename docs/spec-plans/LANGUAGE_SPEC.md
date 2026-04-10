@@ -1,4 +1,4 @@
-# SPLOOSH Language Specification v0.4.0-draft
+# SPLOOSH Language Specification v0.4.1-draft
 
 > **AI-Native · Systems-Grade · Web2/Web3 Dual-Target**
 >
@@ -649,6 +649,82 @@ extern "C" {
 - C functions that can fail are wrapped to return `Result<T, FfiError>`.
 - `extern` blocks are not available inside `onchain` modules (compile error).
 - There are no raw pointer types (`*const T`, `*mut T`) in the language.
+
+### 4.10 Floating-Point and Math Operations
+
+Sploosh exposes the full IEEE 754 math surface on `f32` and `f64` through **method syntax**,
+matching the convention established by integer methods in §4.8. All math methods are
+**compiler intrinsics** — the compiler lowers them directly to LLVM intrinsics
+(`llvm.sin.f64`, `llvm.sqrt.f64`, `llvm.fma.f64`, etc.) rather than through opaque libm
+calls. This is a load-bearing design choice: intrinsic lowering is what enables compile-time
+constant folding (`(0.0f64).sin()` → `0.0` during codegen), auto-vectorization of math
+inside loops, and fusion of adjacent `.sin()` + `.cos()` calls into `llvm.sincos`.
+
+**Correctness contract.** In the default mode (no `@fast_math`), math methods produce
+results within 1 ULP of the correctly-rounded IEEE 754 value. Implementations may lower
+to LLVM libc libm for functions where LLVM intrinsics do not guarantee correct rounding
+(`sin`, `cos`, `log`, `exp`, `pow`). `sqrt` and `fma` are correctly rounded on all supported
+targets. `@fast_math(afn)` relaxes the 1-ULP bound to implementation-defined accuracy.
+
+**Method categories on `f32` and `f64`** (full signatures in `stdlib/math.md`):
+
+- **Classification:** `is_nan`, `is_finite`, `is_infinite`, `is_normal`, `is_sign_positive`, `is_sign_negative`, `classify`
+- **Sign and absolute value:** `abs`, `signum`, `copysign`
+- **Rounding:** `floor`, `ceil`, `round`, `trunc`, `fract`
+- **Min / max:** `min`, `max`, `clamp`
+- **Power and root:** `sqrt`, `cbrt`, `powi`, `powf`, `hypot`, `recip`
+- **Exponential and logarithm:** `exp`, `exp2`, `exp_m1`, `ln`, `ln_1p`, `log`, `log2`, `log10`
+- **Trigonometry:** `sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `atan2`, `sin_cos`
+- **Hyperbolic:** `sinh`, `cosh`, `tanh`, `asinh`, `acosh`, `atanh`
+- **Fused multiply-add:** `mul_add` (lowers to `llvm.fma` when the target supports it)
+- **Angle conversion:** `to_degrees`, `to_radians`
+
+**Constants** are associated constants on `f32` and `f64`, not free items:
+
+```sploosh
+let circumference = 2.0f64 * f64::PI * radius;
+let eps = f64::EPSILON;
+```
+
+Available constants include `PI`, `TAU`, `E`, `SQRT_2`, `FRAC_1_SQRT_2`, `LN_2`, `LN_10`,
+`LOG2_E`, `LOG10_E`, `INFINITY`, `NEG_INFINITY`, `NAN`, `MIN`, `MIN_POSITIVE`, `MAX`,
+`EPSILON`, `MANTISSA_DIGITS`, `DIGITS`, `RADIX`. See `stdlib/math.md` for the full list.
+
+**Example:**
+
+```sploosh
+fn distance(a: (f64, f64), b: (f64, f64)) -> f64 {
+    let dx = a.0 - b.0;
+    let dy = a.1 - b.1;
+    (dx*dx + dy*dy).sqrt()
+}
+
+fn polar_to_cartesian(r: f64, theta: f64) -> (f64, f64) {
+    let (s, c) = theta.sin_cos();  // fuses to llvm.sincos
+    (r * c, r * s)
+}
+```
+
+**On-chain restriction.** Floating-point math methods are a **compile error inside
+`onchain` modules**. Transcendentals are not bit-reproducible across LLVM versions,
+platforms, and fast-math settings, and on-chain determinism is non-negotiable — any drift
+would break consensus. Inside `onchain`, use the integer math methods below. The
+`@fast_math` attribute is similarly forbidden in `onchain` (see §12.1, §12.3).
+
+**Integer math methods.** In addition to the overflow-related methods in §4.8, all
+integer types (`i8`..`i128`, `u8`..`u128`, `u256`) support the following math and
+bit-manipulation methods, all of which are available **on every target including `onchain`**:
+
+- **Arithmetic:** `abs` (signed types only, returns same type — `i32::MIN.abs()` aborts under checked arithmetic), `min`, `max`, `clamp`, `pow` (checked exponentiation)
+- **Roots and logs:** `isqrt` (integer square root, floor), `ilog2`, `ilog10` (integer logarithms, abort on zero)
+- **Bit counting:** `count_ones`, `count_zeros`, `leading_zeros`, `trailing_zeros`
+- **Bit rotation and byte order:** `rotate_left`, `rotate_right`, `swap_bytes`, `to_be`, `to_le`, `from_be`, `from_le`
+
+```sploosh
+let half = amount.clamp(0u256, u256::MAX / 2u256);
+let shift = capacity.ilog2();           // usable on-chain
+let word = hash.rotate_left(13);        // u256 bit tricks for crypto
+```
 
 ---
 
@@ -1749,6 +1825,51 @@ sploosh build --target svm           # on-chain → Solana SBF
 | `@supervisor(...)` | Mark an actor as a supervisor |
 | `@mailbox(capacity: N)` | Set actor mailbox capacity (default: 1024) |
 | `@overflow(wrapping)` | Opt function into wrapping arithmetic (compile error on-chain) |
+| `@fast_math(flags)` | Enable LLVM fast-math flags for floating-point operations (compile error on-chain) |
+
+**Fast-math flags.** The `@fast_math` attribute enables LLVM fast-math flags on the floating-point operations
+inside a function body, trading IEEE 754 strictness for speed. The attribute takes zero
+or more flag names corresponding 1:1 to LLVM's fast-math flags:
+
+| Flag | Meaning | Safe to enable? |
+|---|---|---|
+| `contract` | Allow contraction, e.g. `x*y + z` → `fma(x, y, z)` | Yes — fuses precision-preserving ops |
+| `afn` | Allow approximate math function implementations (~1 ULP error on transcendentals) | Usually |
+| `reassoc` | Allow reordering of associative operations | Only if you know the inputs |
+| `arcp` | Allow `x/y` → `x * (1/y)` | Only if reciprocal error is acceptable |
+| `nnan` | Assume no operand is NaN (UB if violated) | Requires domain reasoning |
+| `ninf` | Assume no operand is infinity (UB if violated) | Requires domain reasoning |
+| `nsz` | Ignore sign of zero (treats −0.0 and +0.0 as equivalent) | Requires domain reasoning |
+
+**Bare `@fast_math` is shorthand for `@fast_math(contract, afn)`** — the safe subset
+that enables FMA fusion and approximate transcendentals without introducing undefined
+behavior on NaN or infinity inputs. These are the two flags that deliver the bulk of
+the performance win on typical numeric code. All other flags must be opted in explicitly
+because they require the author to reason about the numerical domain.
+
+```sploosh
+@fast_math                          // equivalent to @fast_math(contract, afn)
+fn length_sq(v: &[f64]) -> f64 {
+    let mut sum = 0.0f64;
+    for x in v { sum = sum + x * x; }   // compiler may fuse to FMA
+    sum
+}
+
+@fast_math(contract, afn, reassoc)   // allow reduction reordering too
+fn dot(a: &[f64], b: &[f64]) -> f64 {
+    let mut acc = 0.0f64;
+    for i in 0..a.len() { acc = acc + a[i] * b[i]; }
+    acc
+}
+```
+
+**Scope:** `@fast_math` applies to floating-point operations inside the annotated
+function body only. It is **not inherited** by called functions — a `@fast_math` caller
+does not relax the semantics of a strict-math callee.
+
+**On-chain:** `@fast_math` is a **compile error inside `onchain` modules**. On-chain
+float determinism requires strict IEEE 754 semantics on every target; fast-math flags
+would allow bit-level drift across LLVM versions and break consensus. See §12.3.
 
 ### 12.2 Derive Macros
 
@@ -1798,8 +1919,24 @@ standard library modules. The following are compile-time errors inside `onchain`
 - `std::web` — no HTTP server
 - `std::env` — no environment
 
-Available inside `onchain`: `std::math`, `std::crypto`, `std::chain`, `std::collections`,
-and all core types.
+Available inside `onchain`: `std::math` (integer math only — `abs`, `min`, `max`, `clamp`,
+`pow`, `isqrt`, `ilog2`, `count_ones`, and the other methods listed in §4.10),
+`std::crypto`, `std::chain`, `std::collections`, and all core types.
+
+**Forbidden inside `onchain`:** every floating-point math method listed in §4.10 is a
+compile error inside `onchain` modules — classification (`is_nan`, `is_finite`, ...),
+sign and absolute value (`abs`, `signum`, `copysign`), rounding (`floor`, `ceil`, `round`,
+`trunc`, `fract`), min/max/clamp, power/root (`sqrt`, `cbrt`, `powi`, `powf`, `hypot`,
+`recip`), exp/log, trig, hyperbolic, `mul_add`, and angle conversion. The rule is
+intentionally uniform: even the IEEE 754-deterministic methods (e.g., `sqrt`, `min`,
+`max`, `abs`) are banned on-chain so that implementers and auditors never have to
+reason about which subset is safe. Transcendentals are not bit-reproducible across
+LLVM versions, platforms, and fast-math settings, and any drift would break on-chain
+consensus. The `@fast_math` attribute is similarly forbidden in `onchain` for the same
+reason (§12.1). `f32`/`f64` values themselves may still be stored in fields, compared
+with `==`/`<`/`>`, and passed as arguments inside `onchain` code — only the §4.10
+method calls are rejected. Use the integer math methods from §4.10 for all on-chain
+numeric work.
 
 **Portable code pattern:**
 
@@ -1882,11 +2019,69 @@ user-defined.
 | `storage::set(field, key, val)` | `()` | onchain | Write persistent state |
 | `chain::call(addr, fn, args)` | `Result<T, E>` | onchain | Cross-contract call |
 
+**Math intrinsics:**
+
+All floating-point math methods in §4.10 are compiler intrinsics that lower directly to
+LLVM intrinsics. The `f32` forms lower to `llvm.*.f32` and the `f64` forms lower to
+`llvm.*.f64`; only the `f64` forms are listed below for brevity.
+
+| Intrinsic | Signature | Lowers to | Context |
+|---|---|---|---|
+| `f64.sqrt()` | `fn(f64) -> f64` | `llvm.sqrt.f64` (correctly rounded) | not onchain |
+| `f64.abs()` | `fn(f64) -> f64` | `llvm.fabs.f64` | not onchain |
+| `f64.mul_add(b, c)` | `fn(f64, f64, f64) -> f64` | `llvm.fma.f64` (correctly rounded) | not onchain |
+| `f64.sin()` | `fn(f64) -> f64` | `llvm.sin.f64` | not onchain |
+| `f64.cos()` | `fn(f64) -> f64` | `llvm.cos.f64` | not onchain |
+| `f64.tan()` | `fn(f64) -> f64` | `llvm.tan.f64` | not onchain |
+| `f64.sin_cos()` | `fn(f64) -> (f64, f64)` | `llvm.sincos.f64` | not onchain |
+| `f64.exp()` | `fn(f64) -> f64` | `llvm.exp.f64` | not onchain |
+| `f64.exp2()` | `fn(f64) -> f64` | `llvm.exp2.f64` | not onchain |
+| `f64.ln()` | `fn(f64) -> f64` | `llvm.log.f64` | not onchain |
+| `f64.log2()` | `fn(f64) -> f64` | `llvm.log2.f64` | not onchain |
+| `f64.log10()` | `fn(f64) -> f64` | `llvm.log10.f64` | not onchain |
+| `f64.powf(e)` | `fn(f64, f64) -> f64` | `llvm.pow.f64` | not onchain |
+| `f64.powi(e)` | `fn(f64, i32) -> f64` | `llvm.powi.f64` | not onchain |
+| `f64.floor()` | `fn(f64) -> f64` | `llvm.floor.f64` | not onchain |
+| `f64.ceil()` | `fn(f64) -> f64` | `llvm.ceil.f64` | not onchain |
+| `f64.trunc()` | `fn(f64) -> f64` | `llvm.trunc.f64` | not onchain |
+| `f64.round()` | `fn(f64) -> f64` | `llvm.round.f64` | not onchain |
+| `f64.copysign(s)` | `fn(f64, f64) -> f64` | `llvm.copysign.f64` | not onchain |
+| `f64.min(b)` | `fn(f64, f64) -> f64` | `llvm.minnum.f64` | not onchain |
+| `f64.max(b)` | `fn(f64, f64) -> f64` | `llvm.maxnum.f64` | not onchain |
+
+Remaining methods from §4.10 (`asin`, `acos`, `atan`, `atan2`, `sinh`, `cosh`, `tanh`,
+`asinh`, `acosh`, `atanh`, `cbrt`, `hypot`, `exp_m1`, `ln_1p`, `log`, `recip`, `fract`,
+`signum`, `is_nan`, `is_finite`, `is_infinite`, `is_normal`, `is_sign_positive`,
+`is_sign_negative`, `classify`, `to_degrees`, `to_radians`, `clamp`) are also compiler
+intrinsics. Where a direct LLVM intrinsic exists (e.g., `llvm.asin`, `llvm.atan2`,
+`llvm.sinh`), the method lowers to it; otherwise the compiler lowers to LLVM libc libm.
+
+**Integer math intrinsics** (all available on-chain):
+
+| Intrinsic | Signature | Lowers to | Context |
+|---|---|---|---|
+| `uN.count_ones()` | `fn(uN) -> u32` | `llvm.ctpop.iN` | All |
+| `uN.leading_zeros()` | `fn(uN) -> u32` | `llvm.ctlz.iN` | All |
+| `uN.trailing_zeros()` | `fn(uN) -> u32` | `llvm.cttz.iN` | All |
+| `uN.rotate_left(n)` | `fn(uN, u32) -> uN` | `llvm.fshl.iN` | All |
+| `uN.rotate_right(n)` | `fn(uN, u32) -> uN` | `llvm.fshr.iN` | All |
+| `uN.swap_bytes()` | `fn(uN) -> uN` | `llvm.bswap.iN` | All |
+| `uN.isqrt()` | `fn(uN) -> uN` | Compiler-provided | All |
+| `uN.ilog2()` | `fn(uN) -> u32` | Derived from `ctlz` | All |
+
+Remaining integer methods from §4.10 (`abs`, `min`, `max`, `clamp`, `pow`, `ilog10`,
+`count_zeros`, `to_be`, `to_le`, `from_be`, `from_le`) are also compiler intrinsics on
+every integer type, available on all targets including `onchain`. They are
+compiler-provided without a 1:1 LLVM intrinsic mapping — the compiler emits the
+equivalent sequence of primitive operations and lets the optimizer handle the rest.
+
 **Notes:**
 - `vec![]` uses `![]` syntax. This is the only intrinsic with this form. No other "macros" exist.
 - `format()` template strings are validated at compile time — mismatched `{}` count is an error.
 - `print()` and `assert()` are not available in `onchain` modules (compile error).
 - `assert()` failure in an actor causes actor death. In non-actor code, it aborts the program.
+- The optimizer may fuse adjacent `.sin()` and `.cos()` calls on the same input into a single `llvm.sincos` call. Math calls inside loops are auto-vectorized when the target has a SIMD libm (SVML on Intel, libmvec on glibc).
+- Constant expressions involving math intrinsics are folded at compile time: `(0.0f64).sin()` becomes `0.0` during codegen, with no runtime call.
 
 ### 13.1 Prelude (auto-imported)
 
@@ -1904,6 +2099,7 @@ Send, Sync
 Handle, JoinHandle
 Channel, Sender, Receiver
 Address, u256
+FpCategory
 ```
 
 ### 13.2 Core Modules
@@ -1915,7 +2111,7 @@ Address, u256
 | `std::json`    | JSON parse/serialize                     | all |
 | `std::crypto`  | Hashing, signing, key generation         | all |
 | `std::time`    | Timestamps, durations, timers            | native, wasm |
-| `std::math`    | Numeric operations, constants            | all |
+| `std::math`    | Integer math, bit ops, IEEE 754 float methods | integer: all; float: native, wasm |
 | `std::collections` | Advanced data structures             | all |
 | `std::fs`      | Filesystem operations                    | native |
 | `std::env`     | Environment variables, CLI args          | native |
@@ -2250,8 +2446,9 @@ Source (.sp)
 | v0.2.0 | Added: closure capture semantics (§4.5), type unification & pattern binding rules (§3.7), `Handle<T>` actor handle types (§8.2), generic actors (§8.3), pipe + error propagation rules (§5.5), format specifiers (§9), self-matching in impls (§5.2), `ctx` API surface (§11.2), `@payable` and reentrancy (§11.3), cross-contract calls (§11.4), iterator protocol and collection methods (§7), `@error` derive macro (§6.3), error context/chaining (§6.4), derive macro reference (§12.2). EBNF updated for `move` closures, `ref` patterns, generic actors. Keyword count 37→38 (`move`). |
 | v0.3.0 | Added: pipe argument position rules (§5.6), actor message ownership — no references in pub methods (§8.2), type inference rules with default i64/f64 (§3.8), dynamic dispatch / `dyn Trait` / `Box<dyn Trait>` with object safety rules (§3.9), actor failure and recovery / `ActorError` (§8.7), constant evaluation rules / no `static` (§4.6), string methods on `str`/`String` / no `+` concat (§9.5), conditional compilation `cfg` flags and onchain stdlib restrictions (§12.3), supertrait syntax and struct generic bounds (§3.5-3.6), destructuring in `let` bindings (§5.3), `if let` and `while let` (§5.4), destructuring in `for` loops (§5.5). EBNF updated for `if_let_expr`, `while_let_expr`, `dyn` types, `..` rest pattern, numeric literal suffixes. Stdlib table now includes target availability. Feature flags in sploosh.toml. |
 | v0.4.0 | **Runtime Specification** (§8.10-8.11): M:N work-stealing scheduler, bounded lock-free mailboxes with backpressure, per-sender FIFO ordering, async-actor integration, runtime lifecycle. **Type System**: `u256`/`Address` primitives (§3.1), `Box<T>` heap allocation (§4.4), `Channel<T>`/`Sender<T>`/`Receiver<T>` (§3.2, §8.5), `Drop` trait (§3.10), associated types in traits (§3.5), standard traits catalog — 30+ traits formally defined (§3.10), `as` numeric casting (§3.11). **Safety**: checked arithmetic everywhere (§4.8), `@overflow(wrapping)` opt-out, `wrapping_*`/`saturating_*`/`checked_*` methods on all integer types. **Ownership**: lifetime elision — single-source rule (§4.5), `Box<T>` with RAII drop semantics, no `Rc<T>`/`Arc<T>`. **FFI**: `extern "C"` with safe wrappers, no `unsafe` keyword, no raw pointers (§4.9). **Concurrency**: typed bounded channels (§8.5), `select` formalized (§8.6), `spawn async {}` for non-actor tasks (§8.9), three supervision strategies (§8.7), `@mailbox(capacity)` attribute, `send_timeout` intrinsic. **Modules**: file resolution rules (§10.4), `pub use` re-exports, trait coherence/orphan rules (§10.5). **Compiler intrinsics catalog** (§13.0): all 25+ intrinsics formally specified with signatures and contexts. **Grammar**: `as` cast, `select_expr`, `spawn async`, `emit_stmt`, `extern_block`, associated `type` in traits/impls, `type_suffix` with `u256`. Keywords 38→40 (`as`, `extern`). |
+| v0.4.1 | **std::math module** (§4.10, `stdlib/math.md`): comprehensive IEEE 754 surface on `f32`/`f64` as method-syntax compiler intrinsics that lower directly to LLVM intrinsics (`llvm.sin`, `llvm.sqrt`, `llvm.fma`, `llvm.sincos`, `llvm.pow`, `llvm.log`, etc.), unlocking constant folding, auto-vectorization, and sin+cos fusion. Method categories: classification, sign, rounding, min/max/clamp, power/root (`sqrt`, `cbrt`, `powi`, `powf`, `hypot`, `recip`), exp/log (`exp`, `exp2`, `exp_m1`, `ln`, `ln_1p`, `log2`, `log10`), trig (`sin`, `cos`, `tan`, inverses, `atan2`, `sin_cos`), hyperbolic, `mul_add` (correctly rounded FMA), `to_degrees`/`to_radians`. Constants as associated consts: `f64::PI`, `f64::TAU`, `f64::E`, `f64::EPSILON`, `f64::INFINITY`, `f64::NAN`, etc. **Integer math methods** (§4.10) on all integer types: `abs`, `min`, `max`, `clamp`, `pow` (checked), `isqrt`, `ilog2`, `ilog10`, `count_ones`, `count_zeros`, `leading_zeros`, `trailing_zeros`, `rotate_left`, `rotate_right`, `swap_bytes`. **`@fast_math(flags)` attribute** (§12.1): granular LLVM fast-math flags — `contract`, `afn`, `reassoc`, `arcp`, `nnan`, `ninf`, `nsz`; bare `@fast_math` defaults to the safe subset `contract + afn`; per-function scope, not inherited. **On-chain restriction** (§12.3, §4.10): floating-point math methods and `@fast_math` are compile errors inside `onchain` modules — only integer math is available, for bit-level determinism across LLVM versions and platforms. **§13.0 Compiler Intrinsics**: new Math intrinsics and Integer math intrinsics tables with LLVM lowering targets. No grammar changes — method call and attribute syntax already in §16. Keyword count unchanged (40). |
 
 ---
 
 *Working title: Sploosh. Name subject to change.*
-*This spec is a living document. v0.4.0-draft — April 2026.*
+*This spec is a living document. v0.4.1-draft — April 2026.*
