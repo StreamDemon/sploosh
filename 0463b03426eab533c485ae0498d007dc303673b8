@@ -1,0 +1,25 @@
+docs/spec-plans/LANGUAGE_SPEC.md
+  b71394b686352d29 2420-2421,2439
+docs/reference/grammar.md
+  b71394b686352d29 11-12,30
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8",
+  "base_commit_sha": "0463b03426eab533c485ae0498d007dc303673b8",
+  "prompts": {
+    "b71394b686352d29": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d7dd39c9-8e98-4716-ad01-d468db11a837",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "StreamDemon",
+      "messages": [],
+      "total_additions": 5532,
+      "total_deletions": 5530,
+      "accepted_lines": 5661,
+      "overriden_lines": 3
+    }
+  }
+}
