@@ -1,0 +1,44 @@
+docs/migration/from-elixir.md
+  3712a1ba4df50910 30
+docs/examples/actor-chat-server.md
+  3712a1ba4df50910 20-21,41-42
+docs/spec-plans/LANGUAGE_SPEC_PROMPT.md
+  3712a1ba4df50910 149
+docs/web3/onchain-overview.md
+  3712a1ba4df50910 45
+docs/spec-plans/LANGUAGE_SPEC.md
+  3712a1ba4df50910 1387-1394,2167-2168,2410-2415,3042
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8",
+  "base_commit_sha": "332ec89f15a9d712361f790014c6c0c8dcd1deb7",
+  "prompts": {
+    "3712a1ba4df50910": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "3a3c4f4a-88f2-4684-8ad6-2e4a8c1378b0",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "StreamDemon",
+      "messages": [],
+      "total_additions": 6790,
+      "total_deletions": 6785,
+      "accepted_lines": 3393,
+      "overriden_lines": 0
+    },
+    "b71394b686352d29": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d7dd39c9-8e98-4716-ad01-d468db11a837",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "StreamDemon",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 2918,
+      "overriden_lines": 0
+    }
+  }
+}
