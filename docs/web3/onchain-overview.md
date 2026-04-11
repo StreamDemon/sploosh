@@ -31,7 +31,9 @@ The following modules are compile-time errors inside `onchain`:
 - `std::web` -- no HTTP server
 - `std::env` -- no environment variables
 
-**Available inside onchain:** `std::math`, `std::crypto`, `std::chain`, `std::collections`, and all core types.
+**Concurrency primitives are also forbidden on-chain.** The `actor` keyword, the `spawn`, `send`, `send_timeout`, `select`, and `timeout(ms)` intrinsics, the `Handle<T>`, `Channel<T>`, `Sender<T>`, `Receiver<T>`, and `JoinHandle<T>` types, and the `@supervisor` and `@mailbox` attributes are all compile errors inside `onchain`. `extern "C"` and `extern "C" async` FFI blocks are also rejected. On-chain execution is synchronous, single-threaded, and transactional — there is no runtime scheduler for any of these to run on. Transitive imports of native modules that internally use actors are still allowed, provided the functions called across the `onchain` boundary do not themselves touch actor intrinsics. See §8.1, §11.1, and §12.3 of the language specification for the full list.
+
+**Available inside onchain:** `std::math` (integer methods only — floating-point methods are forbidden), `std::crypto`, `std::chain`, `std::collections`, and all core types.
 
 ## Key Differences from Regular Modules
 
@@ -40,6 +42,7 @@ The following modules are compile-time errors inside `onchain`:
 - No references in public function parameters (messages cross transaction boundaries)
 - Events via `emit` keyword
 - Blockchain context via `ctx` module
+- **No concurrency** -- on-chain execution is sequential within a transaction. No actors, no async, no channels, no FFI. Reentrancy control is via `@payable`/`@reentrant` (§11.3), a different mechanism from the off-chain actor-handler `SelfCall` detection.
 
 ## Checked Arithmetic on Chain
 

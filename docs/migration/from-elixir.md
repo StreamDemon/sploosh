@@ -25,6 +25,10 @@
 | Untyped process mailbox | Typed actor mailbox | Messages arrive via `send handle.method(args)` with type-checked params. `Channel<T>` is a separate primitive for explicit data flow. |
 | Unbounded mailboxes | Bounded actor mailboxes | Fixed capacity; senders block when full |
 | `:one_for_one`, `:one_for_all`, `:rest_for_one` | `one_for_one`, `one_for_all`, `rest_for_one` | Same three supervision strategies as OTP |
+| `init/1` may return `{:stop, reason}` | `init` is infallible and non-async | `init` returns `Self` with no error channel. Panics in `init` transition the actor directly to `DEAD`; supervisor decides. Model recoverable init with a handshake message after spawn. |
+| `GenServer.call` to self hangs | Direct self request/reply → `Err(ActorError::SelfCall)` | Sploosh runtime detects direct self-deadlocks in O(1) and returns an error instead of hanging. Multi-actor cycles (A → B → A) are still undetected — keep communication a DAG. |
+| PID refcount via `Process.monitor` | `Handle<T>` is not reference-counted | Dropping the last handle does **not** terminate the actor. Clean shutdown is the supervisor's job; orphaned actors keep running until runtime shutdown. |
+| Restart preserves no state (default) | Same — fresh `init` with stored args on every restart | Sploosh matches OTP default behavior. Old handles become permanently dead after restart; callers must re-fetch the new handle from the supervisor. |
 
 ## Actor Comparison
 

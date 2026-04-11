@@ -34,6 +34,9 @@
 | Unbounded `mpsc::channel` | `Channel::new(cap)` | Bounded MPSC only; returns `(Sender<T>, Receiver<T>)` |
 | Unbounded actor channels | Bounded actor mailboxes | Mailboxes have a fixed capacity with backpressure |
 | Checked arithmetic (debug only) | Checked arithmetic (all modes) | Overflow always panics, no silent wrapping in release |
+| `tokio::task::spawn_blocking` | Not available yet | In v0.4.3 the only way to run blocking work from an actor handler is an `extern "C" async` FFI wrapper, which the compiler offloads to the runtime's blocking pool. Calling plain `extern "C"` from a handler is a compile error. |
+| `tokio::sync::Mutex` held across `.await` | Not needed | The actor holds its `&mut self` lock automatically until the handler returns (including across `.await`). Direct re-entrant self-calls are detected as `ActorError::SelfCall` rather than deadlocking. |
+| `Arc::strong_count` / dropping the last `Arc` frees the inner value | `Handle<T>` is not reference-counted | Dropping the last handle does not kill the actor. Terminate via supervisor or runtime shutdown; orphaned actors keep running. |
 
 ## New Concepts for Rust Developers
 - **Actors** (`actor`, `spawn`, `send`, `Handle<T>`) -- structured concurrency primitive
