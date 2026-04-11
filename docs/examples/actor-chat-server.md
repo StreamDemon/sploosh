@@ -17,7 +17,8 @@ actor ChatRoom {
         self.members.push(client);
     }
 
-    pub fn broadcast(&self, from: String, message: String) {
+    // &mut self so this can be invoked via `send` from other actors (§8.2).
+    pub fn broadcast(&mut self, from: String, message: String) {
         let formatted = format("[{}] {}: {}", self.name, from, message);
         for member in self.members.iter() {
             send member.receive(formatted.clone());
@@ -37,7 +38,8 @@ actor Client {
         Client { username, room }
     }
 
-    pub fn send_message(&self, message: String) {
+    // &mut self so this can be invoked via `send` from main (§8.2).
+    pub fn send_message(&mut self, message: String) {
         send self.room.broadcast(self.username.clone(), message);
     }
 

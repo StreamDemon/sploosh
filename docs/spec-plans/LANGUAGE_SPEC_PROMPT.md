@@ -146,7 +146,7 @@ let msg = rx.recv()?;                // blocks until available
 - Blocking FFI in actor handlers is a compile error. Handler-safe FFI must be `extern "C" async`.
 - Supervision: `@supervisor(strategy: "one_for_one", max_restarts: 5, window_secs: 60)` (sliding window).
 - Restart: fresh `init` with stored args; old handles become permanently dead (no transparent redirect).
-- Actors are native/wasm only — the `actor`/`spawn`/`send`/`Handle<T>`/`@supervisor`/`@mailbox` surface is a compile error inside `onchain`.
+- Actors are native/wasm only. Compile error inside `onchain`: `actor`, `spawn`, `send`, `send_timeout`, `select`, `timeout(ms)`, `Handle<T>`, `Channel<T>`, `Sender<T>`, `Receiver<T>`, `JoinHandle<T>`, `@supervisor`, `@mailbox`, `async fn`/`.await`, `extern "C"`/`extern "C" async`.
 - Runtime starts with `main()`, shuts down when `main()` returns.
 
 ## Async

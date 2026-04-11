@@ -42,7 +42,7 @@ The following modules are compile-time errors inside `onchain`:
 - No references in public function parameters (messages cross transaction boundaries)
 - Events via `emit` keyword
 - Blockchain context via `ctx` module
-- **No concurrency** -- on-chain execution is sequential within a transaction. No actors, no async, no channels, no FFI. Reentrancy control is via `@payable`/`@reentrant` (§11.3), a different mechanism from the off-chain actor-handler `SelfCall` detection.
+- **No concurrency** -- on-chain execution is sequential within a transaction. No actors, no async, no channels, no FFI. On-chain functions are non-reentrant by default; the `@reentrant` attribute is the explicit opt-in (§11.3). This is a wholly separate mechanism from the off-chain actor-handler `SelfCall` detection — the two do not overlap.
 
 ## Checked Arithmetic on Chain
 
