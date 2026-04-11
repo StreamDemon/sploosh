@@ -17,7 +17,8 @@ actor ChatRoom {
         self.members.push(client);
     }
 
-    pub fn broadcast(&self, from: String, message: String) {
+    // &mut self so this can be invoked via `send` from other actors (§8.2).
+    pub fn broadcast(&mut self, from: String, message: String) {
         let formatted = format("[{}] {}: {}", self.name, from, message);
         for member in self.members.iter() {
             send member.receive(formatted.clone());
@@ -37,7 +38,8 @@ actor Client {
         Client { username, room }
     }
 
-    pub fn send_message(&self, message: String) {
+    // &mut self so this can be invoked via `send` from main (§8.2).
+    pub fn send_message(&mut self, message: String) {
         send self.room.broadcast(self.username.clone(), message);
     }
 
@@ -72,7 +74,9 @@ fn main() -> Result<(), AppError> {
 ## Key Patterns
 
 - **`Handle<T>` is Clone + Send** -- freely passed between actors
-- **`send` for fire-and-forget** -- non-blocking message dispatch
+- **`send` for fire-and-forget** -- non-blocking message dispatch (only valid on `&mut self` methods)
 - **Direct call for request/reply** -- blocks until response
-- **Owned parameters only** -- `String` not `&str` in pub methods
+- **`&mut self` methods require owned parameters** -- `String` not `&str` when a method can be `send`-called
+- **`&self` methods may take references** -- e.g. `pub fn find_by_name(&self, name: &str) -> Option<Handle<Client>>` is valid, because request/reply always blocks and the caller's stack outlives the call
+- **Self-sends are legal** -- `send self.handle.method(args)` enqueues to the actor's own mailbox for the next handler turn; useful for self-scheduling. Synchronous self-calls via request/reply deadlock and return `Err(ActorError::SelfCall)`
 - **`.clone()` on handles and data** -- explicit copying for message passing

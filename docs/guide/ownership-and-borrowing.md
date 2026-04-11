@@ -106,6 +106,8 @@ let counter: Handle<Counter> = spawn Counter::init(0);
 let h2 = counter.clone();     // cheap clone -- both handles talk to the same actor
 ```
 
+**`Handle<T>` is also not reference-counted.** Dropping the last live handle has no effect on the actor's lifetime — actors die only via runtime failure, supervisor termination, or runtime shutdown. An actor with no live handle and an empty mailbox is *orphaned* and continues running until the runtime shuts down. Clean shutdown is the supervisor's job. See §8.2 of the language spec for the full rule.
+
 ## No Static Mutable State
 
 There is no `static` keyword. All mutable state lives in actors. This eliminates data races by construction.

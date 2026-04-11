@@ -1,4 +1,4 @@
-# SPLOOSH Language Specification v0.4.2-draft
+# SPLOOSH Language Specification v0.4.3-draft
 
 > **AI-Native · Systems-Grade · Web2/Web3 Dual-Target**
 >
@@ -820,6 +820,13 @@ extern "C" {
 - C functions that can fail are wrapped to return `Result<T, FfiError>`.
 - `extern` blocks are not available inside `onchain` modules (compile error).
 - There are no raw pointer types (`*const T`, `*mut T`) in the language.
+- **Handler-safe FFI.** `extern "C"` blocks may be marked `async` —
+  `extern "C" async { fn native_fetch(...) -> Result<..., FfiError>; }` — in
+  which case the compiler emits an awaitable wrapper that offloads the
+  underlying synchronous C call to the runtime's blocking pool. Only
+  `extern "C" async` functions may be called (directly or transitively) from
+  inside an actor message handler; calling a plain (synchronous) `extern "C"`
+  function from a handler is a compile error. See §8.11a for the handler rule.
 
 ### 4.10 Floating-Point and Math Operations
 
@@ -1373,6 +1380,55 @@ actor Counter {
 }
 ```
 
+**Actors are off-chain primitives.** The `actor` keyword, the `spawn`, `send`,
+`send_timeout`, `select`, and `timeout(ms)` intrinsics, and the `Handle<T>`,
+`Channel<T>`, `Sender<T>`, `Receiver<T>`, `JoinHandle<T>` types are all **compile
+errors inside `onchain` modules**. The `@supervisor` and `@mailbox` attributes are
+also rejected on items in `onchain` scope. The `async` function modifier and the
+`.await` operator are likewise compile errors inside `onchain` — on-chain
+execution is synchronous, single-threaded, and transactional, with no runtime
+scheduler for any of these to run on. Transitive imports of native modules that
+internally use actors are still allowed, provided the functions called across
+the `onchain` boundary do not themselves touch actor intrinsics. See §11.1 and
+§12.3 for the cross-target restriction surface, and §13.0 for the per-intrinsic
+context column.
+
+### 8.1a Actor Lifecycle States
+
+Every actor observable through a `Handle<T>` is always in one of three states:
+
+| State | Meaning |
+|---|---|
+| `INITIALIZING` | `spawn` has returned a handle, but `init` has not yet produced the initial `Self`. Incoming messages queue in the mailbox. |
+| `READY` | `init` has returned. The actor is processing messages from its mailbox under the normal one-handler-at-a-time rule. |
+| `DEAD` | The actor has terminated and will never process another message. Its state has been dropped. |
+
+**`init` is infallible in signature** — it returns `Self`, not `Result<Self, E>`,
+and it is not `async`. Writing `async fn init(...)` on an actor is a compile error.
+`init` may perform synchronous work that can *fail at runtime* (bounds checks,
+overflow checks, `assert` failures); any such failure transitions the actor
+directly from `INITIALIZING` to `DEAD` without ever reaching `READY`. Recoverable
+initialization should be modeled by storing an `Option<T>` field and running a
+handshake message after spawn (see §8.7a for how supervisors observe init
+failures).
+
+**Mailbox queuing during `INITIALIZING`.** Because `spawn` returns the handle
+immediately (§8.11) while `init` runs asynchronously on the scheduler, messages
+sent to a still-initializing actor are simply placed in its mailbox and delivered
+once the actor enters `READY`. There is a happens-before edge from the completion
+of `init` to the first handler dispatch: the first message handler cannot observe
+partially-constructed state. Request/reply calls from other actors block until the
+target reaches `READY` (or `DEAD`).
+
+**Handles returned from `spawn` may be observationally dead.** If `init` panics
+before returning `Self`, the actor transitions `INITIALIZING → DEAD` and the first
+call on the handle observes the dead state — request/reply returns
+`Err(ActorError::Dead)`, `send` silently drops (§8.2, §8.11). The spawner does not
+receive a synchronous error from `spawn` itself; the handle is the only observation
+surface. A supervised actor that dies in `init` is reported to its supervisor as if
+a `READY` child had died, and init-failures count toward the supervisor's
+`max_restarts` window (§8.7, §8.7a).
+
 ### 8.2 Actor Handle Types and Message Ownership
 
 `spawn` returns a typed handle: `Handle<ActorName>`. Handles are the only way to interact
@@ -1387,12 +1443,43 @@ let counter: Handle<Counter> = spawn Counter::init(0);
 - Handles can be stored in structs, other actors, and collections.
 - `&self` methods on handles are **request/reply** — blocks caller until response.
 - `&mut self` methods can be called via `send` (fire-and-forget) or direct call (blocks).
+- **`send` is only valid on `&mut self` methods.** Applying `send` to an `&self`
+  method (e.g. `send handle.get()`) is a compile error: an `&self` call has a
+  meaningful return value and no mutation, so discarding its reply is never the
+  author's intent.
 - Sending to a dead actor: request/reply returns `Err(ActorError::Dead)`. `send` silently drops.
 
-**Message ownership rules:**
-All parameters to `pub` actor methods must be **owned types**. References (`&T`, `&mut T`)
-are not allowed in actor method signatures because messages are delivered asynchronously —
-the caller's stack frame may no longer exist when the actor processes the message.
+**Handle drop semantics.** Dropping a `Handle<T>` — including the last live
+handle in the program — has **no effect on the actor's lifetime**. Actors
+terminate only via (a) runtime failure (bounds, overflow, failed `assert`),
+(b) supervisor termination under the applicable strategy (§8.7), or (c) runtime
+shutdown when `main()` returns (§8.11). An actor that is reachable from no live
+handle and has an empty mailbox is said to be **orphaned**; it continues running
+until the runtime shuts down. Orphaned actors are a known tradeoff of the
+non-reference-counted handle model — clean shutdown is the supervisor's job. A
+future amendment may introduce explicit self-termination; v0.4.3 deliberately
+does not.
+
+**Message ownership rules.** The rule is keyed to the method's receiver:
+
+- **`&mut self` methods** — which may be invoked via `send` (fire-and-forget),
+  `send_timeout`, or a direct request/reply call — **must use owned types** for
+  every parameter. `&T`, `&mut T`, and any type containing a non-`'static`
+  reference are compile errors. The reason is that `send` is the only Sploosh
+  construct where a call can outlive the caller's stack frame; forbidding
+  references on `&mut self` methods blocks the dangling-reference class at the
+  receiver boundary.
+- **`&self` methods** — which are synchronous request/reply only (see the handle
+  rules above) — **may take reference parameters**. The caller blocks until the
+  reply arrives, so the caller's stack frame is guaranteed to outlive the call,
+  and references remain sound even when the actor internally `.await`s the
+  reply (§8.10). Standard borrow-checker rules apply on the caller side.
+- **Private (non-`pub`) methods** are called only during message handling on the
+  actor's own scope and may use references freely. This rule is unchanged.
+
+Adding `send` capability to a method with a reference parameter is a compile
+error, and adding a reference parameter to a method that is already
+`send`-callable is also a compile error. There is no hidden escape hatch.
 
 ```sploosh
 actor Logger {
@@ -1402,8 +1489,15 @@ actor Logger {
     // CORRECT: owned String
     pub fn log(&mut self, msg: String) { self.entries.push(msg); }
 
-    // COMPILE ERROR: &str is a reference — not allowed in actor methods
+    // COMPILE ERROR: &str is a reference — not allowed in &mut self
     // pub fn log_ref(&mut self, msg: &str) { ... }
+
+    // OK: &self request/reply methods may take references.
+    pub fn count_matching(&self, needle: &str) -> u64 {
+        self.entries.iter()
+            |> filter(|e| e.contains(needle))
+            |> count
+    }
 
     pub fn count(&self) -> u64 { self.entries.len() as u64 }
 }
@@ -1435,7 +1529,13 @@ are only called internally during message handling, when the actor's own scope i
 
 ### 8.3 Generic Actors
 
-Actors can be generic. All message types must implement `Send`.
+Actors can be generic. **Every type parameter on an `actor` declaration must be
+`Send`** (not only the ones that appear in `pub` method signatures), because the
+actor's state fields may hold values of those types and those fields move across
+scheduler threads when the actor is migrated between cores. `K`, `V`, and any
+other generic parameter must therefore carry a `Send` bound. This is a
+conservative rule but zero-cost at the usage site — the same bound is already
+required in practice.
 
 ```sploosh
 actor Cache<K: Hash + Eq + Send, V: Clone + Send> {
@@ -1455,6 +1555,7 @@ actor Cache<K: Hash + Eq + Send, V: Clone + Send> {
         self.data.insert(key, value);
     }
 
+    // OK under §8.2: &self methods may take reference parameters.
     pub fn get(&self, key: &K) -> Option<V> {
         self.data.get(key).map(|v| v.clone())
     }
@@ -1499,7 +1600,9 @@ let msg = rx.recv()?;
 - `Sender<T>` implements `Clone` and `Send`. Multiple producers can hold clones.
 - `Receiver<T>` does NOT implement `Clone`. Single consumer only.
 - When the channel is full, `send` blocks the sender until space is available (backpressure).
-- `send_timeout(tx.send(val), duration_ms)` returns `Result<(), SendError::Timeout>`.
+- `send_timeout(tx.send(val), duration_ms)` returns `Result<(), SendError>` where
+  `SendError` has variants `Timeout` (bounded wait elapsed) and `Dead`
+  (destination actor died — raised for actor-targeted `send_timeout`, see §8.11).
 
 ### 8.6 Select (multiplexed receive)
 
@@ -1514,7 +1617,10 @@ select {
 ```
 
 **Select rules:**
-- Arms are evaluated in order. The first arm with an available message wins.
+- Arms are checked **top-to-bottom deterministically** (not round-robin). When
+  multiple arms are simultaneously ready, the first textually listed ready arm
+  wins every time. This makes `select` reproducible under test and avoids
+  randomized scheduling hazards.
 - If no arms are ready, `select` blocks until one becomes available or a timeout fires.
 - `timeout(ms)` is a compiler intrinsic usable only inside `select` arms.
 
@@ -1544,9 +1650,55 @@ actor WorkerPool {
 
 **Parameters:**
 - `max_restarts`: maximum restarts within `window_secs` before the supervisor itself dies (default: 5).
-- `window_secs`: time window for counting restarts (default: 60).
+- `window_secs`: time window for counting restarts (default: 60). The window is
+  **sliding**, not fixed — each restart is tagged with its wall-clock timestamp,
+  and the supervisor counts restarts whose timestamps fall within the last
+  `window_secs` seconds of the current time. There are no window-reset
+  boundaries to abuse with timing.
 - When a supervisor dies, it propagates to ITS supervisor (cascading failure).
 - If the top-level supervisor dies, the runtime returns an error from `main()`.
+
+### 8.7a Restart Semantics
+
+When a supervisor restarts a child under any strategy (`one_for_one`,
+`one_for_all`, or `rest_for_one`), the runtime performs these steps in order:
+
+1. **Drop the failed actor's state.** RAII runs via any `Drop` impls on state
+   fields. The failed actor's mailbox is discarded (consistent with §8.8 —
+   pending messages are lost).
+2. **Run a fresh `init`** with the arguments the supervisor originally used to
+   spawn the child. The new instance begins in `INITIALIZING` per §8.1a and
+   transitions to `READY` once `init` completes. The new state is **fresh** —
+   there is no preservation of fields across restart. This matches OTP's default
+   semantics and avoids the bug class where a corrupted state field is
+   "restarted" into a state that caused the crash.
+3. **Replace the supervisor's stored handle.** Any `Handle<T>` that was cloned
+   out of the supervisor *before* the crash is **permanently dead** — calls on
+   those old handles return `Err(ActorError::Dead)` (§8.8) or silently drop for
+   `send` (§8.2). Callers that need to reach the restarted actor must re-fetch
+   the handle from the supervisor's public API. Blocked senders waiting on the
+   dead actor's mailbox are **not transparently redirected** to the new
+   instance (§8.11).
+
+The mechanism the supervisor uses to remember each child's construction
+arguments (closures, tuples, factory types) is deliberately left to the runtime.
+The spec commits only to the observable contract: *same arguments, fresh state,
+new handle*.
+
+**Init failures count toward `max_restarts`.** A child that dies in `init`
+(§8.1a) is reported to its supervisor exactly as if a `READY` child had died.
+This prevents infinite restart storms when `init` consistently panics on bad
+configuration: after `max_restarts` failures in `window_secs`, the supervisor
+itself dies and the failure cascades to its own supervisor.
+
+**`rest_for_one` ordering requirement.** For `rest_for_one` to be well-defined,
+the supervisor must spawn its children in a deterministic order and track them
+in an ordered collection (typically `Vec<Handle<T>>`, as in the §8.7 example).
+Supervisors that spawn children dynamically into unordered structures (e.g.
+`Map<K, Handle<T>>`) have no observable "started after" ordering;
+`rest_for_one` on such a supervisor emits a **compile-time warning** and falls
+back to `one_for_one` semantics at runtime. The intent is that `rest_for_one`
+should always describe a meaningful relationship, not an accidental one.
 
 ### 8.8 Actor Failure and Recovery
 
@@ -1564,6 +1716,7 @@ explicit `assert` failures). When an actor fails:
 enum ActorError {
     Dead,                           // Actor has terminated
     Timeout,                        // Request/reply timed out
+    SelfCall,                       // Direct re-entrant self-call detected (§8.10.1)
     PanicMessage { msg: String },   // What went wrong (for logging)
 }
 
@@ -1639,6 +1792,61 @@ actor DataFetcher {
   and `send` results back.
 - Async functions cannot hold `&mut` borrows across `.await` points (borrow checker enforced).
 
+### 8.10.1 Re-entrant Calls and Deadlock
+
+Because an actor holds its mailbox "busy" across a handler's entire execution
+(including every `.await` point, §8.10), any synchronous request/reply call
+from a handler back into the same actor deadlocks: the caller is waiting for
+itself to return before it will process the next message. Sploosh detects the
+direct case at runtime and makes the indirect cases the author's responsibility.
+
+**Direct self-calls** (actor A's handler makes a request/reply call on its own
+`Handle<A>`, or on any cloned copy of it) return **`Err(ActorError::SelfCall)`
+immediately, without blocking**. The runtime compares the target handle's actor
+identity against the currently-executing actor on the scheduler thread; the
+check is O(1) and free in the fast path. This catches the common accident of
+using `self.handle.method(args)` where `self.method(args)` was intended.
+
+```sploosh
+actor Recorder {
+    entries: Vec<String>,
+    self_handle: Option<Handle<Recorder>>,
+
+    fn init() -> Self { Recorder { entries: Vec::new(), self_handle: None } }
+
+    pub async fn append(&mut self, msg: String) -> Result<u64, ActorError> {
+        self.entries.push(msg);
+        // WRONG: direct self-call via a cloned handle deadlocks on itself.
+        // The runtime returns Err(ActorError::SelfCall) instead of hanging.
+        // let n = self.self_handle.as_ref().unwrap().count()?;
+
+        // CORRECT: call the local method directly on self.
+        Ok(self.entries.len() as u64)
+    }
+
+    pub fn count(&self) -> u64 { self.entries.len() as u64 }
+}
+```
+
+**Multi-actor cycles** (A awaits B, B awaits A; or longer chains) are **not
+detected** by the v0.4.3 runtime. Such cycles block indefinitely until an outer
+`send_timeout` or user-level timeout fires. The language will not silently
+recover: authors must structure actor communication as a DAG, or break the
+cycle with fire-and-forget `send` so that no chain of synchronous waits can
+close. Cycle detection is expensive (wait-for graph maintenance, false
+positives under temporary pauses) and is deliberately deferred until
+operational experience justifies the cost.
+
+**Fire-and-forget self-sends are legal and do not deadlock.** A handler may
+enqueue a message to itself via `send self.handle.method(args)` — the message
+is placed in the actor's own mailbox and processed on the next handler turn
+after the current one returns. This is the correct pattern for self-scheduling
+work, splitting long computations, or retrying a handler with modified
+arguments.
+
+This rule is distinct from the on-chain reentrancy guard in §11.3; on-chain
+execution has no actors and no scheduler, so the two mechanisms never overlap.
+
 ### 8.11 Runtime Architecture
 
 The actor runtime is the execution engine for all actors and async tasks.
@@ -1661,9 +1869,30 @@ The actor runtime is the execution engine for all actors and async tasks.
 - Each actor has a bounded, lock-free MPSC mailbox. Default capacity: 1024 messages.
 - Configurable per actor with `@mailbox(capacity: N)`.
 - When full: `send` (fire-and-forget) blocks the sender until space is available (backpressure).
-- `send_timeout(handle.method(args), duration_ms)` returns `Result<(), SendError::Timeout>`.
+- `send_timeout(handle.method(args), duration_ms)` returns `Result<(), SendError>`
+  with variants `Timeout` and `Dead` (§8.5).
 - Sending to a dead actor: `send` drops immediately (no block). Request/reply returns
   `Err(ActorError::Dead)` immediately.
+
+**Death while sender blocked.** If the destination actor dies while a sender is
+blocked on its full mailbox, the sender **wakes immediately** regardless of the
+mailbox's current fill state. Wake semantics by call style:
+
+- `send handle.method(args)` (fire-and-forget, blocking on backpressure): the
+  message is silently dropped, the sender's `send` call returns `()`, and
+  execution continues.
+- `send_timeout(handle.method(args), ms)`: returns `Err(SendError::Dead)`
+  immediately, without running to the full timeout.
+- Synchronous request/reply on an `&self` or `&mut self` method: returns
+  `Err(ActorError::Dead)`.
+
+Wake order across multiple blocked senders is **unspecified**; blocked senders
+are not woken FIFO or in any observable order, and fairness is not guaranteed.
+**Supervisor restart does not redirect blocked senders.** If the runtime
+restarts the actor while a sender is blocked on its (now-dead) mailbox, the
+blocked sender still wakes with `Err(...::Dead)` — the message is never
+transparently re-delivered to the new instance. To reach the restarted actor,
+the caller must re-fetch the new handle from the supervisor (§8.7a).
 
 **Memory model:**
 - No garbage collector. Deterministic drop via ownership.
@@ -1676,6 +1905,66 @@ The actor runtime is the execution engine for all actors and async tasks.
   (configurable timeout, default 30 seconds).
 - `Err(e)`: immediate shutdown — all actors killed, pending messages dropped.
 - There is no explicit `Runtime::new()`. The `main` function is the entry point.
+
+### 8.11a Blocking Operations in Handlers
+
+Actor message handlers run on scheduler threads that also execute other actors.
+A handler that blocks its OS thread starves every other actor on that core.
+Sploosh forbids blocking operations in handlers by construction rather than by
+attribute marking.
+
+**Standard library.** The standard library exposes **no synchronous blocking
+I/O surface**. `std::fs`, `std::net`, `std::io`, `std::db`, and `std::web` are
+async-only (§13.2): their methods return futures and require `.await`. There
+is nothing to forbid at the type level — the absence of a sync API *is* the
+forbid.
+
+**FFI.** `extern "C"` functions are synchronous by default (§4.9). Calling a
+synchronous `extern "C"` function from inside an actor message handler — either
+directly, or transitively through any function the handler calls — is a
+**compile error**. FFI that needs to be safe to call from handlers must be
+declared `extern "C" async`; the compiler then emits an awaitable wrapper that
+offloads the underlying call to the runtime's blocking pool, so the scheduler
+thread is never pinned.
+
+```sploosh
+extern "C" {
+    fn native_decompress(buf: &[u8]) -> Result<Vec<u8>, FfiError>;  // sync
+}
+
+extern "C" async {
+    fn native_fetch_blocking(url: &str) -> Result<Vec<u8>, FfiError>;  // handler-safe
+}
+
+actor Loader {
+    fn init() -> Self { Loader {} }
+
+    pub async fn load(&mut self, url: String) -> Result<Vec<u8>, FfiError> {
+        // COMPILE ERROR: native_decompress is sync and would pin the scheduler thread.
+        // let data = native_decompress(&buf)?;
+
+        // OK: native_fetch_blocking is async-wrapped.
+        let bytes = native_fetch_blocking(&url).await?;
+        Ok(bytes)
+    }
+}
+```
+
+**Spin loops and busy waits** are legal but discouraged; they violate no rule,
+but they starve other actors on the same scheduler thread. Use `.await`, or a
+`timeout(ms)` arm in a `select`, to yield instead.
+
+**Scheduler yielding.** An actor that makes no `.await` call during a handler
+runs to handler completion and then yields (see the "An actor processes one
+message handler to completion, then yields" rule above). Handlers that cannot
+reach an `.await` point in bounded time should be split into smaller messages
+or moved to a separate `spawn async { }` task and communicate results back via
+`send`.
+
+A future revision may introduce an explicit `spawn_blocking async { }`
+intrinsic for offloading ad-hoc blocking work; in v0.4.3, the only way to
+invoke blocking code from a handler is via an `extern "C" async` wrapper or by
+forwarding to a non-actor `spawn async` task.
 
 ---
 
@@ -1864,6 +2153,26 @@ onchain mod token {
     }
 }
 ```
+
+**Concurrency primitives are not available on-chain.** On-chain execution is
+synchronous, single-threaded, and transactional — there is no runtime
+scheduler. The following are all compile errors inside `onchain` modules:
+
+- The `actor` keyword and any `actor Foo { ... }` declaration.
+- The `spawn`, `send`, `send_timeout`, `select`, and `timeout(ms)` intrinsics.
+- The `Handle<T>`, `Channel<T>`, `Sender<T>`, `Receiver<T>`, and `JoinHandle<T>`
+  types in storage fields, event fields, function signatures, or local bindings.
+- The `@supervisor` and `@mailbox` attributes on any item in `onchain` scope.
+- `extern "C"` blocks of any kind, including `extern "C" async` (§4.9).
+- The `async` function modifier and the `.await` operator — on-chain functions
+  must be synchronous end-to-end within a transaction.
+
+Transitive imports of native modules that internally use actors are still
+allowed, provided the functions called across the `onchain` boundary do not
+themselves touch any of the constructs above. The forbid is on *spawning
+inside `onchain`*, not on depending on actor-using code through pure-function
+boundaries. See §8.1 for the actor-side statement of this rule, §12.3 for the
+stdlib restriction surface, and §13.0 for the per-intrinsic context column.
 
 ### 11.2 The `ctx` Module (On-Chain Context)
 
@@ -2093,6 +2402,17 @@ standard library modules. The following are compile-time errors inside `onchain`
 Available inside `onchain`: `std::math` (integer math only — `abs`, `min`, `max`, `clamp`,
 `pow`, `isqrt`, `ilog2`, `count_ones`, and the other methods listed in §4.10),
 `std::crypto`, `std::chain`, `std::collections`, and all core types.
+
+**Concurrency primitives forbidden in `onchain`.** In addition to the I/O-bound
+stdlib modules above, the entire actor and async runtime surface is a compile
+error inside `onchain` modules: the `actor` keyword, the `spawn`, `send`,
+`send_timeout`, `select`, `timeout(ms)` intrinsics, the `Handle<T>`,
+`Channel<T>`, `Sender<T>`, `Receiver<T>`, `JoinHandle<T>` types, the
+`@supervisor`, `@mailbox` attributes, and the `async` function modifier with its
+`.await` operator. `extern "C"` and `extern "C" async` FFI blocks are also
+forbidden on-chain (§4.9, §11.1). On-chain execution is synchronous,
+single-threaded, and transactional — there is no scheduler for any of these
+constructs to run on. See §8.1 and §11.1 for the cross-references.
 
 **Forbidden inside `onchain`:** every floating-point math method listed in §4.10 is a
 compile error inside `onchain` modules — classification (`is_nan`, `is_finite`, ...),
@@ -2719,8 +3039,9 @@ Source (.sp)
 | v0.4.0 | **Runtime Specification** (§8.10-8.11): M:N work-stealing scheduler, bounded lock-free mailboxes with backpressure, per-sender FIFO ordering, async-actor integration, runtime lifecycle. **Type System**: `u256`/`Address` primitives (§3.1), `Box<T>` heap allocation (§4.4), `Channel<T>`/`Sender<T>`/`Receiver<T>` (§3.2, §8.5), `Drop` trait (§3.10), associated types in traits (§3.5), standard traits catalog — 30+ traits formally defined (§3.10), `as` numeric casting (§3.11). **Safety**: checked arithmetic everywhere (§4.8), `@overflow(wrapping)` opt-out, `wrapping_*`/`saturating_*`/`checked_*` methods on all integer types. **Ownership**: lifetime elision — single-source rule (§4.5), `Box<T>` with RAII drop semantics, no `Rc<T>`/`Arc<T>`. **FFI**: `extern "C"` with safe wrappers, no `unsafe` keyword, no raw pointers (§4.9). **Concurrency**: typed bounded channels (§8.5), `select` formalized (§8.6), `spawn async {}` for non-actor tasks (§8.9), three supervision strategies (§8.7), `@mailbox(capacity)` attribute, `send_timeout` intrinsic. **Modules**: file resolution rules (§10.4), `pub use` re-exports, trait coherence/orphan rules (§10.5). **Compiler intrinsics catalog** (§13.0): all 25+ intrinsics formally specified with signatures and contexts. **Grammar**: `as` cast, `select_expr`, `spawn async`, `emit_stmt`, `extern_block`, associated `type` in traits/impls, `type_suffix` with `u256`. Keywords 38→40 (`as`, `extern`). |
 | v0.4.1 | **std::math module** (§4.10, `stdlib/math.md`): comprehensive IEEE 754 surface on `f32`/`f64` as method-syntax compiler intrinsics that lower directly to LLVM intrinsics (`llvm.sin`, `llvm.sqrt`, `llvm.fma`, `llvm.sincos`, `llvm.pow`, `llvm.log`, etc.), unlocking constant folding, auto-vectorization, and sin+cos fusion. Method categories: classification, sign, rounding, min/max/clamp, power/root (`sqrt`, `cbrt`, `powi`, `powf`, `hypot`, `recip`), exp/log (`exp`, `exp2`, `exp_m1`, `ln`, `ln_1p`, `log2`, `log10`), trig (`sin`, `cos`, `tan`, inverses, `atan2`, `sin_cos`), hyperbolic, `mul_add` (correctly rounded FMA), `to_degrees`/`to_radians`. Constants as associated consts: `f64::PI`, `f64::TAU`, `f64::E`, `f64::EPSILON`, `f64::INFINITY`, `f64::NAN`, etc. **Integer math methods** (§4.10) on all integer types: `abs`, `min`, `max`, `clamp`, `pow` (checked), `isqrt`, `ilog2`, `ilog10`, `count_ones`, `count_zeros`, `leading_zeros`, `trailing_zeros`, `rotate_left`, `rotate_right`, `swap_bytes`. **`@fast_math(flags)` attribute** (§12.1): granular LLVM fast-math flags — `contract`, `afn`, `reassoc`, `arcp`, `nnan`, `ninf`, `nsz`; bare `@fast_math` defaults to the safe subset `contract + afn`; per-function scope, not inherited. **On-chain restriction** (§12.3, §4.10): floating-point math methods and `@fast_math` are compile errors inside `onchain` modules — only integer math is available, for bit-level determinism across LLVM versions and platforms. **§13.0 Compiler Intrinsics**: new Math intrinsics and Integer math intrinsics tables with LLVM lowering targets. No grammar changes — method call and attribute syntax already in §16. Keyword count unchanged (40). |
 | v0.4.2 | **Lexical foundation** (new §2.6 Literals, new §2.7 Identifiers): formal prose and grammar for numeric literal formats (decimal, hex `0x`, octal `0o`, binary `0b`, underscore digit separators, exponent notation, type suffixes), string literals with a complete escape sequence table (`\n`, `\r`, `\t`, `\\`, `\"`, `\'`, `\0`, `\xNN` for ASCII, `\u{H...}` for Unicode scalar values, plus `\<newline>` line continuation), character literals (single-quoted Unicode scalar values, surrogates rejected), and identifier grammar (ASCII `[A-Za-z_][A-Za-z0-9_]*`, keyword priority, `_` as wildcard binding, `_name` allowed for intentionally-unused bindings). **Literal overflow is now a compile error** — integer literals that do not fit their declared or inferred type are rejected at parse time. **Float-to-int cast edge cases** (§3.11): NaN → 0, +∞ → target `MAX`, −∞ → target `MIN` (signed) or 0 (unsigned), matching WebAssembly `trunc_sat` semantics. No more undefined behavior on exotic float values. **Address representation** (§3.1): clarified as always 32 bytes big-endian in memory on every target; EVM serialization left-pads the low 20 bytes with 12 zero high bytes (Solidity-compatible); non-zero high bytes are rejected at EVM serialization time; SVM uses the full 32 bytes unchanged. **§16 Grammar completeness**: new §16.1 Lexical Productions block with formal EBNF for `IDENT`, `INT_LIT`, `FLOAT_LIT`, `STRING_LIT`, `CHAR_LIT`, `lifetime`, `escape`, and digit classes. Previously-undefined non-terminals now defined in §16: `path_expr`, `path`, `args`, `types`, `patterns`, `field_pats`, `field_pat`, `field_inits`, `field_init`, `idents`, `fn_sig`, `field_def`, `event_def`, `attr_args`, `attr_arg`, `dir_args`, `prim_type`, `type_alias`, `trait_ref`, `BINOP`, `UNOP`. Case normalization: `EXPR` → `expr` in the array type production. No feature changes — this is a completeness pass unblocking tokenizer and parser implementation. No new keywords (still 40). |
+| v0.4.3 | **Actor lifecycle states** (new §8.1a): explicit `INITIALIZING → READY → DEAD` state machine. `fn init(args) -> Self` is **infallible by signature and non-async** — writing `async fn init` is a compile error, and `init` panic transitions directly to `DEAD`. Messages sent to an INITIALIZING actor queue in the mailbox and are delivered once `init` returns; there is a happens-before edge from `init` completion to the first handler dispatch, so handlers never observe partially-constructed state. Handles returned by `spawn` may be immediately dead if `init` panics — first call observes `Err(ActorError::Dead)` or silent drop. **Message ownership rule rewritten by receiver type** (§8.2): `&mut self` methods (which may be invoked via `send`) must use owned parameters; `&self` methods (request/reply only — caller always blocks, stack always outlives the call) **may** take reference parameters. The rule now explicitly rejects `send handle.method()` on an `&self` method as a compile error. Resolves the previous §8.2/§8.3 contradiction on `Cache::get(&self, key: &K)`. Private (non-`pub`) actor methods retain their existing "references freely allowed" rule. **Handle drop semantics** (§8.2): dropping a `Handle<T>` — including the last live handle — has **no effect on actor lifetime**. Actors terminate only via runtime failure, supervisor termination, or runtime shutdown. Orphaned actors (no live handle, empty mailbox) are a known tradeoff of the non-reference-counted handle model; explicit self-termination is deferred. **Generic actor `Send` bounds** (§8.3): all type parameters on an `actor` declaration must carry `Send`, not only those used in `pub` method signatures. **Supervisor restart semantics** (new §8.7a): restart always runs a fresh `init` with the supervisor's stored construction arguments — no state preservation across restart; old `Handle<T>` values become permanently dead and are not transparently redirected to the restarted instance (callers re-fetch from the supervisor); queued mailbox messages are discarded; init failures count toward `max_restarts`; `rest_for_one` requires children in an ordered collection, with a compile-time warning and `one_for_one` fallback if dynamic. **Supervisor restart window is sliding** (§8.7): `window_secs` is a wall-clock sliding window over each restart's timestamp, not a fixed window with reset boundaries. **Mailbox-full + actor-dies race** (§8.11): blocked senders wake immediately on destination death; `send` drops silently, `send_timeout` returns new variant `SendError::Dead` (added to §8.5 `SendError`), request/reply returns `Err(ActorError::Dead)`. Wake order unspecified. Supervisor restart does not redirect blocked senders. **Re-entrant call detection** (new §8.10.1): direct self-calls (A → A via request/reply on own handle) return new variant `ActorError::SelfCall` immediately via an O(1) runtime check — variant added to the `ActorError` enum in §8.8. Multi-actor cycles (A → B → A) are documented as a hazard but not detected in v0.4.3. Fire-and-forget self-sends (`send self.handle.method(args)`) are legal and are the correct self-scheduling pattern. Cross-references §11.3 on-chain reentrancy as a distinct mechanism. **Blocking operations in handlers** (new §8.11a): actor handlers run in an async context; the stdlib is already async-only, so no new forbid is needed there. **FFI:** calling a synchronous `extern "C"` function from inside a handler (directly or transitively) is a compile error. Handler-safe FFI must be declared `extern "C" async` (§4.9) — the compiler emits an awaitable wrapper that offloads to the runtime's blocking pool. `spawn_blocking` intrinsic deferred. **Select arm fairness** (§8.6): arms are checked top-to-bottom deterministically (not round-robin), making `select` reproducible under test. **Actors forbidden in `onchain`** (§8.1, §11.1, §12.3): the `actor` keyword, `spawn`, `send`, `send_timeout`, `select`, `timeout(ms)`, `Handle<T>`, `Channel<T>`, `Sender<T>`, `Receiver<T>`, `JoinHandle<T>`, `@supervisor`, `@mailbox`, the `async` function modifier with its `.await` operator, and `extern "C"`/`extern "C" async` FFI are all compile errors inside `onchain` modules. Transitive imports of actor-using native modules through pure-function boundaries remain allowed — the forbid is on *spawning inside onchain*, not on depending on actor-using code. **Deferred to a future amendment:** `init() -> Result<Self, E>`, async `init`, explicit `handle.stop()` / `stop c` intrinsic, `spawn_blocking` intrinsic, multi-actor cycle detection, `ChildSpec<T>` as a language-visible type. No grammar changes. No new keywords (still 40). |
 
 ---
 
 *Working title: Sploosh. Name subject to change.*
-*This spec is a living document. v0.4.2-draft — April 2026.*
+*This spec is a living document. v0.4.3-draft — April 2026.*

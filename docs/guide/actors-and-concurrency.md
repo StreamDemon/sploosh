@@ -24,6 +24,32 @@ actor Counter {
 
 Actors process one message at a time. No data races by construction.
 
+`init` is infallible — its signature returns `Self`, not `Result<Self, E>`, and it cannot be marked `async`.
+
+## Actor Lifecycle
+
+Every actor is always in one of three states:
+
+- **INITIALIZING** -- `spawn` has returned a handle, but `init` is still running. Messages queue in the mailbox and are delivered once the actor is ready.
+- **READY** -- `init` has returned. The actor is processing messages under the one-handler-at-a-time rule.
+- **DEAD** -- The actor has terminated. Its state has been dropped and it will never process another message.
+
+If `init` panics (bounds check, overflow, failed `assert`), the actor transitions `INITIALIZING → DEAD` without ever reaching `READY`. The handle returned by `spawn` may therefore be observationally dead on the very first call: request/reply returns `Err(ActorError::Dead)`, and `send` silently drops. If the actor is supervised, its parent is notified as if a `READY` child had died — init failures count toward `max_restarts`.
+
+Need recoverable initialization? Store the work as an `Option<T>` field and run a handshake message after spawn:
+
+```sploosh
+actor Loader {
+    config: Option<Config>,
+    fn init() -> Self { Loader { config: None } }
+
+    pub fn start(&mut self, path: String) -> Result<(), AppError> {
+        self.config = Some(Config::load(&path)?);
+        Ok(())
+    }
+}
+```
+
 ## Spawning and Handles
 
 ```sploosh
@@ -31,6 +57,8 @@ let counter: Handle<Counter> = spawn Counter::init(0);
 ```
 
 `Handle<T>` implements `Clone` and `Send`. Handles can be stored in structs, passed between actors, and put in collections.
+
+**Handle drops do not kill the actor.** Unlike `Rc<T>` or `Arc<T>`, `Handle<T>` is *not* reference-counted — dropping the last live handle has no effect on the actor's lifetime. Actors terminate only via runtime failure, supervisor termination, or runtime shutdown when `main()` returns. An actor with no live handle and an empty mailbox is *orphaned* and continues running until the runtime shuts down; clean shutdown is the supervisor's job.
 
 ## Message Passing
 
@@ -40,19 +68,35 @@ let counter: Handle<Counter> = spawn Counter::init(0);
 | `&mut self` | `send counter.increment(5)` | Fire-and-forget, non-blocking |
 | `&mut self` | Direct call: `counter.increment(5)` | Request/reply, blocks caller |
 
-## Owned Parameters Only
+**`send` is only valid on `&mut self` methods.** Writing `send counter.get()` on a `&self` method is a compile error — discarding a pure query's reply is never the author's intent.
 
-All `pub` actor method parameters must be owned types. No `&T` or `&mut T` -- messages are async and the caller's stack frame may not exist when processed.
+## Message Ownership Rules
+
+The parameter-reference rule is keyed to the method's receiver:
+
+- **`&mut self` methods** may be invoked via `send`, `send_timeout`, or direct request/reply. Because `send` can outlive the caller's stack frame, every parameter must be an owned type. `&T`, `&mut T`, and any type holding a non-`'static` reference are compile errors.
+- **`&self` methods** are synchronous request/reply only — the caller always blocks until the reply arrives, so the caller's stack frame is guaranteed to outlive the call. `&self` methods **may** take reference parameters.
+- **Private (non-`pub`) methods** are called only during message handling and may use references freely.
 
 ```sploosh
-// CORRECT: owned String
-pub fn log(&mut self, msg: String) { /* ... */ }
+actor Logger {
+    entries: Vec<String>,
+    fn init() -> Self { Logger { entries: Vec::new() } }
 
-// COMPILE ERROR: &str is a reference
-// pub fn log_ref(&mut self, msg: &str) { /* ... */ }
+    // CORRECT: &mut self with owned String
+    pub fn log(&mut self, msg: String) { self.entries.push(msg); }
+
+    // COMPILE ERROR: &mut self must use owned types
+    // pub fn log_ref(&mut self, msg: &str) { /* ... */ }
+
+    // OK: &self methods may take references
+    pub fn count_matching(&self, needle: &str) -> u64 {
+        self.entries.iter()
+            |> filter(|e| e.contains(needle))
+            |> count
+    }
+}
 ```
-
-Private methods can use references freely.
 
 ## Generic Actors
 
@@ -61,9 +105,12 @@ actor Cache<K: Hash + Eq + Send, V: Clone + Send> {
     data: Map<K, V>,
     fn init() -> Self { Cache { data: Map::new() } }
     pub fn set(&mut self, key: K, value: V) { self.data.insert(key, value); }
+    // OK: &self request/reply methods may take references.
     pub fn get(&self, key: &K) -> Option<V> { self.data.get(key).map(|v| v.clone()) }
 }
 ```
+
+Every type parameter on an `actor` declaration must carry `Send`, not only the parameters used in `pub` method signatures. State fields may hold values of any of the parameters, and those fields move across scheduler threads when the actor is rebalanced between cores.
 
 ## Channels
 
@@ -124,7 +171,19 @@ Supervisors monitor child actors and apply a restart strategy when a child fails
 - **one_for_all** -- all children are stopped and restarted when any child fails.
 - **rest_for_one** -- the failed child and all children started after it are restarted.
 
-Each strategy accepts `max_restarts` (maximum restart count) and `window_secs` (the time window in seconds for counting restarts). If `max_restarts` is exceeded within `window_secs`, the supervisor itself fails.
+Each strategy accepts `max_restarts` (maximum restart count) and `window_secs` (the time window in seconds for counting restarts). The window is **sliding** — each restart is tagged with its wall-clock timestamp and the supervisor counts restarts whose timestamps fall within the last `window_secs` seconds. If `max_restarts` is exceeded, the supervisor itself fails.
+
+### Restart Semantics
+
+When a supervisor restarts a child:
+
+1. The failed actor's state is **dropped** (RAII runs any `Drop` impls). Its mailbox is discarded — queued messages are lost.
+2. A **fresh `init`** is run with the arguments the supervisor originally used to spawn the child. The new instance begins in `INITIALIZING` and transitions to `READY` when `init` completes. State is *not* preserved across restart — this matches OTP semantics and avoids resurrecting a corrupted field into a state that caused the crash.
+3. The supervisor's stored handle is replaced. **Any `Handle<T>` cloned out of the supervisor before the crash is permanently dead.** Callers that need to reach the restarted actor must re-fetch the handle from the supervisor — old handles are never transparently redirected.
+
+Init failures count toward `max_restarts`: an actor that dies in `init` is reported to its supervisor exactly as if a `READY` child had died. This prevents infinite restart storms on a bad config.
+
+`rest_for_one` requires children to be tracked in an ordered collection (e.g. `Vec<Handle<T>>`). A supervisor that spawns children dynamically into an unordered structure has no observable "started after" ordering — the compiler issues a warning and `rest_for_one` falls back to `one_for_one` at runtime.
 
 ```sploosh
 @supervisor(strategy: "one_for_one", max_restarts: 5, window_secs: 60)
@@ -154,6 +213,7 @@ Actors die from runtime checks (bounds, overflow, assert). There is no `panic` k
 
 - Dead actor: request/reply returns `Err(ActorError::Dead)`
 - `send` to dead actor: silently drops
+- Blocked sender on a full mailbox wakes immediately with `Err(SendError::Dead)` (for `send_timeout`) or silent drop (for `send`) if the destination dies. Supervisor restart does **not** transparently redirect blocked senders to the new instance.
 - Supervised actors are restarted per strategy
 
 ```sploosh
@@ -163,9 +223,28 @@ match worker.process(data) {
         let worker = spawn Worker::init();
         worker.process(data)?
     }
+    Err(ActorError::SelfCall) => {
+        // A handler called back into its own actor via request/reply — the runtime
+        // catches this direct self-deadlock and returns SelfCall instead of hanging.
+        return Err(AppError::Logic("self-call"));
+    }
     Err(e) => return Err(AppError::from(e)),
 }
 ```
+
+## Re-entrant Calls and Deadlock
+
+An actor holds its mailbox "busy" across a handler's entire execution, including every `.await` point. A request/reply call from a handler back into the same actor therefore deadlocks — the caller is waiting for itself to return before it will process the next message.
+
+**Direct self-calls** (A's handler calls request/reply on `Handle<A>`) are detected by the runtime and return `Err(ActorError::SelfCall)` immediately — no hang. This catches the common accident of writing `self.handle.method(args)` where a local `self.method(args)` was intended.
+
+**Multi-actor cycles** (A → B → A, or longer chains) are **not detected** in v0.4.3. Such chains block until an outer `send_timeout` or user-level timeout fires. Structure actor communication as a DAG or break cycles with fire-and-forget `send`.
+
+**Self-sends are legal.** A handler that wants to re-queue work into its own mailbox should use `send self.handle.method(args)` — the message is processed on the next handler turn after the current one returns. This is the correct pattern for self-scheduling and for splitting long computations.
+
+## Where Actors Can't Run
+
+Actors are an off-chain primitive. The `actor` keyword, the `spawn`, `send`, `send_timeout`, `select`, and `timeout(ms)` intrinsics, and the `Handle<T>`, `Channel<T>`, `Sender<T>`, `Receiver<T>`, and `JoinHandle<T>` types are all compile errors inside `onchain` modules. The `@supervisor` and `@mailbox` attributes are also rejected on items in `onchain` scope. On-chain execution is synchronous, single-threaded, and transactional — there is no runtime scheduler for any of this to run on. See the [on-chain overview](../web3/onchain-overview.md) for details.
 
 ## Next Steps
 

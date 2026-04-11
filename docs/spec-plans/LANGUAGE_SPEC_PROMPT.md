@@ -1,4 +1,4 @@
-# SPLOOSH Quick Reference — LLM System Prompt Edition (v0.4.2)
+# SPLOOSH Quick Reference — LLM System Prompt Edition (v0.4.3)
 
 Sploosh: AI-native language. Rust safety + Elixir concurrency + web3 targeting.
 
@@ -121,9 +121,14 @@ let c: Handle<Counter> = spawn Counter::init(0);
 send c.inc(5);           // fire-and-forget (&mut self)
 let val = c.get();       // request/reply, blocks (&self)
 ```
-`Handle<T>`: Clone + Send. Actor pub params must be **owned types** (no references).
-Dead actor: request/reply → `Err(ActorError::Dead)`. `send` silently drops.
-`select { msg = rx.recv() => handle(msg), _ = timeout(5000) => err() }`
+`Handle<T>`: Clone + Send. `send` valid only on `&mut self` methods; `send` on `&self` is a compile error.
+`&mut self` pub params must be **owned**. `&self` pub params **may take references** (caller blocks, stack outlives call).
+Lifecycle: `INITIALIZING → READY → DEAD`. `init` is infallible and non-async; init panic → DEAD, supervisor notified.
+Handle drop does NOT kill the actor — actors die only via failure, supervisor, or runtime shutdown.
+Direct self request/reply → `Err(ActorError::SelfCall)`. Self-sends (`send self.handle.method(args)`) are legal.
+Dead actor: `send` drops, `send_timeout` → `Err(SendError::Dead)`, request/reply → `Err(ActorError::Dead)`.
+Blocked senders wake immediately on destination death; no transparent redirect after supervisor restart.
+`select { msg = rx.recv() => handle(msg), _ = timeout(5000) => err() }` — arms top-to-bottom deterministic.
 
 ## Channels
 ```sploosh
@@ -137,7 +142,11 @@ let msg = rx.recv()?;                // blocks until available
 - M:N work-stealing scheduler. One thread per core. Lock-free bounded mailboxes.
 - Per-sender FIFO message ordering. Bounded mailbox (default 1024). `@mailbox(capacity: N)`.
 - `spawn async { expr }` for non-actor async tasks. `.await` allowed in actors.
-- Supervision: `@supervisor(strategy: "one_for_one", max_restarts: 5, window_secs: 60)`
+- Actor handler is busy (mailbox locked) across every `.await` — re-entrant self-call → `SelfCall`, multi-actor cycles undetected.
+- Blocking FFI in actor handlers is a compile error. Handler-safe FFI must be `extern "C" async`.
+- Supervision: `@supervisor(strategy: "one_for_one", max_restarts: 5, window_secs: 60)` (sliding window).
+- Restart: fresh `init` with stored args; old handles become permanently dead (no transparent redirect).
+- Actors are native/wasm only. Compile error inside `onchain`: `actor`, `spawn`, `send`, `send_timeout`, `select`, `timeout(ms)`, `Handle<T>`, `Channel<T>`, `Sender<T>`, `Receiver<T>`, `JoinHandle<T>`, `@supervisor`, `@mailbox`, `async fn`/`.await`, `extern "C"`/`extern "C" async`.
 - Runtime starts with `main()`, shuts down when `main()` returns.
 
 ## Async

@@ -12,8 +12,8 @@
 | `@inline` | Hint to inline a function |
 | `@payable` | On-chain: function accepts native tokens |
 | `@reentrant` | On-chain: opt-in to reentrancy (discouraged) |
-| `@supervisor(...)` | Mark an actor as a supervisor |
-| `@mailbox(capacity: N)` | Set actor mailbox capacity (default 1024) |
+| `@supervisor(...)` | Mark an actor as a supervisor. Accepts `strategy`, `max_restarts`, `window_secs` (sliding window). Restart runs a fresh `init` with stored arguments; old handles become permanently dead — see §8.7a of the spec. Compile error inside `onchain`. |
+| `@mailbox(capacity: N)` | Set actor mailbox capacity (default 1024). Mailbox stays locked across `.await` points in handlers (§8.10); full mailbox blocks senders, and blocked senders wake with `Err(SendError::Dead)` if the destination dies (§8.11). Compile error inside `onchain`. |
 | `@overflow(wrapping)` | Opt function into wrapping arithmetic (compile error on-chain) |
 
 ## Derive Macros
