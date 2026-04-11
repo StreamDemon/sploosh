@@ -1,0 +1,54 @@
+docs/spec-plans/LANGUAGE_SPEC_PROMPT.md
+  3712a1ba4df50910 1,124-131,145-149
+docs/migration/from-elixir.md
+  3712a1ba4df50910 28-31
+docs/web3/onchain-overview.md
+  3712a1ba4df50910 34,36,45
+docs/guide/ownership-and-borrowing.md
+  3712a1ba4df50910 109
+docs/guide/actors-and-concurrency.md
+  3712a1ba4df50910 33-35,41-44,46-51,82-84,86-87,89-90,92-98,108,226-230
+docs/guide/async-await.md
+  3712a1ba4df50910 90-93,97-99
+docs/examples/actor-chat-server.md
+  3712a1ba4df50910 75,77-79
+docs/reference/attributes.md
+  3712a1ba4df50910 15-16
+docs/migration/from-rust.md
+  3712a1ba4df50910 37-39
+docs/runbooks/actor-debugging.md
+  3712a1ba4df50910 3,27,29-78,83,88-91,93
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8",
+  "base_commit_sha": "4e592f334ad6879859be12c23c81d9ccc68b6e3b",
+  "prompts": {
+    "3712a1ba4df50910": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "3a3c4f4a-88f2-4684-8ad6-2e4a8c1378b0",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "StreamDemon",
+      "messages": [],
+      "total_additions": 4059,
+      "total_deletions": 3560,
+      "accepted_lines": 595,
+      "overriden_lines": 126
+    },
+    "b71394b686352d29": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d7dd39c9-8e98-4716-ad01-d468db11a837",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "StreamDemon",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 2918,
+      "overriden_lines": 23
+    }
+  }
+}
