@@ -50,7 +50,7 @@ send self.self_handle.as_ref().unwrap().retry(job);
 
 Symptom: actor A and actor B appear healthy but a user-level timeout eventually fires; neither actor processes new mail. Cause: a synchronous call chain A → B → A (or longer) has closed a cycle, and each actor is waiting for the next to return.
 
-The v0.4.3 runtime does **not** detect multi-actor cycles — only direct self-calls surface as `SelfCall`. Resolution:
+The current runtime does **not** detect multi-actor cycles — only direct self-calls surface as `SelfCall`. Resolution:
 
 1. Identify the handler that's blocked. Under a debug build, each handler logs its current request/reply target.
 2. Restructure the call graph as a DAG — one side of the cycle should fetch state proactively and pass it as an argument rather than calling back.

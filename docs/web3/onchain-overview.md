@@ -64,4 +64,14 @@ The following on-chain APIs are **compiler intrinsics**, not regular function ca
 
 The compiler lowers these directly to the target bytecode (EVM/SVM). They cannot be imported, re-exported, or passed as function pointers.
 
-<!-- TODO: Expand with compilation model details once EVM/SVM backends are implemented -->
+## See Also
+
+Detailed semantics for on-chain features are specified in the language
+specification and mirrored across these companion docs:
+
+- §11.1a / [storage-and-state.md](./storage-and-state.md) — storage layout (Solidity-compatible EVM reference, target-pluggable abstraction)
+- §11.3a / [payable-and-reentrancy.md](./payable-and-reentrancy.md) — reentrancy guard mechanism, `@reentrant` scope, distinction from actor `SelfCall`
+- §11.4a / [cross-contract-calls.md](./cross-contract-calls.md) — `extern onchain mod` syntax, `ChainError`, `?` propagation of callee revert
+- §11.7a / [evm-vs-svm.md](./evm-vs-svm.md) — gas model (EVM gas / SVM compute units / native-wasm compile error), OOG unwind
+- §11.5 — events and the `#[indexed]` field marker
+- §13.0 — on-chain compiler intrinsics reference

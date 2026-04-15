@@ -1,4 +1,4 @@
-# SPLOOSH Language Specification v0.4.3-draft
+# SPLOOSH Language Specification v0.4.4-draft
 
 > **AI-Native · Systems-Grade · Web2/Web3 Dual-Target**
 >
@@ -1457,8 +1457,8 @@ shutdown when `main()` returns (§8.11). An actor that is reachable from no live
 handle and has an empty mailbox is said to be **orphaned**; it continues running
 until the runtime shuts down. Orphaned actors are a known tradeoff of the
 non-reference-counted handle model — clean shutdown is the supervisor's job. A
-future amendment may introduce explicit self-termination; v0.4.3 deliberately
-does not.
+future amendment may introduce explicit self-termination; the current
+revision deliberately does not.
 
 **Message ownership rules.** The rule is keyed to the method's receiver:
 
@@ -1829,7 +1829,7 @@ actor Recorder {
 ```
 
 **Multi-actor cycles** (A awaits B, B awaits A; or longer chains) are **not
-detected** by the v0.4.3 runtime. Such cycles block indefinitely until an outer
+detected** by the current runtime. Such cycles block indefinitely until an outer
 `send_timeout` or user-level timeout fires. The language will not silently
 recover: authors must structure actor communication as a DAG, or break the
 cycle with fire-and-forget `send` so that no chain of synchronous waits can
@@ -1962,7 +1962,7 @@ or moved to a separate `spawn async { }` task and communicate results back via
 `send`.
 
 A future revision may introduce an explicit `spawn_blocking async { }`
-intrinsic for offloading ad-hoc blocking work; in v0.4.3, the only way to
+intrinsic for offloading ad-hoc blocking work; currently, the only way to
 invoke blocking code from a handler is via an `extern "C" async` wrapper or by
 forwarding to a non-actor `spawn async` task.
 
@@ -2174,6 +2174,84 @@ inside `onchain`*, not on depending on actor-using code through pure-function
 boundaries. See §8.1 for the actor-side statement of this rule, §12.3 for the
 stdlib restriction surface, and §13.0 for the per-intrinsic context column.
 
+### 11.1a Storage Layout
+
+On-chain contracts expose persistent state via `storage { ... }` blocks and the
+`storage::get` / `storage::set` intrinsics (§13.0). The Sploosh surface is
+target-neutral: fields resolve to opaque persistent locations, and `Map<K, V>`
+keys resolve to derived locations whose concrete layout is determined by the
+target backend. The same contract source compiles to EVM, Solana SBF, or future
+ZK-EVM / alt-VM targets without the storage model leaking into user code. The
+**bytes on chain** differ per target; the Sploosh source does not.
+
+**EVM reference realization.** On the EVM target, Sploosh adopts the Solidity
+storage layout verbatim so that Sploosh contracts can be read from, written
+to, and upgraded alongside Solidity contracts without storage-layout
+surprises. This is a load-bearing design choice: the most common deployment
+pathway for a new on-chain language is coexistence with existing Solidity
+infrastructure, and layout compatibility is what makes that coexistence real.
+
+- **Struct fields.** Fields in a `storage { ... }` block occupy sequential
+  32-byte slots in declaration order, starting at slot `0`. A field that would
+  overflow its remaining same-slot space is promoted to a fresh slot. Within a
+  slot, primitives are right-aligned (low byte at the low address) and packed
+  in declaration order — matching Solidity's packing rules exactly. Example:
+
+  ```sploosh
+  storage {
+      admin: Address,         // slot 0, bytes 0..20 (high 12 bytes zero)
+      paused: bool,           // slot 0, byte 20
+      fee_bps: u16,           // slot 0, bytes 21..23
+      total_supply: u256,     // slot 1 (full slot)
+      balances: Map<Address, u256>,   // slot 2 (map header; entries derived)
+  }
+  ```
+
+- **`Map<K, V>`.** A `Map<K, V>` field occupies one slot as the **map's own
+  slot** `s` (its contents are computed, not stored there). For a given key
+  `k`, the value lives at slot `keccak256(abi.encode(k, s))`, where
+  `abi.encode` is Solidity's ABI encoding of the key type padded to 32 bytes.
+  `Address` keys pad to 32 bytes with 12 leading zero bytes; integer keys are
+  zero-extended big-endian.
+
+- **Nested maps.** For `Map<K1, Map<K2, V>>` with outer slot `s`, the inner
+  map's slot is `keccak256(abi.encode(k1, s))`, and the final value lives at
+  `keccak256(abi.encode(k2, keccak256(abi.encode(k1, s))))`. Deeper nestings
+  recurse identically.
+
+- **Dynamic types.** `Vec<T>` and `String` store their length in their
+  declared slot `s`; the element region begins at `keccak256(s)` and grows
+  contiguously. This matches Solidity's `T[]` and `string` storage encoding.
+
+- **Fixed arrays.** `[T; N]` occupies `ceil(N * size_of::<T>() / 32)` slots
+  inline; they do not use `keccak256` derivation.
+
+- **Storage is per-contract.** Distinct `onchain mod` declarations compile to
+  distinct contracts with independent storage roots. A contract cannot read
+  another contract's raw storage; inter-contract state is accessed only
+  through cross-contract calls (§11.4, §11.4a).
+
+**SVM target divergence.** The Solana target uses a fundamentally different
+persistence model (account-based, with program-chosen account layouts and
+borsh serialization) and does not derive slots via `keccak256`. The Sploosh
+surface — `storage { ... }` declarations, `storage::get` / `storage::set`
+intrinsics, and the `Map<K, V>` field type — remains identical, but the
+concrete SVM layout (account schema, serialization format, rent accounting)
+is deferred to a future amendment targeting Solana deployment. SVM contracts
+authored against `storage` today should expect the final SVM layout to be a
+Sploosh-defined schema over one or more program accounts, not a direct port
+of the EVM slot derivation.
+
+**Determinism and ordering.** All storage operations are deterministic: the
+same sequence of `storage::get` / `storage::set` calls on the same input
+produces the same bytes on chain. Sploosh does not introduce a hidden cache
+or reorder writes; the order of storage effects matches source order within
+each transaction. Costs for `SLOAD` / `SSTORE` on EVM are priced per the
+active hard fork's gas schedule (§11.7a).
+
+See §13.0 for the `storage::get` / `storage::set` intrinsic signatures and
+§11.7a for the gas model that prices these operations.
+
 ### 11.2 The `ctx` Module (On-Chain Context)
 
 All on-chain functions have access to `ctx`, which provides blockchain execution context.
@@ -2202,6 +2280,7 @@ All on-chain functions have access to `ctx`, which provides blockchain execution
 | `ctx::lamports()` | `u64` | SOL sent with the instruction |
 | `ctx::program_id()` | `Address` | This program's address |
 | `ctx::signer()` | `Address` | Transaction signer |
+| `ctx::compute_units_remaining()` | `u64` | Remaining compute units (§11.7a) |
 
 ### 11.3 Payable Functions and Reentrancy
 
@@ -2229,11 +2308,101 @@ onchain mod vault {
 ```
 
 **Reentrancy:** On-chain functions are **non-reentrant by default**. A function
-cannot be called again while it is already executing.
+cannot be called again while it is already executing. See §11.3a for the
+runtime guard mechanism and its distinction from §8.10.1 actor `SelfCall`.
+
+### 11.3a Reentrancy Guard Mechanism
+
+Every `onchain mod` maintains a single **per-contract reentrancy flag** in
+transient runtime state (not persisted across transactions). The flag is
+implemented as a reserved boolean slot in the contract's runtime frame on EVM
+and as an equivalent per-program transient state on SVM.
+
+**Guard semantics:**
+
+- On entry to any `pub` on-chain function that is **not** marked `@reentrant`,
+  the runtime checks the flag. If already set, the call reverts with
+  `ChainError::Reentrancy` (§11.4a) and all state changes in the current call
+  frame are unwound (§11.7a).
+- If the flag is clear, the runtime sets it, executes the function body, and
+  clears it on return — whether the function returns `Ok`, returns `Err`, or
+  reverts. The clear-on-revert rule means a revert inside a guarded function
+  does not leave the guard stuck set; the flag always matches the current
+  call-stack depth into the contract.
+- A function marked `@reentrant` **skips both the check and the set**. The
+  flag is neither consulted nor modified on entry or exit of a `@reentrant`
+  function.
+
+**`@reentrant` scope.** The attribute disables the guard for the marked
+function only. Guarded sibling functions in the same contract continue to
+observe and set the flag. This means a contract can expose a small number of
+opt-in re-entrant entry points (e.g., a view that is safe to call recursively)
+without weakening the guarantees of the rest of its surface.
+
+**Cross-contract interaction.** If contract A's function `foo` (guarded) calls
+contract B, and B calls back into A's function `bar`:
+
+- If `bar` is **not** `@reentrant`, the call reverts with
+  `ChainError::Reentrancy` — A's flag is still set from the outer `foo`.
+- If `bar` **is** `@reentrant`, the call proceeds — the flag is not consulted.
+  Authors who mark `bar` `@reentrant` are responsible for its safety under
+  concurrent invocation of the same contract.
+
+```sploosh
+onchain mod vault {
+    storage {
+        balances: Map<Address, u256>,
+    }
+
+    pub fn withdraw(amount: u256) -> Result<(), VaultError> {
+        // Guarded by default. A callee that calls back into any non-@reentrant
+        // function of this contract reverts with ChainError::Reentrancy.
+        let sender = ctx::caller();
+        let bal = storage::get(&self.balances, sender).unwrap_or(0);
+        if bal < amount { return Err(VaultError::Insufficient); }
+        storage::set(&mut self.balances, sender, bal - amount);
+        chain::call(sender, wallet::on_receive, amount)?; // safe: reentry caught
+        Ok(())
+    }
+
+    @reentrant
+    pub fn peek_balance(who: Address) -> u256 {
+        // Opt-out: callable from a callback without the guard firing.
+        storage::get(&self.balances, who).unwrap_or(0)
+    }
+}
+```
+
+**Gas cost.** The guard adds one SLOAD on entry and one SSTORE on entry and
+exit for every non-`@reentrant` `pub` function on EVM, priced per the active
+hard fork's gas schedule (EIP-2929 and later). Concrete numbers are not
+specified here because warm/cold access pricing and refund rules change per
+hard fork; implementations should consult the active EVM cost table.
+
+**Distinct from actor `SelfCall` (§8.10.1).** The two mechanisms share the
+word "reentrancy" but are different concepts at different layers. Actor
+`SelfCall` is a runtime check in the scheduler that catches an actor handler
+synchronously requesting a reply from its own mailbox — a deadlock condition
+specific to the scheduler. The on-chain guard is a per-contract flag that
+catches a cross-contract callback re-entering a guarded function — a
+vulnerability class specific to the EVM call model. On-chain execution has
+no actor scheduler, and actor execution has no storage slots, so the two
+never overlap.
 
 ### 11.4 Cross-Contract Calls
 
+Call signatures of foreign contracts must be declared at the caller's module
+level via `extern onchain mod` (§11.4a). The `chain::call` intrinsic then
+takes a declared function as its target and enforces argument types at
+compile time. Calls return `Result<T, ChainError>` and `?` propagates a
+callee revert.
+
 ```sploosh
+extern onchain mod token {
+    pub fn balance_of(account: Address) -> Result<u256, TokenError>;
+    pub fn transfer_from(from: Address, to: Address, amount: u256) -> Result<(), TokenError>;
+}
+
 onchain mod lending {
     pub fn borrow(token_addr: Address, amount: u256) -> Result<(), LendError> {
         let sender = ctx::caller();
@@ -2259,15 +2428,175 @@ onchain mod lending {
 }
 ```
 
+### 11.4a Cross-Contract ABI and Call Semantics
+
+Cross-contract calls in Sploosh are **statically typed at the caller** and
+**dynamically dispatched on chain**. The caller declares the callee's public
+interface as a compile-time interface block; the compiler generates argument
+encoding and return decoding stubs; `chain::call` invokes the callee through
+the active target's native call mechanism.
+
+**`extern onchain mod` interface blocks.** A caller that wants to invoke
+functions on another contract declares their signatures at module top level:
+
+```sploosh
+extern onchain mod token {
+    pub fn balance_of(account: Address) -> Result<u256, TokenError>;
+    pub fn transfer(to: Address, amount: u256) -> Result<(), TokenError>;
+}
+```
+
+- The block contains only function *signatures* ending in `;` — no bodies.
+- Signatures use `pub fn` to match how the callee would write its own public
+  interface; the keyword is accepted and ignored at the extern site.
+- Return types are always `Result<T, E>` (on-chain functions are total in the
+  spec sense; see §11.3).
+- Error types referenced in signatures (`TokenError` above) must be in scope
+  on the caller side via `use` or local definition — the caller and callee
+  must agree on the error enum's layout the same way they agree on argument
+  types.
+- `extern onchain mod` blocks are only allowed inside `offchain` code or at
+  the top level of a crate containing `onchain mod` declarations. They are
+  not allowed inside `extern "C"` blocks, inside actor declarations, or
+  nested in function bodies.
+- Declaring an `extern onchain mod` does not deploy, instantiate, or
+  otherwise reference a specific on-chain address. The address is passed to
+  `chain::call` at the call site.
+
+**`chain::call` signature and semantics.** The intrinsic has the signature:
+
+```sploosh
+chain::call<Args, T, E>(target: Address, fn: ExternFn<Args, T, E>, args: Args)
+    -> Result<T, ChainError>
+```
+
+- `target` is the on-chain address of the callee contract.
+- `fn` is the name of a function declared in an in-scope `extern onchain mod`
+  block (e.g., `token::balance_of`).
+- `args` is a single value of the argument tuple type, or the sole argument
+  for a unary function.
+- The return type is `Result<T, ChainError>` — distinct from the callee's
+  own `Result<T, TokenError>`. `?` on the outer `Result` propagates
+  `ChainError` to the caller's surrounding `Result`. If the caller wants to
+  inspect the callee's domain error, it must unwrap `ChainError::Reverted`
+  and decode the revert data (see below).
+
+**Synchronous EVM execution.** On the EVM target, `chain::call` lowers to an
+EVM `CALL` opcode. The caller's execution blocks until the callee returns or
+reverts; all caller-side storage writes made before the call remain in
+journaled state and are unwound only if the **entire transaction** reverts.
+Gas is forwarded per the EVM default (all remaining gas minus the 1/64
+reserve from EIP-150). Explicit per-call `#[gas_limit(N)]` on `chain::call`
+is not yet supported and is deferred to v0.5.0.
+
+**Solidity ABI as the reference encoding.** Argument and return encoding on
+EVM is Solidity's ABI encoding: arguments are tuple-encoded with a
+4-byte selector derived from `keccak256(signature_string)[0..4]`, where
+`signature_string` is built from the Sploosh signature using Solidity
+type names (`address`, `uint256`, `bool`, `bytes`, `string`, etc.). This
+matches Solidity's function selector derivation exactly so that Sploosh
+contracts can call and be called by Solidity contracts without a wrapper
+layer. Encoding is a compiler responsibility; user code never constructs
+calldata manually.
+
+**`ChainError` enum.** The error type returned by `chain::call` is:
+
+```sploosh
+@error
+pub enum ChainError {
+    Reverted { data: Vec<u8> },
+    OutOfGas,
+    Reentrancy,
+    InvalidTarget,
+    DecodingError,
+}
+```
+
+- `Reverted { data }` — the callee reverted. `data` is the callee's revert
+  payload, bounded by the EVM `RETURNDATACOPY` semantics (the callee's final
+  `RETURN` / `REVERT` buffer, capped by the gas available for return-data
+  copy). The buffer is allocated in the caller's current call frame using the
+  same allocation model Solidity uses for revert data; on-chain heap
+  allocation for revert bytes is permitted for this type specifically.
+  Authors who know the callee's error enum can decode `data` via the
+  `@error`-generated decoder on that enum.
+- `OutOfGas` — the callee exhausted its forwarded gas. Unlike `Reverted`,
+  this variant carries no revert data. See §11.7a for transaction-wide OOG
+  semantics.
+- `Reentrancy` — the callee hit its reentrancy guard (§11.3a).
+- `InvalidTarget` — the target address is not a contract, or the target
+  contract has no function matching the called selector.
+- `DecodingError` — the callee returned bytes that do not decode as the
+  declared `T` (callee and caller disagree on the ABI).
+
+**No delegatecall in v0.4.x.** Sploosh does not yet expose the EVM
+`DELEGATECALL` opcode. `chain::call` always uses `CALL` semantics (callee
+executes in its own storage context). A delegate-call intrinsic and its
+storage-layout implications are deferred to v0.5.0.
+
+**SVM target divergence.** Solana's cross-program invocation (CPI) model is
+asynchronous at the VM layer — a program issues an invocation instruction
+that the Solana runtime executes in a nested context. On SVM, `chain::call`
+and `extern onchain mod` still compile, but the compiler lowers to a CPI
+instruction rather than an EVM `CALL`. The user-level surface (synchronous
+`Result<T, ChainError>` return, `?` propagation, argument typing) is
+preserved so that the same Sploosh source can target either chain; the
+on-chain ABI, selector derivation, and account-passing conventions are
+SVM-specific and deferred to the Solana-targeting amendment (see §11.1a
+SVM note).
+
+**Distinct from `extern "C"` (§4.9).** Both `extern "C" { ... }` and
+`extern onchain mod X { ... }` are declaration-only blocks nested under the
+`extern` keyword, but their calling conventions, safety models, and error
+surfaces are entirely different:
+
+| Aspect | `extern "C"` (§4.9) | `extern onchain mod` (§11.4a) |
+|---|---|---|
+| Calling convention | C ABI (platform-specific) | Solidity ABI (EVM) or CPI (SVM) |
+| Transport | In-process function call | On-chain transaction (EVM `CALL` / SVM CPI) |
+| Safety model | Compiler-generated safe wrappers around raw C | Compile-time argument typing + runtime revert |
+| Error surface | `Result<T, FfiError>` | `Result<T, ChainError>` |
+| Allowed in `onchain`? | No (compile error) | Yes, and only declared here or in `offchain` |
+| Allowed in handlers? | Only the `async` form (§8.11a) | N/A — handlers and on-chain never overlap |
+
+Authors must not treat the two as interchangeable despite the syntactic
+resemblance. A misuse — e.g., declaring an `extern "C"` block inside
+`onchain`, or calling an `extern onchain mod` function from an off-chain
+actor handler — is a compile error.
+
 ### 11.5 Events
 
 ```sploosh
 onchain enum Event {
-    Transfer { from: Address, to: Address, amount: u256 },
-    Approval { owner: Address, spender: Address, amount: u256 },
+    Transfer {
+        #[indexed] from: Address,
+        #[indexed] to: Address,
+        amount: u256,
+    },
+    Approval {
+        #[indexed] owner: Address,
+        #[indexed] spender: Address,
+        amount: u256,
+    },
     Deposit { sender: Address, amount: u256 },
 }
 ```
+
+**`#[indexed]` field marker.** On EVM, an event field marked `#[indexed]`
+becomes an indexed topic in the emitted log, allowing off-chain indexers to
+filter by that field cheaply. Unmarked fields are packed into the event's
+data region.
+
+- EVM allows up to **three** `#[indexed]` fields per event variant (topics
+  1, 2, 3; topic 0 is reserved for the event signature hash). A variant with
+  more than three `#[indexed]` fields on EVM is a compile error.
+- On SVM, `#[indexed]` is accepted for source-compatibility but is a no-op
+  at the Solana log record level — Solana programs emit a single data buffer
+  per log entry. Off-chain indexers for SVM contracts must parse the full
+  event payload.
+- The marker is valid only on fields of variants inside an `onchain enum`
+  declaration used with `emit`. Applying `#[indexed]` elsewhere is a compile
+  error.
 
 ### 11.6 Off-Chain Calling On-Chain
 
@@ -2288,6 +2617,76 @@ sploosh build --target evm           # on-chain → EVM bytecode
 sploosh build --target svm           # on-chain → Solana SBF
 ```
 
+### 11.7a Gas Model
+
+On-chain execution is metered. Every instruction executed on chain consumes
+a resource — **gas** on EVM, **compute units** on SVM — that is bounded per
+transaction and paid for by the transaction submitter. Sploosh exposes this
+resource as a first-class concept in the type system (intrinsics and
+attributes that are compile errors off-chain) but **does not redefine the
+cost model of any target**. The authoritative cost tables are the ones
+maintained by the host chains.
+
+**EVM: gas.** On the EVM target:
+
+- `ctx::gas_remaining() -> u256` returns the remaining gas at the point of
+  the call. Available only inside `onchain` modules compiled for EVM; a
+  compile error on SVM, native, and wasm targets.
+- `#[gas_limit(N)]` on a `pub fn` is an **advisory** annotation surfaced in
+  the deployed contract's ABI metadata; it does not itself cap execution at
+  runtime. Runtime OOG is produced by the EVM, not by this annotation. The
+  annotation is EVM-only — a compile error on SVM, native, and wasm.
+- Opcode costs are those of the EVM Yellow Paper as amended by the active
+  hard fork's EIPs (EIP-2929 warm/cold access pricing, EIP-3529 refund
+  rules, EIP-1559 base fees, and later). Sploosh does not duplicate these
+  tables in this specification; implementations consult the active EVM cost
+  table at compile time and at execution time.
+
+**SVM: compute units.** On the Solana target:
+
+- `ctx::compute_units_remaining() -> u64` returns the remaining compute
+  units. Available only inside `onchain` modules compiled for SVM; a compile
+  error on EVM, native, and wasm targets.
+- `#[gas_limit(N)]` is a compile error on SVM. Solana bounds compute via the
+  runtime's compute budget instruction rather than a per-function directive;
+  compute-budget configuration is deferred to the SVM-targeting amendment.
+- Compute-unit costs are those of the Solana runtime as documented by the
+  Solana Labs runtime version active on the target cluster.
+
+**Native and wasm targets.** `ctx::gas_remaining`, `ctx::compute_units_remaining`,
+and `#[gas_limit]` are all compile errors on native and wasm. Gas is an
+on-chain-only concept; off-chain Sploosh code does not observe a metering
+abstraction through these names. Authors who want generic metering off-chain
+should build it at the application layer.
+
+**Out-of-gas semantics.** On EVM, when execution exhausts the gas budget
+mid-transaction, the EVM reverts the transaction. In Sploosh terms:
+
+- All storage mutations made since the start of the transaction roll back.
+  `storage::set` calls are journaled; on revert, the journal is discarded.
+- All emitted events (`emit ...`) since transaction start are discarded.
+- Any cross-contract call that was in progress when the enclosing frame ran
+  out of gas returns `ChainError::OutOfGas` to its caller — provided the
+  caller has enough remaining gas to handle the error surface.
+- **Revert unwind is transaction-wide and is unaffected by per-function
+  attributes.** `@payable`, `@reentrant`, `@inline`, and other function
+  attributes do not alter revert semantics; a `@reentrant` function that is
+  mid-execution when an outer OOG fires has its state unwound just like any
+  other function's state.
+
+On SVM, compute-unit exhaustion aborts the current top-level instruction,
+and state changes made by that instruction (and by any CPI it issued) are
+not committed. The same principles apply: revert unwind is atomic at the
+transaction (or top-level instruction) boundary, and no per-function
+attribute changes that.
+
+**Interaction with the reentrancy guard.** The reentrancy flag (§11.3a) is
+held in transient state and is unwound on revert along with storage. A
+function whose outer call runs out of gas therefore does not leave the
+contract's reentrancy flag stuck set: the unwind clears it. The same is true
+for a callee that panics — unwind is driven by transaction outcome, not by
+function-level attributes.
+
 ---
 
 ## 12. Attributes & Compiler Directives
@@ -2301,7 +2700,7 @@ sploosh build --target svm           # on-chain → Solana SBF
 | `@error` | Auto-generate `From`, `Display`, `Error` for error enums |
 | `@inline` | Hint to inline a function |
 | `@payable` | On-chain: function accepts native tokens |
-| `@reentrant` | On-chain: opt-in to reentrancy (discouraged) |
+| `@reentrant` | On-chain: opt-in to reentrancy; disables the §11.3a guard for this function only. Does not alter guard state observed by other functions in the same contract. |
 | `@supervisor(...)` | Mark an actor as a supervisor |
 | `@mailbox(capacity: N)` | Set actor mailbox capacity (default: 1024) |
 | `@overflow(wrapping)` | Opt function into wrapping arithmetic (compile error on-chain) |
@@ -2371,10 +2770,21 @@ All derive macros work on structs and enums with mixed variant types.
 ```sploosh
 #[target(evm)]         // Compile only for EVM target
 #[target(native)]      // Compile only for native target
-#[gas_limit(50000)]    // On-chain gas budget
+#[gas_limit(50000)]    // On-chain gas budget (EVM only; advisory)
+#[indexed]             // Event field marker (EVM topic slot)
 #[cfg(test)]           // Include only in test builds
 #[cfg(debug)]          // Include only in debug builds
 ```
+
+**`#[gas_limit(N)]` scope.** The directive is EVM-only and advisory: it
+surfaces in the deployed contract's ABI metadata but does not itself cap
+runtime execution (runtime OOG is produced by the EVM). Applying
+`#[gas_limit]` on SVM, native, or wasm targets is a compile error. See §11.7a.
+
+**`#[indexed]` scope.** The directive marks an event variant's field as an
+indexed topic on EVM (up to three per variant; §11.5). It is a compile error
+outside event variant fields. On SVM, `#[indexed]` is accepted for
+source-compatibility but has no runtime effect.
 
 **Available `cfg` flags:**
 
@@ -2501,14 +2911,15 @@ user-defined.
 | `ctx::timestamp()` | `u256` | onchain | Block timestamp |
 | `ctx::block_number()` | `u256` | onchain | Block number |
 | `ctx::value()` | `u256` | onchain, EVM, @payable | ETH sent (wei) |
-| `ctx::gas_remaining()` | `u256` | onchain, EVM | Remaining gas |
+| `ctx::gas_remaining()` | `u256` | onchain, EVM only (compile error elsewhere; §11.7a) | Remaining gas |
 | `ctx::chain_id()` | `u256` | onchain, EVM | Chain ID |
 | `ctx::lamports()` | `u64` | onchain, SVM | SOL sent |
 | `ctx::program_id()` | `Address` | onchain, SVM | Program address |
 | `ctx::signer()` | `Address` | onchain, SVM | Transaction signer |
-| `storage::get(field, key)` | Varies | onchain | Read persistent state |
-| `storage::set(field, key, val)` | `()` | onchain | Write persistent state |
-| `chain::call(addr, fn, args)` | `Result<T, E>` | onchain | Cross-contract call |
+| `ctx::compute_units_remaining()` | `u64` | onchain, SVM only (compile error elsewhere; §11.7a) | Remaining compute units |
+| `storage::get(field, key)` | Varies | onchain (§11.1a for layout) | Read persistent state |
+| `storage::set(field, key, val)` | `()` | onchain (§11.1a for layout) | Write persistent state |
+| `chain::call(addr, fn, args)` | `Result<T, ChainError>` | onchain (§11.4a for ABI) | Cross-contract call |
 
 **Math intrinsics:**
 
@@ -2771,8 +3182,9 @@ onchain_mod    = "onchain" "mod" IDENT "{" { onchain_item } "}" ;
 onchain_item   = storage_block | fn_def | event_def ;
 storage_block  = "storage" "{" fields "}" ;
 
-extern_block   = "extern" STRING_LIT "{" { extern_fn } "}" ;
-extern_fn      = "fn" IDENT "(" params ")" [ "->" type ] ";" ;
+extern_block   = "extern" extern_target "{" { extern_fn } "}" ;
+extern_target  = STRING_LIT | "onchain" "mod" IDENT ;
+extern_fn      = [ "pub" ] "fn" IDENT "(" params ")" [ "->" type ] ";" ;
 
 type           = prim_type | IDENT [ generics ] | "&" [ lifetime ] [ "mut" ] type
                | "[" type ";" expr "]" | "[" type "]"
@@ -3039,9 +3451,10 @@ Source (.sp)
 | v0.4.0 | **Runtime Specification** (§8.10-8.11): M:N work-stealing scheduler, bounded lock-free mailboxes with backpressure, per-sender FIFO ordering, async-actor integration, runtime lifecycle. **Type System**: `u256`/`Address` primitives (§3.1), `Box<T>` heap allocation (§4.4), `Channel<T>`/`Sender<T>`/`Receiver<T>` (§3.2, §8.5), `Drop` trait (§3.10), associated types in traits (§3.5), standard traits catalog — 30+ traits formally defined (§3.10), `as` numeric casting (§3.11). **Safety**: checked arithmetic everywhere (§4.8), `@overflow(wrapping)` opt-out, `wrapping_*`/`saturating_*`/`checked_*` methods on all integer types. **Ownership**: lifetime elision — single-source rule (§4.5), `Box<T>` with RAII drop semantics, no `Rc<T>`/`Arc<T>`. **FFI**: `extern "C"` with safe wrappers, no `unsafe` keyword, no raw pointers (§4.9). **Concurrency**: typed bounded channels (§8.5), `select` formalized (§8.6), `spawn async {}` for non-actor tasks (§8.9), three supervision strategies (§8.7), `@mailbox(capacity)` attribute, `send_timeout` intrinsic. **Modules**: file resolution rules (§10.4), `pub use` re-exports, trait coherence/orphan rules (§10.5). **Compiler intrinsics catalog** (§13.0): all 25+ intrinsics formally specified with signatures and contexts. **Grammar**: `as` cast, `select_expr`, `spawn async`, `emit_stmt`, `extern_block`, associated `type` in traits/impls, `type_suffix` with `u256`. Keywords 38→40 (`as`, `extern`). |
 | v0.4.1 | **std::math module** (§4.10, `stdlib/math.md`): comprehensive IEEE 754 surface on `f32`/`f64` as method-syntax compiler intrinsics that lower directly to LLVM intrinsics (`llvm.sin`, `llvm.sqrt`, `llvm.fma`, `llvm.sincos`, `llvm.pow`, `llvm.log`, etc.), unlocking constant folding, auto-vectorization, and sin+cos fusion. Method categories: classification, sign, rounding, min/max/clamp, power/root (`sqrt`, `cbrt`, `powi`, `powf`, `hypot`, `recip`), exp/log (`exp`, `exp2`, `exp_m1`, `ln`, `ln_1p`, `log2`, `log10`), trig (`sin`, `cos`, `tan`, inverses, `atan2`, `sin_cos`), hyperbolic, `mul_add` (correctly rounded FMA), `to_degrees`/`to_radians`. Constants as associated consts: `f64::PI`, `f64::TAU`, `f64::E`, `f64::EPSILON`, `f64::INFINITY`, `f64::NAN`, etc. **Integer math methods** (§4.10) on all integer types: `abs`, `min`, `max`, `clamp`, `pow` (checked), `isqrt`, `ilog2`, `ilog10`, `count_ones`, `count_zeros`, `leading_zeros`, `trailing_zeros`, `rotate_left`, `rotate_right`, `swap_bytes`. **`@fast_math(flags)` attribute** (§12.1): granular LLVM fast-math flags — `contract`, `afn`, `reassoc`, `arcp`, `nnan`, `ninf`, `nsz`; bare `@fast_math` defaults to the safe subset `contract + afn`; per-function scope, not inherited. **On-chain restriction** (§12.3, §4.10): floating-point math methods and `@fast_math` are compile errors inside `onchain` modules — only integer math is available, for bit-level determinism across LLVM versions and platforms. **§13.0 Compiler Intrinsics**: new Math intrinsics and Integer math intrinsics tables with LLVM lowering targets. No grammar changes — method call and attribute syntax already in §16. Keyword count unchanged (40). |
 | v0.4.2 | **Lexical foundation** (new §2.6 Literals, new §2.7 Identifiers): formal prose and grammar for numeric literal formats (decimal, hex `0x`, octal `0o`, binary `0b`, underscore digit separators, exponent notation, type suffixes), string literals with a complete escape sequence table (`\n`, `\r`, `\t`, `\\`, `\"`, `\'`, `\0`, `\xNN` for ASCII, `\u{H...}` for Unicode scalar values, plus `\<newline>` line continuation), character literals (single-quoted Unicode scalar values, surrogates rejected), and identifier grammar (ASCII `[A-Za-z_][A-Za-z0-9_]*`, keyword priority, `_` as wildcard binding, `_name` allowed for intentionally-unused bindings). **Literal overflow is now a compile error** — integer literals that do not fit their declared or inferred type are rejected at parse time. **Float-to-int cast edge cases** (§3.11): NaN → 0, +∞ → target `MAX`, −∞ → target `MIN` (signed) or 0 (unsigned), matching WebAssembly `trunc_sat` semantics. No more undefined behavior on exotic float values. **Address representation** (§3.1): clarified as always 32 bytes big-endian in memory on every target; EVM serialization left-pads the low 20 bytes with 12 zero high bytes (Solidity-compatible); non-zero high bytes are rejected at EVM serialization time; SVM uses the full 32 bytes unchanged. **§16 Grammar completeness**: new §16.1 Lexical Productions block with formal EBNF for `IDENT`, `INT_LIT`, `FLOAT_LIT`, `STRING_LIT`, `CHAR_LIT`, `lifetime`, `escape`, and digit classes. Previously-undefined non-terminals now defined in §16: `path_expr`, `path`, `args`, `types`, `patterns`, `field_pats`, `field_pat`, `field_inits`, `field_init`, `idents`, `fn_sig`, `field_def`, `event_def`, `attr_args`, `attr_arg`, `dir_args`, `prim_type`, `type_alias`, `trait_ref`, `BINOP`, `UNOP`. Case normalization: `EXPR` → `expr` in the array type production. No feature changes — this is a completeness pass unblocking tokenizer and parser implementation. No new keywords (still 40). |
+| v0.4.4 | **On-chain semantics — Cluster C** (§11): closes the four design-heavy gaps that prevented EVM/SVM codegen from starting. **Storage layout** (new §11.1a): target-pluggable abstraction with Solidity-compatible EVM reference realization — sequential `u256` slots in declaration order, Solidity-rule packing within slots, `Map<K, V>` entries at `keccak256(abi.encode(key, map_slot))`, nested maps recurse, `Vec<T>` / `String` with length at slot and data at `keccak256(slot)`, `[T; N]` inline. SVM layout deferred to a future Solana amendment; Sploosh surface stays identical across targets. **Reentrancy guard mechanism** (new §11.3a): runtime per-contract boolean flag set on entry to any non-`@reentrant` `pub` on-chain function and cleared on return (success, error, or revert). Cross-contract re-entry into a guarded function reverts with new error `ChainError::Reentrancy`; `@reentrant` disables the check and the set for that function only. Gas cost is qualitative (one SLOAD + one SSTORE per guarded call on EVM, priced per active hard fork). Explicitly distinguished from §8.10.1 actor `SelfCall` — same word, different layers. **Cross-contract ABI and call semantics** (new §11.4a): new surface syntax `extern onchain mod X { pub fn ...; ... }` declares callee signatures at compile time; `chain::call(addr, fn, args) -> Result<T, ChainError>` blocks synchronously on EVM (lowers to `CALL`), Solidity ABI is the reference argument encoding on EVM, `?` propagates `ChainError::Reverted { data: Vec<u8> }` with revert bytes bounded by `RETURNDATACOPY` semantics. New error enum `ChainError { Reverted, OutOfGas, Reentrancy, InvalidTarget, DecodingError }` added to the on-chain error surface. No delegatecall in v0.4.x (deferred to v0.5.0). SVM divergence via Solana CPI with preserved user-level surface; concrete ABI deferred. **Explicit contrast with `extern "C"` (§4.9)**: both nest under `extern`, but calling conventions, safety models, and error surfaces differ — not interchangeable. **Gas model** (new §11.7a): target-pluggable metering abstraction. EVM references Yellow Paper + active-hard-fork EIP cost tables (Sploosh does not redefine opcode costs); `ctx::gas_remaining() -> u256` EVM-only, `#[gas_limit(N)]` EVM-only advisory in deployed ABI metadata. SVM uses compute units; `ctx::compute_units_remaining() -> u64` SVM-only. All three are compile errors on native and wasm. **Out-of-gas semantics**: transaction-wide revert, all storage mutations and emitted events unwound, and revert is **unaffected by per-function attributes including `@reentrant`** (explicit invariant). Transient-state unwind clears the reentrancy flag on revert, so failed calls cannot leave a contract with its guard stuck set. **`#[indexed]` event field marker** (§11.5, §12.3): up to three indexed fields per event variant on EVM (topic slots 1–3; topic 0 is the signature hash); compile error on more. SVM accepts `#[indexed]` for source-compatibility but treats it as a no-op. **§13.0 intrinsics table**: `ctx::gas_remaining` context column tightened to EVM-only, new row for `ctx::compute_units_remaining` (SVM-only), `chain::call` signature updated to `Result<T, ChainError>`, `storage::*` rows reference §11.1a, `chain::call` row references §11.4a. **§16 grammar**: `extern_block` production extended — `extern_target = STRING_LIT | "onchain" "mod" IDENT` — and `extern_fn` allows optional `pub`. No new keywords (still 40). No new item kinds; `extern onchain mod` is an extern-block variant. **Deferred to v0.5.0**: cross-contract ABI emission artifacts (bytecode + ABI JSON + metadata file), WASM target variants (`wasm32-unknown-unknown` vs `wasm32-wasi`), delegatecall support, SVM storage layout details, SVM CPI concrete ABI, per-call gas forwarding annotation. |
 | v0.4.3 | **Actor lifecycle states** (new §8.1a): explicit `INITIALIZING → READY → DEAD` state machine. `fn init(args) -> Self` is **infallible by signature and non-async** — writing `async fn init` is a compile error, and `init` panic transitions directly to `DEAD`. Messages sent to an INITIALIZING actor queue in the mailbox and are delivered once `init` returns; there is a happens-before edge from `init` completion to the first handler dispatch, so handlers never observe partially-constructed state. Handles returned by `spawn` may be immediately dead if `init` panics — first call observes `Err(ActorError::Dead)` or silent drop. **Message ownership rule rewritten by receiver type** (§8.2): `&mut self` methods (which may be invoked via `send`) must use owned parameters; `&self` methods (request/reply only — caller always blocks, stack always outlives the call) **may** take reference parameters. The rule now explicitly rejects `send handle.method()` on an `&self` method as a compile error. Resolves the previous §8.2/§8.3 contradiction on `Cache::get(&self, key: &K)`. Private (non-`pub`) actor methods retain their existing "references freely allowed" rule. **Handle drop semantics** (§8.2): dropping a `Handle<T>` — including the last live handle — has **no effect on actor lifetime**. Actors terminate only via runtime failure, supervisor termination, or runtime shutdown. Orphaned actors (no live handle, empty mailbox) are a known tradeoff of the non-reference-counted handle model; explicit self-termination is deferred. **Generic actor `Send` bounds** (§8.3): all type parameters on an `actor` declaration must carry `Send`, not only those used in `pub` method signatures. **Supervisor restart semantics** (new §8.7a): restart always runs a fresh `init` with the supervisor's stored construction arguments — no state preservation across restart; old `Handle<T>` values become permanently dead and are not transparently redirected to the restarted instance (callers re-fetch from the supervisor); queued mailbox messages are discarded; init failures count toward `max_restarts`; `rest_for_one` requires children in an ordered collection, with a compile-time warning and `one_for_one` fallback if dynamic. **Supervisor restart window is sliding** (§8.7): `window_secs` is a wall-clock sliding window over each restart's timestamp, not a fixed window with reset boundaries. **Mailbox-full + actor-dies race** (§8.11): blocked senders wake immediately on destination death; `send` drops silently, `send_timeout` returns new variant `SendError::Dead` (added to §8.5 `SendError`), request/reply returns `Err(ActorError::Dead)`. Wake order unspecified. Supervisor restart does not redirect blocked senders. **Re-entrant call detection** (new §8.10.1): direct self-calls (A → A via request/reply on own handle) return new variant `ActorError::SelfCall` immediately via an O(1) runtime check — variant added to the `ActorError` enum in §8.8. Multi-actor cycles (A → B → A) are documented as a hazard but not detected in v0.4.3. Fire-and-forget self-sends (`send self.handle.method(args)`) are legal and are the correct self-scheduling pattern. Cross-references §11.3 on-chain reentrancy as a distinct mechanism. **Blocking operations in handlers** (new §8.11a): actor handlers run in an async context; the stdlib is already async-only, so no new forbid is needed there. **FFI:** calling a synchronous `extern "C"` function from inside a handler (directly or transitively) is a compile error. Handler-safe FFI must be declared `extern "C" async` (§4.9) — the compiler emits an awaitable wrapper that offloads to the runtime's blocking pool. `spawn_blocking` intrinsic deferred. **Select arm fairness** (§8.6): arms are checked top-to-bottom deterministically (not round-robin), making `select` reproducible under test. **Actors forbidden in `onchain`** (§8.1, §11.1, §12.3): the `actor` keyword, `spawn`, `send`, `send_timeout`, `select`, `timeout(ms)`, `Handle<T>`, `Channel<T>`, `Sender<T>`, `Receiver<T>`, `JoinHandle<T>`, `@supervisor`, `@mailbox`, the `async` function modifier with its `.await` operator, and `extern "C"`/`extern "C" async` FFI are all compile errors inside `onchain` modules. Transitive imports of actor-using native modules through pure-function boundaries remain allowed — the forbid is on *spawning inside onchain*, not on depending on actor-using code. **Deferred to a future amendment:** `init() -> Result<Self, E>`, async `init`, explicit `handle.stop()` / `stop c` intrinsic, `spawn_blocking` intrinsic, multi-actor cycle detection, `ChildSpec<T>` as a language-visible type. No grammar changes. No new keywords (still 40). |
 
 ---
 
 *Working title: Sploosh. Name subject to change.*
-*This spec is a living document. v0.4.3-draft — April 2026.*
+*This spec is a living document. v0.4.4-draft — April 2026.*
