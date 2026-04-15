@@ -89,11 +89,16 @@ call back into A's function `bar`:
 
 ## Gas Cost
 
-The guard adds one `SLOAD` on entry and one `SSTORE` on entry and exit for
-every non-`@reentrant` `pub` function on EVM, priced per the active hard
-fork's gas schedule (EIP-2929 warm/cold access pricing, EIP-3529 refund
-rules, and later). Exact costs vary by hard fork; the overhead is small
-compared with most real-world contract logic but not free.
+The guard is backed by transient execution state (see the "transient runtime
+state" note above), not persistent storage. On EVM, it lowers to **transient
+storage** — `TLOAD` / `TSTORE` (EIP-1153) on Cancun and later hard forks —
+adding one `TLOAD` on entry plus one `TSTORE` on entry and exit of every
+non-`@reentrant` `pub` function, priced per the active hard fork's gas
+schedule. Pre-1153 forks are not supported target environments: §11.3a
+requires the mechanism to be unwound automatically on transaction revert,
+which transient storage provides natively. Exact costs vary by hard fork;
+the overhead is small compared with most real-world contract logic but not
+free.
 
 ## Distinct from Actor SelfCall
 

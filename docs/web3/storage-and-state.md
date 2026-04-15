@@ -73,9 +73,14 @@ at:
 slot = keccak256(abi.encode(k, s))
 ```
 
-where `abi.encode` is Solidity's ABI encoding of the key type, padded to 32
-bytes. `Address` keys pad to 32 bytes with 12 leading zero bytes; integer
-keys are zero-extended big-endian.
+where `abi.encode` is Solidity's ABI encoding of the key — for value-type
+keys (integers, `Address`, `bool`, fixed-size byte arrays) this is the key
+padded to 32 bytes. `Address` keys pad with 12 leading zero bytes (low-order
+20 bytes hold the address, matching §3.1); integer keys are zero-extended
+big-endian. Dynamic-length keys (`bytes` / `String`) follow Solidity's rule
+that hashes the raw key bytes concatenated with the slot, not an `abi.encode`
+padded form; Sploosh `Map` keys are value-typed in v0.4.4, so only the
+padded form is emitted.
 
 ### Nested maps
 
@@ -86,9 +91,15 @@ apply the same rule.
 
 ### Dynamic types
 
-`Vec<T>` and `String` store their **length** in their declared slot `s`; the
-element region begins at `keccak256(s)` and grows contiguously. This matches
-Solidity's `T[]` and `string` encoding.
+`Vec<T>` stores its **length** in its declared slot `s`; the element region
+begins at `keccak256(s)` and grows contiguously, matching Solidity's `T[]`
+encoding.
+
+`String` follows Solidity's `bytes` / `string` storage rules: short values
+(payload length ≤ 31 bytes) are inlined in slot `s` — the low byte of the
+slot carries `length * 2` and the high 31 bytes carry the payload, padded
+right with zeros — while long values store `length * 2 + 1` in slot `s` and
+the payload at `keccak256(s)`.
 
 ### Fixed arrays
 

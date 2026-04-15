@@ -167,7 +167,7 @@ onchain mod token {
         if bal < amt { return Err(TokenError::InsufficientBalance); }
         storage::set(&mut self.balances, sender, bal - amt);
         storage::set(&mut self.balances, to, storage::get(&self.balances, to)? + amt);
-        emit Transfer { #[indexed] from: sender, #[indexed] to, amt };
+        emit Transfer { from: sender, to, amt };
         Ok(())
     }
 }
@@ -177,7 +177,7 @@ EVM: `ctx::value()` (requires `@payable`), `ctx::gas_remaining()`, `ctx::chain_i
 SVM: `ctx::lamports()`, `ctx::program_id()`, `ctx::signer()`, `ctx::compute_units_remaining()`.
 Non-reentrant by default. `onchain` cannot use: `std::fs`, `std::net`, `std::io`, `std::db`, `std::web`, `std::env`. `onchain` cannot call `f32`/`f64` math methods or use `@fast_math` (see Math section).
 
-**Storage layout (§11.1a).** Target-pluggable; EVM adopts Solidity-compatible slots verbatim. Struct fields: sequential `u256` slots from 0 in declaration order, same-slot primitives right-aligned and packed (matches Solidity). `Map<K,V>` value at `keccak256(abi.encode(key, map_slot))`; nested maps recurse. `Vec<T>`/`String`: length at slot `s`, data at `keccak256(s)`. `[T; N]` inline. SVM uses account-based storage; layout deferred to Solana amendment.
+**Storage layout (§11.1a).** Target-pluggable; EVM adopts Solidity-compatible slots verbatim. Struct fields: sequential `u256` slots from 0 in declaration order, same-slot primitives right-aligned and packed (matches Solidity). `Map<K,V>` value at `keccak256(abi.encode(key, map_slot))` for value-type keys; nested maps recurse. `Vec<T>`: length at slot `s`, data at `keccak256(s)`. `String`: follows Solidity `bytes`/`string` (≤31-byte payloads inlined in slot `s`; longer payloads store data at `keccak256(s)`). `[T; N]` inline. SVM uses account-based storage; layout deferred to Solana amendment.
 
 **Reentrancy guard (§11.3a).** Runtime per-contract bool flag. Set on entry to any non-`@reentrant` `pub` on-chain function; cleared on return (Ok, Err, or revert). Cross-contract callback into a guarded function → `ChainError::Reentrancy` (revert). `@reentrant` disables check+set for that function only. Distinct from §8.10.1 actor `SelfCall` — same word, different layer.
 
@@ -186,7 +186,7 @@ Non-reentrant by default. `onchain` cannot use: `std::fs`, `std::net`, `std::io`
 extern onchain mod token {
     pub fn balance_of(account: Address) -> Result<u256, TokenError>;
 }
-let bal = chain::call(addr, token::balance_of, user)?;  // Result<T, ChainError>
+let bal = chain::call(addr, token::balance_of, user)?;  // bal: u256; chain::call returns Result<T, ChainError> and `?` unwraps T
 ```
 Sync on EVM (lowers to `CALL`). Solidity ABI for argument/return encoding. `?` propagates `ChainError::Reverted { data: Vec<u8> }` (revert data bounded by `RETURNDATACOPY`, allocated in caller's frame — same as Solidity). `ChainError = { Reverted, OutOfGas, Reentrancy, InvalidTarget, DecodingError }`. No delegatecall in v0.4.x. SVM: CPI lowering, concrete ABI deferred. **Distinct from `extern "C"` (§4.9)** — different calling convention, safety model, and error surface; not interchangeable.
 

@@ -15,7 +15,8 @@ onchain mod token {
     // Storage layout on EVM: sequential slots from 0 in declaration order
     // (§11.1a). `balances` occupies slot 0 as a Map header; its entries
     // live at keccak256(abi.encode(key, 0)). `total_supply` is slot 1.
-    // `owner` is slot 2 (right-padded to 32 bytes). Layout matches Solidity
+    // `owner` is slot 2 (left-padded with 12 zero high bytes; the low-order
+    // 20 bytes hold the address, per §3.1). Layout matches Solidity
     // verbatim, so a Solidity indexer or proxy can read this storage.
     storage {
         balances: Map<Address, u256>,

@@ -2,11 +2,17 @@
 
 > Catalog of compiler error codes with explanations and suggested fixes.
 
-This page collects compiler-emitted errors with stable codes and specification
-cross-references. Error codes follow the pattern `E<NNNN>` and are assigned in
-blocks by topic; the full catalog will grow as the compiler lands.
-Runtime-emitted errors (e.g., variants of `ChainError` and `ActorError`) are
-listed in their respective spec sections.
+This page is the stable registry of Sploosh diagnostic codes, covering
+**both** compile-time errors emitted by the compiler **and** runtime reverts
+emitted by the VM / actor runtime (e.g., variants of `ChainError` and
+`ActorError`). Codes follow the pattern `E<NNNN>` and are assigned in
+blocks by topic; the full catalog will grow as the compiler lands. The
+`Kind` column distinguishes compile errors (raised at build time, no
+deployed artifact) from runtime reverts (raised during transaction
+execution). Runtime-revert entries mirror variants defined in their spec
+sections (§8.7, §11.3a, §11.4a, §11.7a); the variant semantics are
+specified there, but this page is the canonical source of its stable code
+number.
 
 ## On-chain (Cluster C, v0.4.4) — E1101–E1199
 
