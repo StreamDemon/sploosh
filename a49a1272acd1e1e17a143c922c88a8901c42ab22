@@ -1,0 +1,79 @@
+docs/web3/storage-and-state.md
+  905078945e826901 3-4,25-131
+docs/web3/ctx-api.md
+  905078945e826901 19,29,48,50-51,53-58,60-63
+docs/web3/events.md
+  905078945e826901 9-18,29-32,34-66
+docs/examples/token-contract.md
+  905078945e826901 15-19,26-27,46-52,62-64
+docs/web3/cross-contract-calls.md
+  905078945e826901 3-4,6,8-28,38,40,50-64,66-121,123-124,126,128-131
+docs/reference/keywords.md
+  905078945e826901 19
+docs/web3/evm-vs-svm.md
+  905078945e826901 43-87
+docs/reference/compiler-errors.md
+  905078945e826901 5-9,11-27
+docs/stdlib/chain.md
+  905078945e826901 3,7-11,15-31,34,36-44,46-77,79-81
+docs/migration/from-solidity.md
+  905078945e826901 10-11,15,17-19,22-24,29,33-55
+docs/web3/payable-and-reentrancy.md
+  905078945e826901 3-4,23-26,28,32-34,37-78,80-102,104-119
+docs/reference/attributes.md
+  905078945e826901 14,18,38-39,44,49-53
+docs/runbooks/actor-debugging.md
+  905078945e826901 53
+docs/web3/onchain-overview.md
+  905078945e826901 67,69-70,72-77
+docs/migration/from-rust.md
+  905078945e826901 37
+docs/spec-plans/LANGUAGE_SPEC_PROMPT.md
+  905078945e826901 1,177,180,182,184,195
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8",
+  "base_commit_sha": "a49a1272acd1e1e17a143c922c88a8901c42ab22",
+  "prompts": {
+    "3712a1ba4df50910": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "3a3c4f4a-88f2-4684-8ad6-2e4a8c1378b0",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "StreamDemon",
+      "messages": [],
+      "total_additions": 890,
+      "total_deletions": 890,
+      "accepted_lines": 1289,
+      "overriden_lines": 77
+    },
+    "905078945e826901": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e4bd6ca4-dc28-4ede-bda5-eaf8cdeaf37f",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "StreamDemon",
+      "messages": [],
+      "total_additions": 4413,
+      "total_deletions": 3433,
+      "accepted_lines": 792,
+      "overriden_lines": 30
+    },
+    "b71394b686352d29": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d7dd39c9-8e98-4716-ad01-d468db11a837",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "StreamDemon",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 2910,
+      "overriden_lines": 17
+    }
+  }
+}
