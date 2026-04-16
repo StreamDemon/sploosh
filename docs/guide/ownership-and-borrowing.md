@@ -97,16 +97,29 @@ impl Drop for TempFile {
 
 `Box<T>`, file handles, network connections, and other resource-owning types use `Drop` for deterministic cleanup. Drop is called automatically -- you never call it directly.
 
-## No Rc/Arc -- Use Handle\<T\> for Sharing
+## Shared State: `Shared<T>` for Immutable, `Handle<T>` for Mutable
 
-Sploosh does not provide `Rc<T>` or `Arc<T>`. Shared mutable state belongs in actors; use `Handle<T>` to share access across actors. `Handle<T>` is `Clone + Send` and routes messages to the owning actor, so no reference counting or locking is needed.
+Sploosh does not provide `Rc<T>` or `Arc<T>`. Sharing is split by intent into two narrow primitives, each with one job:
+
+- **`Shared<T>`** — an atomically refcounted, immutable-only pointer. `Clone + Send + Sync` when `T: Send + Sync`. Use it for configs, lookup tables, interned strings, ML weights, and any other value that is constructed once and read by many actors. Cloning bumps an atomic refcount in O(1) — no allocation, no `T::clone` call. When the last `Shared<T>` clone is dropped, `T` is dropped and the allocation is freed. There is no `&mut *shared`, no `get_mut`, no `Weak<T>` — `Shared<T>` can only ever produce `&T`, which is what makes reference cycles impossible and keeps the surface narrow. See §4.4a of the language spec.
+- **`Handle<T>`** — a typed actor handle for shared mutable state. `Clone + Send` and routes messages to the owning actor, so no reference counting or locking is needed. See §8.2 of the language spec.
 
 ```sploosh
+// Read-only data: cheap to clone into many actors.
+let config: Shared<Config> = Shared::new(Config::load("app.toml")?);
+let worker_a = spawn Worker::init(config.clone());
+let worker_b = spawn Worker::init(config.clone());
+
+// Mutable state: one actor owns, handles share access.
 let counter: Handle<Counter> = spawn Counter::init(0);
 let h2 = counter.clone();     // cheap clone -- both handles talk to the same actor
 ```
 
-**`Handle<T>` is also not reference-counted.** Dropping the last live handle has no effect on the actor's lifetime — actors die only via runtime failure, supervisor termination, or runtime shutdown. An actor with no live handle and an empty mailbox is *orphaned* and continues running until the runtime shuts down. Clean shutdown is the supervisor's job. See §8.2 of the language spec for the full rule.
+Pick by intent: *does any actor need to mutate this value?* If no, reach for `Shared<T>`; if yes, wrap it in an actor and share its `Handle<T>`.
+
+**Neither primitive is available inside `onchain` modules.** Reference counting has no gas or storage meaning, and actors do not exist on-chain — see §11.1 and §12.3 of the language spec.
+
+**`Handle<T>` is not reference-counted.** Dropping the last live handle has no effect on the actor's lifetime — actors die only via runtime failure, supervisor termination, or runtime shutdown. An actor with no live handle and an empty mailbox is *orphaned* and continues running until the runtime shuts down. Clean shutdown is the supervisor's job. `Shared<T>` *is* reference-counted and is deterministically freed when the last clone is dropped.
 
 ## No Static Mutable State
 
