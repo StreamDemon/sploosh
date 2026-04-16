@@ -1,0 +1,27 @@
+docs/reference/compiler-errors.md
+  1ddf451537079537 3-12,15-109
+docs/spec-plans/LANGUAGE_SPEC_PROMPT.md
+  1ddf451537079537 1,225-226
+docs/tooling/build-system.md
+  1ddf451537079537 18-42
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8",
+  "base_commit_sha": "637c35fe48477bd06eb8433e26e2291da30000b6",
+  "prompts": {
+    "1ddf451537079537": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "86338197-6fe0-421a-a722-dad27a86a5cb",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "StreamDemon",
+      "messages": [],
+      "total_additions": 4227,
+      "total_deletions": 3989,
+      "accepted_lines": 6074,
+      "overriden_lines": 26
+    }
+  }
+}
