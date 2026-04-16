@@ -1,4 +1,4 @@
-# SPLOOSH Language Specification v0.5.0-draft
+# SPLOOSH Language Specification v0.5.1-draft
 
 > **AI-Native · Systems-Grade · Web2/Web3 Dual-Target**
 >
@@ -3401,6 +3401,139 @@ in prose.
 | `u256` and `Address` as primitives | Available on all targets. `u256` always checked. `Address` is not an integer. |
 | `Box<T>` with `Drop` trait | RAII pattern. Deterministic cleanup. `Drop` + `Copy` mutually exclusive. |
 | Standard orphan rule | Match Rust's coherence rule. Deeply trained. Prevents conflicting impls. |
+| Diagnostic format + stable error codes | Machine-actionable compiler output is the AI-native lever. Stable `E<NNNN>` codes, rustc-compatible applicability vocabulary, and an NDJSON mode let LLM agents round-trip fix-and-retry loops deterministically. |
+
+---
+
+## 18. Compiler Diagnostics
+
+The compiler's diagnostic surface is a first-class design artifact. Because
+Sploosh is positioned as an AI-native language, machine-actionable errors —
+stable codes, structured output, suggested fixes with applicability markers —
+are the primary interface between the compiler and the LLM / IDE / human
+reading the result. This section specifies the **format** of a diagnostic.
+The stable **registry** of error codes lives in
+`docs/reference/compiler-errors.md`. The compiler CLI surface for selecting
+a rendering lives in `docs/tooling/build-system.md`.
+
+### 18.1 Diagnostic record
+
+Every diagnostic emitted by the compiler or runtime carries the following
+canonical fields. Field names and semantics are stable across the renderings
+described in §18.5.
+
+| Field             | Type                | Meaning |
+|-------------------|---------------------|---------|
+| `code`            | `&str`              | `E<NNNN>` (error), `W<NNNN>` (warning), or `L<NNNN>` (lint). Stable identifier — see §18.4. |
+| `severity`        | `Severity`          | One of `error`, `warning`, `help`, `note`. |
+| `message`         | `String`            | One-line summary, sentence case, no trailing punctuation. |
+| `primary_span`    | `Span`              | `{ file, byte_start, byte_end, line_start, line_end, col_start, col_end }`. Byte offsets are 0-based; line/column are 1-based. |
+| `labels`          | `Vec<Label>`        | Each `{ span, message }`; the primary label's `span` equals `primary_span`. Additional labels attach supporting annotations at other spans. |
+| `children`        | `Vec<Child>`        | Nested `{ severity, message, spans }` records, used to render `note:` and `help:` lines beneath the primary diagnostic. |
+| `suggested_fixes` | `Vec<Fix>`          | Zero or more suggested edits — see §18.3. |
+| `explanation_url` | `Option<String>`    | Optional implementation-defined URL pointing at a long-form explanation for `code`. The spec does not commit to a hosting model, URL shape, or availability; implementations may always leave this `None`. Consumers that need explanation text should use the `--explain <code>` CLI surface (see `tooling/build-system.md`), which reads from the local registry. |
+
+### 18.2 Error-code clusters
+
+Codes are partitioned by topic so contributors know where to file new ones
+and so readers can place a code at a glance. Ranges are reserved at spec
+level; exceeding a cluster's range requires a spec amendment to declare a
+new range, not silent reuse.
+
+| Range         | Cluster | Topic |
+|---------------|---------|-------|
+| `E0001–E0999` | A       | Lexical / parser / basic syntax |
+| `E1000–E1099` | B       | Type system, trait coherence, ownership, lifetimes |
+| `E1100–E1199` | C       | On-chain (populated from v0.4.4 onward) |
+| `E1200–E1299` | D       | Actors / concurrency |
+| `E1300–E1399` | E       | FFI / extern |
+| `E1400–E1499` | F       | Attributes / derives / directives |
+| `W0001–W0999` | —       | Warnings |
+| `L0001–L0999` | —       | Lints |
+| `E9000+`      | —       | Internal compiler errors (ICE). Reserved; not user-facing under normal operation. |
+
+### 18.3 Suggested-fix applicability
+
+A `Fix` record carries `{ span, replacement, applicability, message }`. The
+`applicability` field tells consumers (IDEs, LLM agents, formatters) whether
+an automated tool may apply the edit without human review. The four values
+are borrowed verbatim from rustc so Rust-trained models recognize them:
+
+| Applicability       | Semantics |
+|---------------------|-----------|
+| `MachineApplicable` | Tools may auto-apply the fix. The replacement is complete and correct, and applying it preserves compilability (assuming no other errors). |
+| `MaybeIncorrect`    | Rendered as a suggestion to a human; never auto-applied. |
+| `HasPlaceholders`   | Contains placeholders (`<...>` or similar); a human must fill in before applying. |
+| `Unspecified`       | No applicability declared. Consumers must treat as `MaybeIncorrect`. |
+
+### 18.4 Stability contract
+
+Once a code is published in `docs/reference/compiler-errors.md` at a
+released version, its **semantic meaning is frozen**. Re-use of a number for
+a different meaning is forbidden. Message text, label text, and
+suggested-fix content may evolve freely between versions — only the
+`code → meaning` mapping is stable.
+
+Retirement path: a row may be marked `status: deprecated` with a
+`superseded_by: <code>` pointer. The compiler continues to emit the
+original code while documenting the replacement in the diagnostic's
+`children` (as a `note:` line). The retired number is **not** reassigned.
+
+### 18.5 Output formats
+
+The compiler exposes three renderings of the §18.1 record; the CLI flag
+that selects them is specified in `docs/tooling/build-system.md`:
+
+- **`human`** (default). Rustc-style rendering: `error[E1101]: <message>`
+  header line, `-->` source-span pointer, numbered gutter with the primary
+  span highlighted and supporting labels attached, `note:` / `help:` child
+  lines, and suggested-fix blocks with their applicability rendered
+  inline.
+- **`json`**. **Newline-delimited JSON** — one record per line, flushed
+  immediately after each diagnostic so LLMs and IDEs can consume output
+  mid-compile. Each record matches the §18.1 field layout. An optional
+  `$schema` field, when populated, carries an implementation-defined
+  schema identifier that consumers may use to negotiate field layout;
+  implementations may omit the field entirely. The field layout itself is
+  stable across patch versions and additive across minor versions (new
+  fields may be added; existing fields keep their names and types).
+- **`short`**. A single line per diagnostic:
+  `<path>:<line>:<col>: <severity>[<code>]: <message>`. Optimized for
+  `grep`-style log processing; omits labels, children, and suggested
+  fixes.
+
+Implementations may additionally expose a command that prints the
+long-form explanation for a single code (conventionally
+`sploosh --explain <code>`); see `docs/tooling/build-system.md`. The
+long-form text is sourced from the local
+`docs/reference/compiler-errors.md` registry, not from a network call.
+
+### 18.6 LLM-integration contract
+
+The `json` rendering is the primary artifact that agents parse. The
+following invariants hold for every diagnostic in `json` mode. They are
+what lets an LLM round-trip a fix-and-retry loop deterministically, and
+they are what distinguishes Sploosh diagnostics from free-form compiler
+output.
+
+1. **Every diagnostic carries a `code`.** The compiler never emits a
+   `"unknown"` placeholder. If no registered code applies, the compile is
+   treated as an internal compiler error (`E9000+`) and the diagnostic
+   reports the ICE code.
+2. **Every `MachineApplicable` fix is complete.** When the compiler marks
+   a fix with this applicability, its `replacement` string contains no
+   placeholders and no `<...>` sentinels, and applying it unconditionally
+   preserves compilability of the surrounding region assuming no other
+   errors are present. This is a definitional property of the
+   applicability level, not an aspiration — the compiler must not mark a
+   fix `MachineApplicable` unless both conditions hold.
+3. **`primary_span` is always populated.** File-less diagnostics (e.g.
+   CLI argument errors) are reported under a synthetic `"<cli>"` file
+   with byte offsets 0/0.
+4. **`children` severities are one of `note` or `help`.** `error` and
+   `warning` only appear at the top level — one top-level diagnostic per
+   JSON record. Agents can parse records one at a time without tracking
+   parent-child severity state.
 
 ---
 
@@ -3473,8 +3606,9 @@ Source (.sp)
 | v0.4.3 | **Actor lifecycle states** (new §8.1a): explicit `INITIALIZING → READY → DEAD` state machine. `fn init(args) -> Self` is **infallible by signature and non-async** — writing `async fn init` is a compile error, and `init` panic transitions directly to `DEAD`. Messages sent to an INITIALIZING actor queue in the mailbox and are delivered once `init` returns; there is a happens-before edge from `init` completion to the first handler dispatch, so handlers never observe partially-constructed state. Handles returned by `spawn` may be immediately dead if `init` panics — first call observes `Err(ActorError::Dead)` or silent drop. **Message ownership rule rewritten by receiver type** (§8.2): `&mut self` methods (which may be invoked via `send`) must use owned parameters; `&self` methods (request/reply only — caller always blocks, stack always outlives the call) **may** take reference parameters. The rule now explicitly rejects `send handle.method()` on an `&self` method as a compile error. Resolves the previous §8.2/§8.3 contradiction on `Cache::get(&self, key: &K)`. Private (non-`pub`) actor methods retain their existing "references freely allowed" rule. **Handle drop semantics** (§8.2): dropping a `Handle<T>` — including the last live handle — has **no effect on actor lifetime**. Actors terminate only via runtime failure, supervisor termination, or runtime shutdown. Orphaned actors (no live handle, empty mailbox) are a known tradeoff of the non-reference-counted handle model; explicit self-termination is deferred. **Generic actor `Send` bounds** (§8.3): all type parameters on an `actor` declaration must carry `Send`, not only those used in `pub` method signatures. **Supervisor restart semantics** (new §8.7a): restart always runs a fresh `init` with the supervisor's stored construction arguments — no state preservation across restart; old `Handle<T>` values become permanently dead and are not transparently redirected to the restarted instance (callers re-fetch from the supervisor); queued mailbox messages are discarded; init failures count toward `max_restarts`; `rest_for_one` requires children in an ordered collection, with a compile-time warning and `one_for_one` fallback if dynamic. **Supervisor restart window is sliding** (§8.7): `window_secs` is a wall-clock sliding window over each restart's timestamp, not a fixed window with reset boundaries. **Mailbox-full + actor-dies race** (§8.11): blocked senders wake immediately on destination death; `send` drops silently, `send_timeout` returns new variant `SendError::Dead` (added to §8.5 `SendError`), request/reply returns `Err(ActorError::Dead)`. Wake order unspecified. Supervisor restart does not redirect blocked senders. **Re-entrant call detection** (new §8.10.1): direct self-calls (A → A via request/reply on own handle) return new variant `ActorError::SelfCall` immediately via an O(1) runtime check — variant added to the `ActorError` enum in §8.8. Multi-actor cycles (A → B → A) are documented as a hazard but not detected in v0.4.3. Fire-and-forget self-sends (`send self.handle.method(args)`) are legal and are the correct self-scheduling pattern. Cross-references §11.3 on-chain reentrancy as a distinct mechanism. **Blocking operations in handlers** (new §8.11a): actor handlers run in an async context; the stdlib is already async-only, so no new forbid is needed there. **FFI:** calling a synchronous `extern "C"` function from inside a handler (directly or transitively) is a compile error. Handler-safe FFI must be declared `extern "C" async` (§4.9) — the compiler emits an awaitable wrapper that offloads to the runtime's blocking pool. `spawn_blocking` intrinsic deferred. **Select arm fairness** (§8.6): arms are checked top-to-bottom deterministically (not round-robin), making `select` reproducible under test. **Actors forbidden in `onchain`** (§8.1, §11.1, §12.3): the `actor` keyword, `spawn`, `send`, `send_timeout`, `select`, `timeout(ms)`, `Handle<T>`, `Channel<T>`, `Sender<T>`, `Receiver<T>`, `JoinHandle<T>`, `@supervisor`, `@mailbox`, the `async` function modifier with its `.await` operator, and `extern "C"`/`extern "C" async` FFI are all compile errors inside `onchain` modules. Transitive imports of actor-using native modules through pure-function boundaries remain allowed — the forbid is on *spawning inside onchain*, not on depending on actor-using code. **Deferred to a future amendment:** `init() -> Result<Self, E>`, async `init`, explicit `handle.stop()` / `stop c` intrinsic, `spawn_blocking` intrinsic, multi-actor cycle detection, `ChildSpec<T>` as a language-visible type. No grammar changes. No new keywords (still 40). |
 | v0.4.4 | **On-chain semantics — Cluster C** (§11): closes the four design-heavy gaps that prevented EVM/SVM codegen from starting. **Storage layout** (new §11.1a): target-pluggable abstraction with Solidity-compatible EVM reference realization — sequential `u256` slots in declaration order, Solidity-rule packing within slots, `Map<K, V>` entries at `keccak256(abi.encode(key, map_slot))`, nested maps recurse, `Vec<T>` / `String` with length at slot and data at `keccak256(slot)`, `[T; N]` inline. SVM layout deferred to a future Solana amendment; Sploosh surface stays identical across targets. **Reentrancy guard mechanism** (new §11.3a): runtime per-contract boolean flag set on entry to any non-`@reentrant` `pub` on-chain function and cleared on return (success, error, or revert). Cross-contract re-entry into a guarded function reverts with new error `ChainError::Reentrancy`; `@reentrant` disables the check and the set for that function only. Gas cost is qualitative (one TLOAD + one TSTORE per guarded call on EIP-1153 EVM forks (Cancun+), SLOAD/SSTORE fallback on earlier forks). Explicitly distinguished from §8.10.1 actor `SelfCall` — same word, different layers. **Cross-contract ABI and call semantics** (new §11.4a): new surface syntax `extern onchain mod X { pub fn ...; ... }` declares callee signatures at compile time; `chain::call(addr, callee, args) -> Result<T, ChainError>` blocks synchronously on EVM (lowers to `CALL`), Solidity ABI is the reference argument encoding on EVM, `?` propagates `ChainError::Reverted { data: Vec<u8> }` with revert bytes bounded by `RETURNDATACOPY` semantics. New error enum `ChainError { Reverted, OutOfGas, Reentrancy, InvalidTarget, DecodingError }` added to the on-chain error surface. No delegatecall in v0.4.x (deferred to v0.5.0). SVM divergence via Solana CPI with preserved user-level surface; concrete ABI deferred. **Explicit contrast with `extern "C"` (§4.9)**: both nest under `extern`, but calling conventions, safety models, and error surfaces differ — not interchangeable. **Gas model** (new §11.7a): target-pluggable metering abstraction. EVM references Yellow Paper + active-hard-fork EIP cost tables (Sploosh does not redefine opcode costs); `ctx::gas_remaining() -> u256` EVM-only, `#[gas_limit(N)]` EVM-only advisory in deployed ABI metadata. SVM uses compute units; `ctx::compute_units_remaining() -> u64` SVM-only. All three are compile errors on native and wasm. **Out-of-gas semantics**: transaction-wide revert, all storage mutations and emitted events unwound, and revert is **unaffected by per-function attributes including `@reentrant`** (explicit invariant). Transient-state unwind clears the reentrancy flag on revert, so failed calls cannot leave a contract with its guard stuck set. **`#[indexed]` event field marker** (§11.5, §12.3): up to three indexed fields per event variant on EVM (topic slots 1–3; topic 0 is the signature hash); compile error on more. SVM accepts `#[indexed]` for source-compatibility but treats it as a no-op. **§13.0 intrinsics table**: `ctx::gas_remaining` context column tightened to EVM-only, new row for `ctx::compute_units_remaining` (SVM-only), `chain::call` signature updated to `Result<T, ChainError>`, `storage::*` rows reference §11.1a, `chain::call` row references §11.4a. **§16 grammar**: `extern_block` production extended — `extern_target = STRING_LIT | "onchain" "mod" IDENT` — and `extern_fn` allows optional `pub`. No new keywords (still 40). No new item kinds; `extern onchain mod` is an extern-block variant. **Deferred to v0.5.0**: cross-contract ABI emission artifacts (bytecode + ABI JSON + metadata file), WASM target variants (`wasm32-unknown-unknown` vs `wasm32-wasi`), delegatecall support, SVM storage layout details, SVM CPI concrete ABI, per-call gas forwarding annotation. |
 | v0.5.0 | **Removed the `none` keyword** (§2.3, §16). Per the independent PR #9 review, `none` was reserved in the §2.3 keyword list and appeared as a literal in the §16 grammar `literal` production, but every example, every guide, and the `docs/` tree generally used `None` (the `Option::None` constructor exported from the §13.1 prelude). Lowercase `none` was reserved in two definitional sites and used in zero practical sites — the keyword reservation served no purpose while creating a contradiction with the prelude. Removed from `docs/spec-plans/LANGUAGE_SPEC.md` §2.3 and §16, and from the `docs/reference/keywords.md` and `docs/reference/grammar.md` mirrors. Keyword count: 40→39 (losing `none`). The capitalized `None` — an identifier resolving to `Option::None` via the prelude — is unchanged and remains the sole form for an absent `Option` value. No grammar reshape beyond the deleted alternative; no other sections touched. This amendment opens the v0.5.x cycle with a mechanical correctness fix identified by the PR #9 review (severity Blocker, action L1). |
+| v0.5.1 | **Compiler Diagnostics specification** (new §18). Formalizes the compiler's diagnostic contract as a first-class spec artifact — the highest-leverage missing piece for the AI-native positioning. New §18.1 Diagnostic record defines the canonical field layout (`code`, `severity`, `message`, `primary_span`, `labels`, `children`, `suggested_fixes`, `explanation_url`) that all renderings must preserve. §18.2 Error-code clusters reserves ranges: `E0001–E0999` lexical (A), `E1000–E1099` type/trait/ownership (B), `E1100–E1199` on-chain (C, already in use), `E1200–E1299` actors/concurrency (D), `E1300–E1399` FFI (E), `E1400–E1499` attributes (F), `W0001–W0999` warnings, `L0001–L0999` lints, `E9000+` ICE. §18.3 Suggested-fix applicability adopts rustc's vocabulary verbatim (`MachineApplicable`, `MaybeIncorrect`, `HasPlaceholders`, `Unspecified`) so Rust-trained models recognize the levels. §18.4 Stability contract: code→meaning is frozen on release; retired codes are marked `status: deprecated` with a `superseded_by` pointer and are never reassigned. §18.5 Output formats: `human` (default, rustc-style), `json` (newline-delimited JSON, one record per line, stable field layout with optional `$schema`), `short` (single line per diagnostic, grep-friendly). §18.6 LLM-integration contract: four invariants that hold for every diagnostic in `json` mode — every diagnostic carries a code; `MachineApplicable` fixes are complete (applying them preserves compilability); `primary_span` is always populated (file-less diagnostics use a synthetic `"<cli>"` file); `children` severities are limited to `note` / `help`. Explicit non-commitments: the spec does **not** mandate a hosted URL for `explanation_url` (implementations may leave it `None`) and does **not** commit to a specific JSON Schema artifact for `$schema` (draft-7 emission is a future follow-up). New §17 Design Decisions row documents the format-as-AI-native-lever rationale. **Registry expansion**: `docs/reference/compiler-errors.md` rewritten to distinguish "format" (§18) from "registry" (this file), adds `Cluster` and `Status` columns to the existing E1101–E1109 on-chain rows, and reserves cluster-header placeholders for the A/B/D/E/F/W/L/ICE ranges with TODO entries. Adds a "Growth policy" block (4 rules: registry-first workflow, spec-section anchoring, frozen-on-publish, deprecate-don't-reassign). **Tooling**: `docs/tooling/build-system.md` gains a Compiler Flags subsection documenting `--error-format=<human\|json\|short>` (default `human`) and `--explain <code>` (prints long-form explanation sourced from the local registry, not a network call). No new keywords (39 unchanged). No grammar changes. Closes PR #9 review Blocker U1. |
 
 ---
 
 *Working title: Sploosh. Name subject to change.*
-*This spec is a living document. v0.5.0-draft — April 2026.*
+*This spec is a living document. v0.5.1-draft — April 2026.*
