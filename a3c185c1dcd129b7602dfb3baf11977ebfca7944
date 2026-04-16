@@ -1,0 +1,23 @@
+docs/spec-plans/LANGUAGE_SPEC_REVIEW.md
+  1ddf451537079537 1-487
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8",
+  "base_commit_sha": "a3c185c1dcd129b7602dfb3baf11977ebfca7944",
+  "prompts": {
+    "1ddf451537079537": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "86338197-6fe0-421a-a722-dad27a86a5cb",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "StreamDemon",
+      "messages": [],
+      "total_additions": 5692,
+      "total_deletions": 1501,
+      "accepted_lines": 5673,
+      "overriden_lines": 0
+    }
+  }
+}
