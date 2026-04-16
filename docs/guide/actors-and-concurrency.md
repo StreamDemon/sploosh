@@ -238,7 +238,7 @@ An actor holds its mailbox "busy" across a handler's entire execution, including
 
 **Direct self-calls** (A's handler calls request/reply on `Handle<A>`) are detected by the runtime and return `Err(ActorError::SelfCall)` immediately — no hang. This catches the common accident of writing `self.handle.method(args)` where a local `self.method(args)` was intended.
 
-**Multi-actor cycles** (A → B → A, or longer chains) are **not detected** in v0.4.3. Such chains block until an outer `send_timeout` or user-level timeout fires. Structure actor communication as a DAG or break cycles with fire-and-forget `send`.
+**Multi-actor cycles** (A → B → A, or longer chains) are **not detected** by the current runtime. Such chains block until an outer `send_timeout` or user-level timeout fires. Structure actor communication as a DAG or break cycles with fire-and-forget `send`.
 
 **Self-sends are legal.** A handler that wants to re-queue work into its own mailbox should use `send self.handle.method(args)` — the message is processed on the next handler turn after the current one returns. This is the correct pattern for self-scheduling and for splitting long computations.
 

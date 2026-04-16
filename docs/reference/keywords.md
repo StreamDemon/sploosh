@@ -16,7 +16,7 @@
 | `mod` | Module definition |
 | `use` | Import |
 | `pub` | Public visibility |
-| `extern` | Foreign function interface |
+| `extern` | Foreign function interface (`extern "C" { ... }`, §4.9) and on-chain cross-contract interface declarations (`extern onchain mod X { ... }`, §11.4a) |
 
 ## Control Flow (10)
 | Keyword | Purpose |

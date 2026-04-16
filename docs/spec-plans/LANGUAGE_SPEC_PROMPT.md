@@ -1,4 +1,4 @@
-# SPLOOSH Quick Reference — LLM System Prompt Edition (v0.4.3)
+# SPLOOSH Quick Reference — LLM System Prompt Edition (v0.4.4)
 
 Sploosh: AI-native language. Rust safety + Elixir concurrency + web3 targeting.
 
@@ -174,8 +174,25 @@ onchain mod token {
 ```
 `ctx` API: `caller()`, `self_address()`, `timestamp()`, `block_number()`.
 EVM: `ctx::value()` (requires `@payable`), `ctx::gas_remaining()`, `ctx::chain_id()`.
-SVM: `ctx::lamports()`, `ctx::program_id()`, `ctx::signer()`.
+SVM: `ctx::lamports()`, `ctx::program_id()`, `ctx::signer()`, `ctx::compute_units_remaining()`.
 Non-reentrant by default. `onchain` cannot use: `std::fs`, `std::net`, `std::io`, `std::db`, `std::web`, `std::env`. `onchain` cannot call `f32`/`f64` math methods or use `@fast_math` (see Math section).
+
+**Storage layout (§11.1a).** Target-pluggable; EVM adopts Solidity-compatible slots verbatim. Struct fields: sequential `u256` slots from 0 in declaration order, same-slot primitives right-aligned and packed (matches Solidity). `Map<K,V>` value at `keccak256(abi.encode(key, map_slot))` for value-type keys; nested maps recurse. `Vec<T>`: length at slot `s`, data at `keccak256(s)`. `String`: follows Solidity `bytes`/`string` (≤31-byte payloads inlined in slot `s`; longer payloads store data at `keccak256(s)`). `[T; N]` inline. SVM uses account-based storage; layout deferred to Solana amendment.
+
+**Reentrancy guard (§11.3a).** Runtime per-contract bool flag. Set on entry to any non-`@reentrant` `pub` on-chain function; cleared on return (Ok, Err, or revert). Cross-contract callback into a guarded function → `ChainError::Reentrancy` (revert). `@reentrant` disables check+set for that function only. Distinct from §8.10.1 actor `SelfCall` — same word, different layer.
+
+**Cross-contract calls (§11.4a).** Declare callee signatures with new syntax:
+```sploosh
+extern onchain mod token {
+    pub fn balance_of(account: Address) -> Result<u256, TokenError>;
+}
+let bal = chain::call(addr, token::balance_of, user)?;  // bal: u256; chain::call returns Result<T, ChainError> and `?` unwraps T
+```
+Sync on EVM (lowers to `CALL`). Solidity ABI for argument/return encoding. `?` propagates `ChainError::Reverted { data: Vec<u8> }` (revert data bounded by `RETURNDATACOPY`, allocated in caller's frame — same as Solidity). `ChainError = { Reverted, OutOfGas, Reentrancy, InvalidTarget, DecodingError }`. No delegatecall in v0.4.x. SVM: CPI lowering, concrete ABI deferred. **Distinct from `extern "C"` (§4.9)** — different calling convention, safety model, and error surface; not interchangeable.
+
+**Gas model (§11.7a).** Target-pluggable. **EVM**: gas; `ctx::gas_remaining() -> u256` EVM-only; `#[gas_limit(N)]` EVM-only advisory in ABI metadata (runtime OOG from VM, not annotation); costs per active hard fork's EIPs. **SVM**: compute units; `ctx::compute_units_remaining() -> u64` SVM-only; `#[gas_limit]` compile error on SVM. **Native/wasm**: all three are compile errors. **OOG → transaction revert**: all storage mutations and emitted events unwound; revert is transaction-wide and **unaffected by per-function attributes including `@reentrant`** — guard flag is unwound on revert, so failed calls cannot leave it stuck.
+
+**Event `#[indexed]` (§11.5).** Up to 3 indexed fields per event variant on EVM (topics 1–3; topic 0 is signature hash). More than 3 on EVM → compile error. SVM accepts `#[indexed]` as a no-op.
 
 ## FFI
 ```sploosh
