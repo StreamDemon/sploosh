@@ -1,4 +1,4 @@
-# SPLOOSH Quick Reference — LLM System Prompt Edition (v0.4.4)
+# SPLOOSH Quick Reference — LLM System Prompt Edition (v0.5.0)
 
 Sploosh: AI-native language. Rust safety + Elixir concurrency + web3 targeting.
 
