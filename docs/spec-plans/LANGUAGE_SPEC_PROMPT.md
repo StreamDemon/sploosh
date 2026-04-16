@@ -1,4 +1,4 @@
-# SPLOOSH Quick Reference — LLM System Prompt Edition (v0.5.0)
+# SPLOOSH Quick Reference — LLM System Prompt Edition (v0.5.1)
 
 Sploosh: AI-native language. Rust safety + Elixir concurrency + web3 targeting.
 
@@ -221,5 +221,8 @@ Derives: `Debug`, `Clone`, `Copy`, `Eq`, `Hash`, `Serialize`, `Deserialize`, `Or
 
 ## Build
 `sploosh build --target native|wasm|evm|svm`
+
+## Diagnostics
+Every compiler diagnostic carries a stable code (`E<NNNN>` error / `W<NNNN>` warning / `L<NNNN>` lint), a severity (`error`/`warning`/`help`/`note`), a primary span, and optional suggested fixes with rustc-compatible applicability (`MachineApplicable`, `MaybeIncorrect`, `HasPlaceholders`, `Unspecified`). Output modes: `human` (default), `json` (NDJSON, one record per line, LLM-parseable), `short` (grep-friendly). `MachineApplicable` fixes are complete and safe to auto-apply.
 
 ## File ext: `.sp` — Entry: `src/main.sp` — Manifest: `sploosh.toml`
