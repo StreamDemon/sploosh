@@ -3431,7 +3431,7 @@ described in §18.5.
 | `labels`          | `Vec<Label>`        | Each `{ span, message }`; the primary label's `span` equals `primary_span`. Additional labels attach supporting annotations at other spans. |
 | `children`        | `Vec<Child>`        | Nested `{ severity, message, spans }` records, used to render `note:` and `help:` lines beneath the primary diagnostic. |
 | `suggested_fixes` | `Vec<Fix>`          | Zero or more suggested edits — see §18.3. |
-| `explanation_url` | `Option<String>`    | Optional implementation-defined URL pointing at a long-form explanation for `code`. The spec does not commit to a hosting model, URL shape, or availability; implementations may always leave this `None`. Consumers that need explanation text should use the `--explain <code>` CLI surface (see `tooling/build-system.md`), which reads from the local registry. |
+| `explanation_url` | `Option<String>`    | Optional implementation-defined URL pointing at a long-form explanation for `code`. The spec does not commit to a hosting model, URL shape, or availability; implementations may always leave this `None`. Consumers that need explanation text should use the `--explain <code>` CLI surface (see `docs/tooling/build-system.md`), which reads from the local registry. |
 
 ### 18.2 Error-code clusters
 
