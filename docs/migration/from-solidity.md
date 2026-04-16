@@ -40,7 +40,9 @@ and indexers without a translation layer:
 - Same-slot primitives are right-aligned and packed per Solidity rules.
 - `Map<K, V>` entries live at `keccak256(abi.encode(key, map_slot))`.
 - Nested maps recurse identically.
-- `Vec<T>` / `String` store length at slot `s`, data at `keccak256(s)`.
+- `Vec<T>` stores length at slot `s`, data at `keccak256(s)`; `String`
+  follows Solidity `bytes` / `string` rules (payloads ≤ 31 bytes are inlined
+  in slot `s`; longer payloads store data at `keccak256(s)`).
 - `[T; N]` occupies inline sequential slots, no hashing.
 
 A Sploosh contract can be deployed behind an existing Solidity upgrade proxy

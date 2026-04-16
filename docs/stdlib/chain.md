@@ -27,7 +27,7 @@ chain::call(token_addr, token::transfer, (recipient, amount))?;
 ### Signature
 
 ```sploosh
-chain::call<Args, T, E>(target: Address, fn: ExternFn<Args, T, E>, args: Args)
+chain::call<Args, T, E>(target: Address, callee: ExternFn<Args, T, E>, args: Args)
     -> Result<T, ChainError>
 ```
 
