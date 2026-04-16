@@ -1,4 +1,4 @@
-# SPLOOSH Language Specification v0.4.4-draft
+# SPLOOSH Language Specification v0.5.0-draft
 
 > **AI-Native · Systems-Grade · Web2/Web3 Dual-Target**
 >
