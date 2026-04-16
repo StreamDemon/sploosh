@@ -21,7 +21,7 @@
 | Lifetime elision (3 rules) | Minimal elision (single-source rule) | Only elides when there is exactly one input lifetime |
 | `pub(crate)`, `pub(super)` | Just `pub` | Two visibility levels only |
 | `static mut` | Not available | All mutable state lives in actors |
-| Threads + `Arc<Mutex<T>>` | Actors + `Handle<T>` | Actor model instead of shared-memory concurrency |
+| Threads + `Arc<Mutex<T>>` | `Shared<T>` for reads; Actors + `Handle<T>` for writes | `Shared<T>` replaces `Arc<T>` for read-only sharing; actors replace `Arc<Mutex<T>>` when mutation is needed |
 | `tokio::spawn` / `async-std` | `spawn` (actors), `async`/`await` (I/O) | Built-in actor runtime |
 | `+` for String concat | Not available | Use `format()` or `push_str` |
 | `panic!()` | Not available | Actors die from runtime checks only |
@@ -30,13 +30,13 @@
 | `println!("...")` | `print("...")` | Not a macro |
 | `x as u32` | `x as u32` | Numeric casts work the same way |
 | `unsafe { ... }` | Not available | Use `extern "C"` with safe wrappers instead |
-| `Rc<T>` / `Arc<T>` | `Handle<T>` | Use typed actor handles, not reference counting |
+| `Rc<T>` / `Arc<T>` | `Shared<T>` (immutable) or `Handle<T>` (actor) | `Shared<T>` is strictly less than `Arc<T>` — no `Weak`, no interior mutability, no cycles. Reach for `Handle<T>` when you need mutation across threads. |
 | Unbounded `mpsc::channel` | `Channel::new(cap)` | Bounded MPSC only; returns `(Sender<T>, Receiver<T>)` |
 | Unbounded actor channels | Bounded actor mailboxes | Mailboxes have a fixed capacity with backpressure |
 | Checked arithmetic (debug only) | Checked arithmetic (all modes) | Overflow always panics, no silent wrapping in release |
 | `tokio::task::spawn_blocking` | Not available yet | The only way to run blocking work from an actor handler is an `extern "C" async` FFI wrapper, which the compiler offloads to the runtime's blocking pool. Calling plain `extern "C"` from a handler is a compile error. |
 | `tokio::sync::Mutex` held across `.await` | Not needed | The actor holds its `&mut self` lock automatically until the handler returns (including across `.await`). Direct re-entrant self-calls are detected as `ActorError::SelfCall` rather than deadlocking. |
-| `Arc::strong_count` / dropping the last `Arc` frees the inner value | `Handle<T>` is not reference-counted | Dropping the last handle does not kill the actor. Terminate via supervisor or runtime shutdown; orphaned actors keep running. |
+| `Arc::strong_count` / dropping the last `Arc` frees the inner value | `Handle<T>` is not reference-counted; `Shared<T>` is | Dropping the last `Handle<T>` does not kill the actor — terminate via supervisor or runtime shutdown; orphaned actors keep running. `Shared<T>` *is* refcounted and is deterministically freed at count zero, matching `Arc<T>` drop semantics. |
 
 ## New Concepts for Rust Developers
 - **Actors** (`actor`, `spawn`, `send`, `Handle<T>`) -- structured concurrency primitive

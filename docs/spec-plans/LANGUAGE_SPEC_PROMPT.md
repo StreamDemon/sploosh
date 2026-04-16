@@ -1,4 +1,4 @@
-# SPLOOSH Quick Reference — LLM System Prompt Edition (v0.4.4)
+# SPLOOSH Quick Reference — LLM System Prompt Edition (v0.4.5)
 
 Sploosh: AI-native language. Rust safety + Elixir concurrency + web3 targeting.
 
@@ -34,7 +34,7 @@ Closures: `Fn`, `FnMut`, `FnOnce`. Iterators: `Iter { type Item; }`, `FromIter`.
 ## Ownership
 - Single owner. Move by default. Primitives copy.
 - `&T` immutable borrow, `&mut T` mutable borrow. One `&mut` XOR many `&`.
-- `Box<T>`: heap-allocated single-owner. `Drop` trait for cleanup. No `Rc`/`Arc`.
+- `Box<T>`: heap, single-owner, `Drop`. `Shared<T>`: refcounted, immutable-only (no `&mut`, no `Weak`, no cycles). No `Rc`/`Arc`.
 - Lifetimes: required when returning a reference with multiple ref params.
   Single-source elision: `fn name(&self) -> &str` needs no annotation.
   Multiple sources explicit: `fn longest<'a>(a: &'a str, b: &'a str) -> &'a str`

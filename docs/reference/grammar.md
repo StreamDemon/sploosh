@@ -42,8 +42,9 @@ onchain_mod    = "onchain" "mod" IDENT "{" { onchain_item } "}" ;
 onchain_item   = storage_block | fn_def | event_def ;
 storage_block  = "storage" "{" fields "}" ;
 
-extern_block   = "extern" STRING_LIT "{" { extern_fn } "}" ;
-extern_fn      = "fn" IDENT "(" params ")" [ "->" type ] ";" ;
+extern_block   = "extern" extern_target "{" { extern_fn } "}" ;
+extern_target  = STRING_LIT | "onchain" "mod" IDENT ;
+extern_fn      = [ "pub" ] "fn" IDENT "(" params ")" [ "->" type ] ";" ;
 
 type           = prim_type | IDENT [ generics ] | "&" [ lifetime ] [ "mut" ] type
                | "[" type ";" expr "]" | "[" type "]"
@@ -117,7 +118,7 @@ event_def      = [ attrs ] "enum" IDENT "{" variants "}" ;
 
 literal        = INT_LIT [ type_suffix ] | FLOAT_LIT [ type_suffix ]
                | STRING_LIT | CHAR_LIT
-               | "true" | "false" | "none" ;
+               | "true" | "false" ;
 type_suffix    = "i8" | "i16" | "i32" | "i64" | "i128"
                | "u8" | "u16" | "u32" | "u64" | "u128" | "u256"
                | "f32" | "f64" ;
