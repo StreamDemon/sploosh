@@ -1,4 +1,4 @@
-# Keywords (40 Total)
+# Keywords (39 Total)
 
 > All reserved words in Sploosh.
 
@@ -32,14 +32,13 @@
 | `continue` | Skip to next iteration |
 | `return` | Early return |
 
-## Types & Values (6)
+## Types & Values (5)
 | Keyword | Purpose |
 |---------|---------|
 | `self` | Current instance |
 | `Self` | Current type |
 | `true` | Boolean true |
 | `false` | Boolean false |
-| `none` | No value |
 | `as` | Numeric type cast |
 
 ## Concurrency (7)

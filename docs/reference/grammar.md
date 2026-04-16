@@ -117,7 +117,7 @@ event_def      = [ attrs ] "enum" IDENT "{" variants "}" ;
 
 literal        = INT_LIT [ type_suffix ] | FLOAT_LIT [ type_suffix ]
                | STRING_LIT | CHAR_LIT
-               | "true" | "false" | "none" ;
+               | "true" | "false" ;
 type_suffix    = "i8" | "i16" | "i32" | "i64" | "i128"
                | "u8" | "u16" | "u32" | "u64" | "u128" | "u256"
                | "f32" | "f64" ;
