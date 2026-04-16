@@ -1,4 +1,4 @@
-# SPLOOSH Quick Reference — LLM System Prompt Edition (v0.5.1)
+# SPLOOSH Quick Reference — LLM System Prompt Edition (v0.5.2)
 
 Sploosh: AI-native language. Rust safety + Elixir concurrency + web3 targeting.
 
@@ -10,7 +10,7 @@ Sploosh: AI-native language. Rust safety + Elixir concurrency + web3 targeting.
 
 ## Types
 Primitives: `i8 i16 i32 i64 u8 u16 u32 u64 f32 f64 u256 bool char str String Address ()`
-Compounds: `[T; N]` `Vec<T>` `Map<K,V>` `Set<T>` `Box<T>` `(T, U)` `Option<T>` `Result<T, E>`
+Compounds: `[T; N]` `Vec<T>` `Map<K,V>` `Set<T>` `Box<T>` `Shared<T>` `(T, U)` `Option<T>` `Result<T, E>`
 Channels: `Channel<T>` `Sender<T>` `Receiver<T>`
 Custom: `struct Name { field: Type }` / `enum Name { A, B(T), C { x: T } }`
 Generics: `fn name<T: Bound>(x: T) -> T { }`
@@ -34,7 +34,8 @@ Closures: `Fn`, `FnMut`, `FnOnce`. Iterators: `Iter { type Item; }`, `FromIter`.
 ## Ownership
 - Single owner. Move by default. Primitives copy.
 - `&T` immutable borrow, `&mut T` mutable borrow. One `&mut` XOR many `&`.
-- `Box<T>`: heap-allocated single-owner. `Drop` trait for cleanup. No `Rc`/`Arc`.
+- `Box<T>`: heap-allocated single-owner. `Drop` trait for cleanup.
+- `Shared<T>`: atomically refcounted, immutable-only pointer. `Clone + Send + Sync` iff `T: Send + Sync`. No `&mut *`, no `Weak`, no cycles. Not `Copy`. Idiomatic for cross-actor read-heavy data. Forbidden on-chain. No `Rc`/`Arc`.
 - Lifetimes: required when returning a reference with multiple ref params.
   Single-source elision: `fn name(&self) -> &str` needs no annotation.
   Multiple sources explicit: `fn longest<'a>(a: &'a str, b: &'a str) -> &'a str`

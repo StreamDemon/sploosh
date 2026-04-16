@@ -58,7 +58,7 @@ let counter: Handle<Counter> = spawn Counter::init(0);
 
 `Handle<T>` implements `Clone` and `Send`. Handles can be stored in structs, passed between actors, and put in collections.
 
-**Handle drops do not kill the actor.** Unlike `Rc<T>` or `Arc<T>`, `Handle<T>` is *not* reference-counted — dropping the last live handle has no effect on the actor's lifetime. Actors terminate only via runtime failure, supervisor termination, or runtime shutdown when `main()` returns. An actor with no live handle and an empty mailbox is *orphaned* and continues running until the runtime shuts down; clean shutdown is the supervisor's job.
+**Handle drops do not kill the actor.** Unlike `Rc<T>` / `Arc<T>` (not available in Sploosh), `Handle<T>` is *not* reference-counted — dropping the last live handle has no effect on the actor's lifetime. Actors terminate only via runtime failure, supervisor termination, or runtime shutdown when `main()` returns. An actor with no live handle and an empty mailbox is *orphaned* and continues running until the runtime shuts down; clean shutdown is the supervisor's job. For shared immutable reference-counting (configs, lookup tables, read-only caches) use `Shared<T>` — see §4.4a of the language spec and the "Sharing Read-Heavy Data" section below.
 
 ## Message Passing
 
@@ -111,6 +111,40 @@ actor Cache<K: Hash + Eq + Send, V: Clone + Send> {
 ```
 
 Every type parameter on an `actor` declaration must carry `Send`, not only the parameters used in `pub` method signatures. State fields may hold values of any of the parameters, and those fields move across scheduler threads when the actor is rebalanced between cores.
+
+## Sharing Read-Heavy Data: `Shared<T>` Across Actors
+
+When many actors need to read the same immutable value — a parsed configuration, a lookup table, cached ML weights, an interned-string pool — wrapping it in an actor forces every read through a message round-trip (mailbox enqueue plus scheduler context switch plus reply), which serializes what should be pointer-speed access. Deep-cloning into each actor wastes memory and allocates per spawn. `Shared<T>` (§4.4a of the language spec) is the idiomatic middle ground: an atomically refcounted, immutable-only pointer that lets every holder see the same allocation.
+
+```sploosh
+// Without Shared<T> — every lookup is a message round-trip.
+actor LookupTableActor {
+    table: LookupTable,
+    fn init(table: LookupTable) -> Self { LookupTableActor { table } }
+    pub fn get(&self, key: String) -> Option<u64> { self.table.get(&key) }
+}
+
+// With Shared<T> — workers hold a refcounted pointer and read directly.
+actor Worker {
+    table: Shared<LookupTable>,
+    fn init(table: Shared<LookupTable>) -> Self { Worker { table } }
+    pub fn lookup(&self, key: &str) -> Option<u64> {
+        (*self.table).get(key)     // &T access across the refcounted pointer
+    }
+}
+
+fn main() -> Result<(), AppError> {
+    let table = Shared::new(LookupTable::load("data.bin")?);
+    let w1 = spawn Worker::init(table.clone());
+    let w2 = spawn Worker::init(table.clone());
+    // Both workers share one allocation; each .clone() is an O(1) refcount bump.
+    Ok(())
+}
+```
+
+`Shared<T>` is `Clone + Send + Sync` iff `T: Send + Sync`. Each `.clone()` is a refcount bump (no allocation, no `T::clone` call). When the last `Shared<T>` clone drops, the inner `T` drops and the allocation is freed. Pick `Shared<T>` whenever the answer to *does any actor need to mutate this value?* is no; if yes, wrap in an actor and share the `Handle<T>`.
+
+`Shared<T>` satisfies the §8.2 owned-parameter rule for `&mut self` actor methods (the wrapper itself moves; the inner data is shared via refcount bump) and is the idiomatic reply type for `&self` request/reply methods that return cached data — the caller bumps the refcount on receive rather than deep-cloning the reply.
 
 ## Channels
 

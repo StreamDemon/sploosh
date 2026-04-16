@@ -1,4 +1,4 @@
-# SPLOOSH Language Specification v0.5.1-draft
+# SPLOOSH Language Specification v0.5.2-draft
 
 > **AI-Native · Systems-Grade · Web2/Web3 Dual-Target**
 >
@@ -277,6 +277,7 @@ Vec<T>              // Growable list
 Map<K, V>           // Hash map
 Set<T>              // Hash set
 Box<T>              // Heap-allocated owned value
+Shared<T>           // Refcounted immutable shared pointer
 (T, U, V)           // Tuple
 Option<T>           // Some(T) | None
 Result<T, E>        // Ok(T) | Err(E)
@@ -554,6 +555,11 @@ Sploosh defines the following standard traits. All are in the prelude.
 - Struct fields drop in declaration order.
 - `Drop` and `Copy` are mutually exclusive — a type cannot implement both.
 - Implement `Drop` for custom cleanup (file handles, network connections).
+- For `Shared<T>` values, the wrapper itself drops in scope-reverse order as
+  usual; the inner `T` drops only when the last live clone goes out of scope,
+  which may be earlier or later than any individual wrapper's lifetime. The
+  order remains deterministic given the set of holders — there is no GC and
+  no deferred finalization. See §4.4a.
 
 **Closure traits** (already defined in §4.5):
 `Fn(Args) -> Ret`, `FnMut(Args) -> Ret`, `FnOnce(Args) -> Ret`
@@ -649,8 +655,99 @@ let val: i64 = *boxed;                  // deref to inner value
 - `Box<T>` is `Send` if `T: Send`. `Clone` if `T: Clone`.
 - Primary use: trait objects (`Box<dyn Trait>`), large values, recursive types.
 
-**No `Rc<T>` or `Arc<T>` in Sploosh.** Use `Handle<T>` for sharing state across actors.
-Use `Map<Id, T>` with integer IDs for graph-like structures within a single actor.
+**No `Rc<T>` or `Arc<T>` in Sploosh.** Use `Shared<T>` (§4.4a) for shared
+*immutable* data across threads and actors; use `Handle<T>` (§8.2) for shared
+*mutable* state behind an actor. Use `Map<Id, T>` with integer IDs for
+graph-like structures within a single actor.
+
+### 4.4a Shared Immutable Data with `Shared<T>`
+
+`Shared<T>` is an atomically refcounted pointer to an immutable `T`. It is
+the Sploosh answer for read-only data that many actors need to see —
+configs, lookup tables, parsed ML weights, interned strings, read-only
+caches. Without it, the only options are clone-everything (allocation
+per borrow boundary), wrap-in-an-actor (every read is a message round
+trip), or pass `&T` locally (does not cross actor or thread boundaries).
+None of these scale for read-heavy shared data.
+
+`Shared<T>` is deliberately strictly less than Rust's `Arc<T>`:
+
+- **Immutable only.** `Shared<T>` can only ever produce `&T`. There is no
+  `&mut *shared`, no `get_mut`, no `make_mut`, no `try_unwrap`. The type
+  cannot be used as a backdoor for shared mutable state.
+- **No `Weak<T>`.** Not introduced. Because `Shared<T>` cannot be stored
+  in any cell that is mutable after construction (Sploosh has no `Cell`,
+  `RefCell`, `UnsafeCell`, or user-visible atomics), reference cycles
+  are impossible by construction and a weak form is unnecessary.
+- **Deterministic drop.** When the last `Shared<T>` clone is dropped, `T`
+  is dropped and the allocation is freed. No GC, no delayed reclamation.
+  Preserves the "no GC" guarantee of §3.10.
+
+**API:**
+
+```sploosh
+// Construction — one way to do it.
+let cfg: Shared<Config> = Shared::new(Config::load("app.toml")?);
+
+// Clone is O(1) — bumps the atomic refcount, no allocation, no T::clone.
+let a = cfg.clone();
+let b = cfg.clone();
+
+// Read access via deref.
+let name: &str = &(*cfg).name;
+let count = (*cfg).max_connections;
+```
+
+**Deref produces `&T`, never a move.** Unlike `Box<T>` (§4.4), where
+`*boxed` can move the inner value out of the box for non-`Copy` types,
+`*shared` on a `Shared<T>` always produces an `&T` borrow and can never
+move. The refcount invariant forbids it: the inner `T` is owned jointly
+by all live clones, and no single clone may claim exclusive access. In
+practice this means `*shared` is only ever useful inside a reference
+context (`&(*shared).field`, `(*shared).method(&args)`); assignments
+like `let x = *shared;` are a compile error for non-`Copy` `T`.
+
+**Trait surface.** `Shared<T>: Clone + Send + Sync` when `T: Send + Sync`.
+If `T` is not `Send + Sync`, `Shared::new(value)` is a compile error —
+`Shared<T>` exists to cross thread and actor boundaries, so requiring
+its inner value to be thread-safe is an enforced invariant, not a
+convention. `Drop` is implemented: decrementing the refcount to zero
+drops the inner `T` and frees the allocation. `Shared<T>` is **not
+`Copy`** — explicit `.clone()` preserves the cost-signal of a refcount
+bump at each use site.
+
+**Actor interop.** A `Shared<T>` is an owned value (the wrapper itself
+moves; the inner data is shared via refcount bump). Passing a
+`Shared<T>` to an actor's `&mut self` method via `send` therefore
+satisfies the §8.2 owned-parameter rule without any exception. It is
+also the idiomatic reply type for an `&self` actor method that returns
+cached data — the caller bumps the refcount on receive rather than
+deep-cloning the value.
+
+```sploosh
+actor Worker {
+    cache: Shared<LookupTable>,
+    fn init(cache: Shared<LookupTable>) -> Self { Worker { cache } }
+    pub fn lookup(&self, key: &str) -> Option<u64> {
+        (*self.cache).get(key)                 // &T access across the refcounted pointer
+    }
+}
+
+let table = Shared::new(LookupTable::load("data.bin")?);
+let w1 = spawn Worker::init(table.clone());
+let w2 = spawn Worker::init(table.clone());     // both workers share one allocation
+```
+
+**`Shared<T>` does not replace `Handle<T>`.** They answer different
+questions: `Shared<T>` shares *reads* of immutable data; `Handle<T>`
+shares *writes* to an actor's mutable state. Pick by intent — if any
+actor needs to mutate the value, wrap it in an actor and share its
+`Handle<T>`; otherwise reach for `Shared<T>`.
+
+**Not available on-chain.** `Shared<T>` is a compile error inside
+`onchain` modules (§11.1, §12.3). Reference counting has no gas or
+storage meaning, and every on-chain value is scoped to the transaction
+frame, so no refcounted-sharing primitive is needed or well-defined.
 
 ### 4.5 Lifetimes
 
@@ -1481,6 +1578,16 @@ Adding `send` capability to a method with a reference parameter is a compile
 error, and adding a reference parameter to a method that is already
 `send`-callable is also a compile error. There is no hidden escape hatch.
 
+**`Shared<T>` and the owned-parameter rule.** A `Shared<T>` value is owned
+(the wrapper itself moves; the inner data is shared via atomic refcount),
+so passing a `Shared<T>` to a `&mut self` method via `send` satisfies the
+rule above — the call site `.clone()`s the `Shared<T>` to bump the
+refcount before the send, and the receiver owns its copy of the wrapper.
+This is the idiomatic way to pass read-heavy data to an actor handler
+without deep-cloning. `Shared<T>` is likewise the idiomatic reply type
+for an `&self` request/reply method that returns cached data. See
+§4.4a for the full `Shared<T>` surface.
+
 ```sploosh
 actor Logger {
     entries: Vec<String>,
@@ -2166,6 +2273,9 @@ scheduler. The following are all compile errors inside `onchain` modules:
 - `extern "C"` blocks of any kind, including `extern "C" async` (§4.9).
 - The `async` function modifier and the `.await` operator — on-chain functions
   must be synchronous end-to-end within a transaction.
+- The `Shared<T>` refcounted pointer type (§4.4a) — reference counting has
+  no gas or storage meaning, and every on-chain value is scoped to the
+  transaction frame.
 
 Transitive imports of native modules that internally use actors are still
 allowed, provided the functions called across the `onchain` boundary do not
@@ -2839,9 +2949,12 @@ error inside `onchain` modules: the `actor` keyword, the `spawn`, `send`,
 `Channel<T>`, `Sender<T>`, `Receiver<T>`, `JoinHandle<T>` types, the
 `@supervisor`, `@mailbox` attributes, and the `async` function modifier with its
 `.await` operator. `extern "C"` and `extern "C" async` FFI blocks are also
-forbidden on-chain (§4.9, §11.1). On-chain execution is synchronous,
-single-threaded, and transactional — there is no scheduler for any of these
-constructs to run on. See §8.1 and §11.1 for the cross-references.
+forbidden on-chain (§4.9, §11.1). The `Shared<T>` refcounted pointer type
+(§4.4a) is forbidden on-chain as well — reference counting has no gas or
+storage meaning, and every on-chain value is scoped to the transaction
+frame. On-chain execution is synchronous, single-threaded, and
+transactional — there is no scheduler or shared-memory heap for any of
+these constructs to run on. See §8.1 and §11.1 for the cross-references.
 
 **Forbidden inside `onchain`:** every floating-point math method listed in §4.10 is a
 compile error inside `onchain` modules — classification (`is_nan`, `is_finite`, ...),
@@ -3009,7 +3122,7 @@ equivalent sequence of primitive operations and lets the optimizer handle the re
 ```
 Option, Some, None
 Result, Ok, Err
-String, Vec, Map, Set, Box
+String, Vec, Map, Set, Box, Shared
 print, format, assert
 Display, Debug, Clone, Copy, Eq, Hash, Ord
 From, Into, TryFrom, TryInto
@@ -3402,6 +3515,7 @@ in prose.
 | `Box<T>` with `Drop` trait | RAII pattern. Deterministic cleanup. `Drop` + `Copy` mutually exclusive. |
 | Standard orphan rule | Match Rust's coherence rule. Deeply trained. Prevents conflicting impls. |
 | Diagnostic format + stable error codes | Machine-actionable compiler output is the AI-native lever. Stable `E<NNNN>` codes, rustc-compatible applicability vocabulary, and an NDJSON mode let LLM agents round-trip fix-and-retry loops deterministically. |
+| `Shared<T>` immutable refcount primitive | Chosen over `Arc<T>` to eliminate interior-mutability pairing and cycle risk by construction. Split from `Handle<T>` by intent: reads → `Shared<T>`, writes → actor + `Handle<T>`. Strict `T: Send + Sync` requirement keeps the LLM surface narrow. |
 
 ---
 
@@ -3607,8 +3721,9 @@ Source (.sp)
 | v0.4.4 | **On-chain semantics — Cluster C** (§11): closes the four design-heavy gaps that prevented EVM/SVM codegen from starting. **Storage layout** (new §11.1a): target-pluggable abstraction with Solidity-compatible EVM reference realization — sequential `u256` slots in declaration order, Solidity-rule packing within slots, `Map<K, V>` entries at `keccak256(abi.encode(key, map_slot))`, nested maps recurse, `Vec<T>` / `String` with length at slot and data at `keccak256(slot)`, `[T; N]` inline. SVM layout deferred to a future Solana amendment; Sploosh surface stays identical across targets. **Reentrancy guard mechanism** (new §11.3a): runtime per-contract boolean flag set on entry to any non-`@reentrant` `pub` on-chain function and cleared on return (success, error, or revert). Cross-contract re-entry into a guarded function reverts with new error `ChainError::Reentrancy`; `@reentrant` disables the check and the set for that function only. Gas cost is qualitative (one TLOAD + one TSTORE per guarded call on EIP-1153 EVM forks (Cancun+), SLOAD/SSTORE fallback on earlier forks). Explicitly distinguished from §8.10.1 actor `SelfCall` — same word, different layers. **Cross-contract ABI and call semantics** (new §11.4a): new surface syntax `extern onchain mod X { pub fn ...; ... }` declares callee signatures at compile time; `chain::call(addr, callee, args) -> Result<T, ChainError>` blocks synchronously on EVM (lowers to `CALL`), Solidity ABI is the reference argument encoding on EVM, `?` propagates `ChainError::Reverted { data: Vec<u8> }` with revert bytes bounded by `RETURNDATACOPY` semantics. New error enum `ChainError { Reverted, OutOfGas, Reentrancy, InvalidTarget, DecodingError }` added to the on-chain error surface. No delegatecall in v0.4.x (deferred to v0.5.0). SVM divergence via Solana CPI with preserved user-level surface; concrete ABI deferred. **Explicit contrast with `extern "C"` (§4.9)**: both nest under `extern`, but calling conventions, safety models, and error surfaces differ — not interchangeable. **Gas model** (new §11.7a): target-pluggable metering abstraction. EVM references Yellow Paper + active-hard-fork EIP cost tables (Sploosh does not redefine opcode costs); `ctx::gas_remaining() -> u256` EVM-only, `#[gas_limit(N)]` EVM-only advisory in deployed ABI metadata. SVM uses compute units; `ctx::compute_units_remaining() -> u64` SVM-only. All three are compile errors on native and wasm. **Out-of-gas semantics**: transaction-wide revert, all storage mutations and emitted events unwound, and revert is **unaffected by per-function attributes including `@reentrant`** (explicit invariant). Transient-state unwind clears the reentrancy flag on revert, so failed calls cannot leave a contract with its guard stuck set. **`#[indexed]` event field marker** (§11.5, §12.3): up to three indexed fields per event variant on EVM (topic slots 1–3; topic 0 is the signature hash); compile error on more. SVM accepts `#[indexed]` for source-compatibility but treats it as a no-op. **§13.0 intrinsics table**: `ctx::gas_remaining` context column tightened to EVM-only, new row for `ctx::compute_units_remaining` (SVM-only), `chain::call` signature updated to `Result<T, ChainError>`, `storage::*` rows reference §11.1a, `chain::call` row references §11.4a. **§16 grammar**: `extern_block` production extended — `extern_target = STRING_LIT | "onchain" "mod" IDENT` — and `extern_fn` allows optional `pub`. No new keywords (still 40). No new item kinds; `extern onchain mod` is an extern-block variant. **Deferred to v0.5.0**: cross-contract ABI emission artifacts (bytecode + ABI JSON + metadata file), WASM target variants (`wasm32-unknown-unknown` vs `wasm32-wasi`), delegatecall support, SVM storage layout details, SVM CPI concrete ABI, per-call gas forwarding annotation. |
 | v0.5.0 | **Removed the `none` keyword** (§2.3, §16). Per the independent PR #9 review, `none` was reserved in the §2.3 keyword list and appeared as a literal in the §16 grammar `literal` production, but every example, every guide, and the `docs/` tree generally used `None` (the `Option::None` constructor exported from the §13.1 prelude). Lowercase `none` was reserved in two definitional sites and used in zero practical sites — the keyword reservation served no purpose while creating a contradiction with the prelude. Removed from `docs/spec-plans/LANGUAGE_SPEC.md` §2.3 and §16, and from the `docs/reference/keywords.md` and `docs/reference/grammar.md` mirrors. Keyword count: 40→39 (losing `none`). The capitalized `None` — an identifier resolving to `Option::None` via the prelude — is unchanged and remains the sole form for an absent `Option` value. No grammar reshape beyond the deleted alternative; no other sections touched. This amendment opens the v0.5.x cycle with a mechanical correctness fix identified by the PR #9 review (severity Blocker, action L1). |
 | v0.5.1 | **Compiler Diagnostics specification** (new §18). Formalizes the compiler's diagnostic contract as a first-class spec artifact — the highest-leverage missing piece for the AI-native positioning. New §18.1 Diagnostic record defines the canonical field layout (`code`, `severity`, `message`, `primary_span`, `labels`, `children`, `suggested_fixes`, `explanation_url`) that all renderings must preserve. §18.2 Error-code clusters reserves ranges: `E0001–E0999` lexical (A), `E1000–E1099` type/trait/ownership (B), `E1100–E1199` on-chain (C, already in use), `E1200–E1299` actors/concurrency (D), `E1300–E1399` FFI (E), `E1400–E1499` attributes (F), `W0001–W0999` warnings, `L0001–L0999` lints, `E9000+` ICE. §18.3 Suggested-fix applicability adopts rustc's vocabulary verbatim (`MachineApplicable`, `MaybeIncorrect`, `HasPlaceholders`, `Unspecified`) so Rust-trained models recognize the levels. §18.4 Stability contract: code→meaning is frozen on release; retired codes are marked `status: deprecated` with a `superseded_by` pointer and are never reassigned. §18.5 Output formats: `human` (default, rustc-style), `json` (newline-delimited JSON, one record per line, stable field layout with optional `$schema`), `short` (single line per diagnostic, grep-friendly). §18.6 LLM-integration contract: four invariants that hold for every diagnostic in `json` mode — every diagnostic carries a code; `MachineApplicable` fixes are complete (applying them preserves compilability); `primary_span` is always populated (file-less diagnostics use a synthetic `"<cli>"` file); `children` severities are limited to `note` / `help`. Explicit non-commitments: the spec does **not** mandate a hosted URL for `explanation_url` (implementations may leave it `None`) and does **not** commit to a specific JSON Schema artifact for `$schema` (draft-7 emission is a future follow-up). New §17 Design Decisions row documents the format-as-AI-native-lever rationale. **Registry expansion**: `docs/reference/compiler-errors.md` rewritten to distinguish "format" (§18) from "registry" (this file), adds `Cluster` and `Status` columns to the existing E1101–E1109 on-chain rows, and reserves cluster-header placeholders for the A/B/D/E/F/W/L/ICE ranges with TODO entries. Adds a "Growth policy" block (4 rules: registry-first workflow, spec-section anchoring, frozen-on-publish, deprecate-don't-reassign). **Tooling**: `docs/tooling/build-system.md` gains a Compiler Flags subsection documenting `--error-format=<human\|json\|short>` (default `human`) and `--explain <code>` (prints long-form explanation sourced from the local registry, not a network call). No new keywords (39 unchanged). No grammar changes. Closes PR #9 review Blocker U1. **Principle #7 softened** (§1): the 4,000-token claim is now framed as a soft target rather than a hard budget, acknowledging that the PROMPT edition was already 4,077 tokens (cl100k_base) before v0.5.1 and the Diagnostics bullet added ~133 more. This partially addresses review action L8 by tightening the claim to match reality; the stricter CI-enforcement path remains a strategy decision for a future amendment. |
+| v0.5.2 | **`Shared<T>` immutable-refcounted primitive** (new §4.4a). Closes PR #9 review Blocker P1 — the shared-immutable-data gap that previously forced clone-everything, actor-wrap, or local-`&T`-only patterns for read-heavy data. New §4.4a "Shared Immutable Data with `Shared<T>`" defines an atomically refcounted pointer to an immutable `T`: `Shared::new(value) -> Shared<T>`; `Clone` bumps the atomic refcount O(1) with no allocation and no `T::clone` call; deterministic drop of the inner `T` when the last clone goes out of scope (preserves the "no GC" guarantee of §3.10). **Strictly less than Rust's `Arc<T>`**: immutable only (no `&mut *shared`, no `get_mut`, no `make_mut`, no `try_unwrap`); no `Weak<T>` (cycles impossible by construction because Sploosh has no `Cell` / `RefCell` / `UnsafeCell` / user-visible atomics); not `Copy` (explicit `.clone()` preserves the cost-signal of each refcount bump). **Strict `T: Send + Sync` requirement**: `Shared<T>` is `Clone + Send + Sync` iff `T: Send + Sync`, otherwise `Shared::new` is a compile error — the type exists to cross thread and actor boundaries so requiring thread-safe inner values is an enforced invariant, not a convention. **Deref semantics**: `*shared` produces `&T` only; unlike `Box<T>`'s `*boxed`, it can never move the inner value out. **Actor interop** (§8.2 addition): `Shared<T>` satisfies the §8.2 owned-parameter rule for `&mut self` methods (the wrapper moves; the inner data is shared via refcount bump), making it the idiomatic way to pass read-heavy data to actor handlers and the idiomatic reply type for `&self` request/reply methods returning cached data. **Not available on-chain** — a compile error inside `onchain` modules per both §11.1 and §12.3; reference counting has no gas or storage meaning, and every on-chain value is scoped to the transaction frame. **Drop-order clarification** (§3.10): the `Shared<T>` wrapper drops in scope-reverse order as usual; the inner `T` drops only when the last live clone goes out of scope, which may be earlier or later than any individual wrapper's lifetime — still deterministic given the set of holders. **Compound Types list** (§3.2) adds `Shared<T>`. **Prelude** (§13.1) adds `Shared` after `Box`. **§4.4** rewritten to cross-reference §4.4a and §8.2 instead of saying only "Use `Handle<T>` for sharing state". **§17 Design Decisions Log** adds a new v0.5.2 row (the v0.4 "No `Rc<T>`/`Arc<T>`" row is kept for chronological accuracy). **Guide updates**: `docs/guide/ownership-and-borrowing.md` rewrites the "No Rc/Arc" section with the two-primitive narrative (`Shared<T>` for immutable, `Handle<T>` for mutable, pick by intent); `docs/guide/actors-and-concurrency.md` updates its `Rc`/`Arc` mention to cross-reference `Shared<T>` and adds a worked example of `Shared<LookupTable>` crossing actor boundaries instead of actor-wrapping a read-heavy cache. **Migration update**: `docs/migration/from-rust.md` rewrites three rows (`Arc<Mutex<T>>`, `Rc<T>`/`Arc<T>`, `Arc::strong_count`) to contrast `Shared<T>` (immutable reads) and actor + `Handle<T>` (mutable writes). **PROMPT edition**: `Shared<T>` added to the Compounds line and the Ownership `Box<T>` bullet is rewritten to include the `Shared<T>` summary. No grammar changes. No new keywords (39 unchanged). No new `docs/reference/compiler-errors.md` entries — per §18.4 and the v0.5.1 Growth policy, Shared-specific diagnostic codes are earned when the compiler lands, not pre-assigned. |
 
 ---
 
 *Working title: Sploosh. Name subject to change.*
-*This spec is a living document. v0.5.1-draft — April 2026.*
+*This spec is a living document. v0.5.2-draft — April 2026.*
