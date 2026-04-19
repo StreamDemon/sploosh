@@ -66,7 +66,11 @@ def main() -> int:
               "  pip install youtube-transcript-api", file=sys.stderr)
         return 2
 
-    video_id = extract_video_id(args.video)
+    try:
+        video_id = extract_video_id(args.video)
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
 
     api = YouTubeTranscriptApi()
     try:
