@@ -1675,13 +1675,25 @@ in the actor model.
 1. CAS `Running → StopRequested`. If the flag was already `StopRequested`,
    returns `Err(StopError::AlreadyStopping)`. If the flag was `Killed` or the
    actor was already `DEAD`, returns `Err(StopError::AlreadyDead)`. Otherwise
-   returns `Ok(())`.
-2. The actor's observable state transitions `READY → DRAINING` (§8.1a) at the
-   moment the flag is set. Messages **already in the mailbox** continue to
-   drain in normal FIFO order. **New sends are rejected** the moment the flag
-   is set: `send` silently drops, `send_timeout` returns
-   `Err(SendError::Dead)`, request/reply returns `Err(ActorError::Dead)`. No
-   new error variants are introduced — these match the existing
+   returns `Ok(())`. **`stop()` is valid against an `INITIALIZING` actor**:
+   the CAS succeeds independently of observable lifecycle state, and the
+   stop signal is *latched* — the runtime checks the flag at the boundary
+   between `init` returning and the first handler dispatch and transitions
+   the actor `INITIALIZING → DRAINING` at that point. New sends arriving
+   while the actor is still `INITIALIZING` queue normally; once `init`
+   returns and the latched flag is observed, the queued messages drain in
+   FIFO order under the same `DRAINING` rules as a `READY → DRAINING`
+   transition. If `init` panics, the actor transitions directly to `DEAD`
+   per §8.7 and the latched flag is discarded.
+2. For an actor in `READY`, the observable state transitions
+   `READY → DRAINING` (§8.1a) at the moment the flag is set. For an actor
+   in `INITIALIZING`, the transition is `INITIALIZING → DRAINING` at the
+   moment `init` returns and the latched flag is observed (see step 1).
+   Messages **already in the mailbox** continue to drain in normal FIFO
+   order. **New sends are rejected** from the moment the actor is
+   observably `DRAINING`: `send` silently drops, `send_timeout` returns
+   `Err(SendError::Dead)`, request/reply returns `Err(ActorError::Dead)`.
+   No new error variants are introduced — these match the existing
    dead-mailbox behaviour of §8.5 and §8.8 exactly.
 3. After each handler completes, the runtime checks the flag. When the flag is
    `StopRequested` and the mailbox is empty, the runtime transitions the actor
@@ -1707,7 +1719,13 @@ in the actor model.
    `Err(StopError::AlreadyDead)`. A `kill()` while the flag is `StopRequested`
    is **valid and upgrades**: the CAS succeeds, returns `Ok(())`, and the
    actor transitions `DRAINING → DEAD` after the current handler returns —
-   the remainder of the mailbox is discarded.
+   the remainder of the mailbox is discarded. **`kill()` is valid against an
+   `INITIALIZING` actor**: the flag is latched and observed at the boundary
+   between `init` returning and the first handler dispatch; the actor then
+   transitions `INITIALIZING → DEAD` without ever entering `READY` or
+   `DRAINING`, the mailbox is discarded, and `Drop` runs on `Self` per
+   §8.7a step 1. If `init` panics before the latched flag is observed, the
+   actor transitions directly to `DEAD` per §8.7 and the flag is discarded.
 2. Sploosh does not interrupt user code mid-handler. The runtime allows the
    currently executing handler (including any in-flight `.await`) to run to
    completion; only after the handler returns does the runtime discard the

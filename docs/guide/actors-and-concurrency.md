@@ -28,13 +28,14 @@ Actors process one message at a time. No data races by construction.
 
 ## Actor Lifecycle
 
-Every actor is always in one of three states:
+Every actor is always in one of four states:
 
 - **INITIALIZING** -- `spawn` has returned a handle, but `init` is still running. Messages queue in the mailbox and are delivered once the actor is ready.
 - **READY** -- `init` has returned. The actor is processing messages under the one-handler-at-a-time rule.
+- **DRAINING** -- A `handle.stop()` request has been observed (see "Stopping Actors" below). Messages already in the mailbox keep draining in FIFO order, but new sends are rejected (`send` drops, `send_timeout` and request/reply return `Err(_::Dead)`). The actor transitions to `DEAD` when the mailbox empties — or earlier if a `handle.kill()` upgrade arrives.
 - **DEAD** -- The actor has terminated. Its state has been dropped and it will never process another message.
 
-If `init` panics (bounds check, overflow, failed `assert`), the actor transitions `INITIALIZING → DEAD` without ever reaching `READY`. The handle returned by `spawn` may therefore be observationally dead on the very first call: request/reply returns `Err(ActorError::Dead)`, and `send` silently drops. If the actor is supervised, its parent is notified as if a `READY` child had died — init failures count toward `max_restarts`.
+If `init` panics (bounds check, overflow, failed `assert`), the actor transitions `INITIALIZING → DEAD` without ever reaching `READY` (the `DRAINING` state is skipped on the failure path). The handle returned by `spawn` may therefore be observationally dead on the very first call: request/reply returns `Err(ActorError::Dead)`, and `send` silently drops. If the actor is supervised, its parent is notified as if a `READY` child had died — init failures count toward `max_restarts`.
 
 Need recoverable initialization? Store the work as an `Option<T>` field and run a handshake message after spawn:
 

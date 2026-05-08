@@ -119,7 +119,7 @@ Pick by intent: *does any actor need to mutate this value?* If no, reach for `Sh
 
 **Neither primitive is available inside `onchain` modules.** Reference counting has no gas or storage meaning, and actors do not exist on-chain — see §11.1 and §12.3 of the language spec.
 
-**`Handle<T>` is not reference-counted.** Dropping the last live handle has no effect on the actor's lifetime. Use `handle.stop()` (graceful drain) or `handle.kill()` (immediate after the current handler) for cooperative termination, or rely on supervisor decisions and runtime shutdown for the involuntary paths. An actor with no live handle and no live `stop()` call is *orphaned* and keeps running until runtime shutdown. `Shared<T>` *is* reference-counted and is deterministically freed when the last clone is dropped.
+**`Handle<T>` is not reference-counted.** Dropping the last live handle has no effect on the actor's lifetime. Use `handle.stop()` (graceful drain) or `handle.kill()` (immediate after the current handler) for cooperative termination, or rely on supervisor decisions and runtime shutdown for the involuntary paths. An actor with no live handle and no pending `stop()`/`kill()` request is *orphaned* and keeps running until runtime shutdown. `Shared<T>` *is* reference-counted and is deterministically freed when the last clone is dropped.
 
 ## No Static Mutable State
 
