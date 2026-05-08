@@ -47,6 +47,42 @@ sploosh build --error-format=short 2>&1 | grep error   # terse log processing
 sploosh --explain E1101                      # long-form explanation for reentrancy revert
 ```
 
+## Test Runner Flags
+
+`sploosh test` is the canonical runner. Spec contract lives in §13.3.7
+of `LANGUAGE_SPEC.md`; the API surface lives in `docs/stdlib/test.md`.
+
+| Flag | Values | Default | Purpose |
+|------|--------|---------|---------|
+| `--filter <pat>` | substring | none | Only run tests whose fully-qualified path matches `<pat>` |
+| `--exact` | flag | off | Treat `--filter` as exact match instead of substring |
+| `--test-threads <N>` | `1..` | core count | Run `N` tests concurrently (1 disables parallelism) |
+| `--nocapture` | flag | off | Forward test stdout/stderr to the terminal during the run |
+| `--seed <hex>` | hex string | random | Fix the property-test RNG seed for reproduction |
+| `--cases <N>` | `1..` | 256 | Override the per-property case count |
+| `--format <mode>` | `human`, `json` | `human` | Match `--error-format` (§18.5); `json` is one event per line |
+
+```bash
+sploosh test                                      # run all tests
+sploosh test --filter parser                      # substring match
+sploosh test --filter test_parses_addition --exact
+sploosh test --test-threads=1 --seed=0xCAFEBABE   # deterministic
+sploosh test --format=json | jq '.'               # machine-readable
+```
+
+**Determinism contract.** With `--test-threads=1 --seed=<fixed>`, two
+runs of the same source against the same compiler version produce
+byte-identical output. This is the contract LLM agents and CI snapshot
+tests rely on.
+
+**Exit codes.**
+
+| Code | Meaning |
+|------|---------|
+| `0` | All tests passed |
+| `1` | At least one test failed |
+| `2` | Runner error (build failure, no tests matched a `--filter`, etc.) |
+
 ## Compilation Pipeline
 
 ```

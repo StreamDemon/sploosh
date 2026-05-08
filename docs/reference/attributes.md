@@ -6,7 +6,8 @@
 
 | Attribute | Purpose |
 |-----------|---------|
-| `@test` | Mark a function as a test case |
+| `@test` | Mark a function as a test case. Function must take zero parameters and return `()` or `Result<(), TestFailure>`; may be `async`. Honored only under `#[cfg(test)]`. See §13.3.1 of the spec and `docs/stdlib/test.md`. |
+| `@property` | Mark a function as a randomized property test. Parameters' types must implement `Gen`. Optional `cases: N` parameter overrides the default 256-case count. See §13.3.6 of the spec. |
 | `@derive(...)` | Auto-generate trait impls |
 | `@error` | Auto-generate `From`, `Display`, `Error` for error enums |
 | `@inline` | Hint to inline a function |

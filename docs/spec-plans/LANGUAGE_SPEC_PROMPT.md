@@ -215,11 +215,14 @@ File resolution: `mod foo;` → `foo.sp` or `foo/mod.sp`.
 Orphan rule: impl trait for type only if you own the trait or the type.
 
 ## Attributes & Derives
-`@test` `@derive(Serialize, Clone, Debug)` `@inline` `@error` `@payable`
+`@test` `@property` `@derive(Serialize, Clone, Debug)` `@inline` `@error` `@payable`
 `@supervisor(strategy: "one_for_one")` `@mailbox(capacity: 2048)` `@overflow(wrapping)`
 `@fast_math(contract, afn)` (compile error on-chain)
 `#[target(evm)]` `#[cfg(test)]`
 Derives: `Debug`, `Clone`, `Copy`, `Eq`, `Hash`, `Serialize`, `Deserialize`, `Ord`.
+
+## Testing
+`@test fn name() { assert_eq(a, b); }` — zero params, returns `()` or `Result<(), TestFailure>`; may be `async`. Honored only under `#[cfg(test)]`. Each test runs in its own runtime-spawned isolation actor; failure paths: `Err(TestFailure)` (Result shape) or actor death (panic from failed `assert*`). `assert_eq(a, b)` / `assert_ne(a, b)` / `assert_matches(value, pattern)` are test-only intrinsics (`E1410` outside tests) requiring `T: Eq + Debug`. `Result<(), TestFailure>` shape: `?` propagates via `TestFailure: From<E>` for every `E: Error`. Layout: unit tests in `#[cfg(test)] mod tests`, integration tests in `tests/*.sp` (each compiled as separate crate, `pub`-only). `@property fn name(x: T) { ... }` runs 256 cases by default with deterministic shrinking; `T: Gen` (built-in for primitives, `bool`, `String`, `Vec<T: Gen>`, `Option`, `Result`, tuples ≤12). CLI: `sploosh test [--filter pat] [--exact] [--test-threads N] [--nocapture] [--seed hex] [--cases N] [--format human|json]`. `--test-threads=1 --seed=<fixed>` is byte-deterministic. Exit codes: `0` pass, `1` fail, `2` runner error. **`std::test` is a compile error inside `onchain`**; on-chain test scaffolding deferred.
 
 ## Build
 `sploosh build --target native|wasm|evm|svm`
