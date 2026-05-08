@@ -1,0 +1,28 @@
+docs/runbooks/testing-strategies.md
+  s_91b4131ef9a322::t_45ae545ab31201 141-147
+  s_91b4131ef9a322::t_753571fd5cc52b 148-150
+docs/spec-plans/LANGUAGE_SPEC.md
+  s_91b4131ef9a322::t_f1562218dc1b19 3483-3484
+docs/reference/compiler-errors.md
+  s_91b4131ef9a322::t_07a1690a79ef1a 73
+docs/spec-plans/LANGUAGE_SPEC_PROMPT.md
+  s_91b4131ef9a322::t_4d017bff9136bf 225
+docs/stdlib/test.md
+  s_91b4131ef9a322::t_5a3436047ad0f4 128
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "7f4e959dab0a2c303a7cadc574583089a62685d1",
+  "prompts": {},
+  "sessions": {
+    "s_91b4131ef9a322": {
+      "agent_id": {
+        "tool": "droid",
+        "id": "2082b1d3-6c81-4820-bb9c-74eda326776d",
+        "model": "custom:claude-opus-4-7-0"
+      },
+      "human_author": null
+    }
+  }
+}
