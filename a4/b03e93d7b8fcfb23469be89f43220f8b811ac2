@@ -1,0 +1,43 @@
+docs/guide/actors-and-concurrency.md
+  s_1c0103bc3e1dca::t_0a26da951f5b40 61-103
+docs/spec-plans/LANGUAGE_SPEC.md
+  s_1c0103bc3e1dca::t_ecdc2c21625854 1876-1879
+  s_1c0103bc3e1dca::t_7c6c9314dba16a 1551-1569
+  s_1c0103bc3e1dca::t_ff3e40ea49d8d4 1935-1944
+  s_1c0103bc3e1dca::t_7152f0ba54c1fe 2151-2159
+  s_1c0103bc3e1dca::t_dc502afa61fcb5 1648-1799
+  s_1c0103bc3e1dca::t_b2efa6fade61df 1
+  s_1c0103bc3e1dca::t_323aec19f5726c 4270
+  s_1c0103bc3e1dca::t_569e210941a489 2039-2048
+  s_1c0103bc3e1dca::t_245da4c2e27940 3242-3243
+  s_1c0103bc3e1dca::t_0c0795556ff6d8 1495,1501,2016-2017
+  s_1c0103bc3e1dca::t_d45aaa354eb6ce 4057
+  s_1c0103bc3e1dca::t_2810c820cdfb16 4263
+  s_1c0103bc3e1dca::t_d13246a928e35f 2192-2195
+  s_1c0103bc3e1dca::t_689ee0ea30c011 2003-2004,2010-2015
+  s_1c0103bc3e1dca::t_4b9a3e03de2273 1952-1954
+docs/guide/ownership-and-borrowing.md
+  s_1c0103bc3e1dca::t_cd2620f3f446bc 122
+docs/migration/from-rust.md
+  s_1c0103bc3e1dca::t_86c5e8a7b0f18d 39
+docs/migration/from-elixir.md
+  s_1c0103bc3e1dca::t_ff1546b98c6d31 30
+docs/spec-plans/LANGUAGE_SPEC_PROMPT.md
+  s_1c0103bc3e1dca::t_be30a9e1172cdf 127-131
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "a4b03e93d7b8fcfb23469be89f43220f8b811ac2",
+  "prompts": {},
+  "sessions": {
+    "s_1c0103bc3e1dca": {
+      "agent_id": {
+        "tool": "droid",
+        "id": "bc57b4ca-f550-42aa-a9d0-fb5eda263018",
+        "model": "custom:claude-opus-4-7-0"
+      },
+      "human_author": "StreamDemon <revenantpulse@gmail.com>"
+    }
+  }
+}
