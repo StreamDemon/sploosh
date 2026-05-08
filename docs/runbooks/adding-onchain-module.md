@@ -41,7 +41,14 @@
    [targets]
    default = "native"
    contracts = ["evm"]
+
+   [target.evm.dependencies]
+   # Optional: target-specific deps for on-chain builds
+   sploosh_chain = { version = "0.2", features = ["evm"] }
    ```
+
+   Note: `overflow-checks` is **frozen `true`** for `evm` and `svm`
+   builds regardless of any `[profile.<name>]` setting (§14.1.6, §4.7).
 
 5. **Build for on-chain target:**
    ```bash
