@@ -28,3 +28,6 @@ CLAUDE.md
 # Python
 __pycache__/
 *.pyc
+
+# ByteRover context tree (has its own sync via `brv push` / `brv pull`)
+.brv/
