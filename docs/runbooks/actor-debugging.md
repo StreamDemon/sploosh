@@ -109,22 +109,30 @@ Holding the iterator across an `.await` inside an actor handler is permitted but
 
 ## Recipe: What does our supervisor tree look like right now?
 
+A real supervisor tree is heterogeneous — a `RootSupervisor` whose children include a `WorkerPoolSupervisor`, a `LoggingSupervisor`, and so on. There is no `dyn Supervisor` trait object to recurse through typed handles, so `children()` (which lives only on `@supervisor`-decorated handles, §8.12.3) is the right tool for one-shot listing of a *known* supervisor's direct children but not for a generic tree walk.
+
+For the tree walk, recurse via `ActorId` against the registry instead. `observe::actors()` plus `ActorInfo.supervisor` (§8.12.2) does the job without needing a typed handle for each intermediate node:
+
 ```sploosh
 use std::actor::observe;
 
 fn dump_tree(root: &Handle<RootSupervisor>) {
-    fn walk_children(parent: &Handle<impl Actor>, depth: usize) {
-        for child in parent.children() {
-            let indent: String = " ".repeat(depth * 2);
-            log::info(format("{}{} ({}) state={:?}", indent, child.name, child.id, child.lifecycle_state));
-            // Recurse via a stored handle map keyed by ActorId — implementation-defined.
-        }
+    let root_info = observe::actor_info(root)
+        .expect("root supervisor must have a live snapshot");
+    log::info(format("{} ({})", root_info.name, root_info.id));
+    walk_by_supervisor(root_info.id, 1);
+}
+
+fn walk_by_supervisor(parent_id: ActorId, depth: usize) {
+    let indent: String = " ".repeat(depth * 2);
+    for info in observe::actors().filter(|i| i.supervisor == Some(parent_id)) {
+        log::info(format("{}- {} ({}) state={:?}", indent, info.name, info.id, info.lifecycle_state));
+        walk_by_supervisor(info.id, depth + 1);
     }
-    walk_children(root, 0);
 }
 ```
 
-`children()` on a `@supervisor`-decorated handle enumerates its current children in supervisor-order (the same order `rest_for_one` uses; §8.7a). Combine with `restart_count(&child)` to spot a child that is restarting in a tight loop:
+`children()` on a `@supervisor`-decorated handle still enumerates its current children in supervisor-order (the same order `rest_for_one` uses; §8.7a) when you already hold a typed handle to that specific supervisor. Combine with `restart_count(&child)` to spot a child that is restarting in a tight loop:
 
 ```sploosh
 fn restart_storm_audit(sup: &Handle<WorkerPool>) {
