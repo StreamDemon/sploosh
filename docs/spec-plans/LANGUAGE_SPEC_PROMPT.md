@@ -124,10 +124,11 @@ let val = c.get();       // request/reply, blocks (&self)
 ```
 `Handle<T>`: Clone + Send. `send` valid only on `&mut self` methods; `send` on `&self` is a compile error.
 `&mut self` pub params must be **owned**. `&self` pub params **may take references** (caller blocks, stack outlives call).
-Lifecycle: `INITIALIZING → READY → DEAD`. `init` is infallible and non-async; init panic → DEAD, supervisor notified.
-Handle drop does NOT kill the actor — actors die only via failure, supervisor, or runtime shutdown.
-Direct self request/reply → `Err(ActorError::SelfCall)`. Self-sends (`send self.handle.method(args)`) are legal.
-Dead actor: `send` drops, `send_timeout` → `Err(SendError::Dead)`, request/reply → `Err(ActorError::Dead)`.
+Lifecycle: `INITIALIZING → READY → DRAINING → DEAD` (DRAINING entered via `stop()`; failure path skips DRAINING). `init` is infallible and non-async; init panic → DEAD, supervisor notified.
+Handle drop does NOT kill the actor. Five termination paths: `handle.stop()` (graceful drain), `handle.kill()` (immediate, after current handler), runtime failure, supervisor decision, runtime shutdown.
+`handle.stop() / handle.kill() -> Result<(), StopError>` (`AlreadyStopping` / `AlreadyDead`). Both `&self`; out-of-band signal — bypass mailbox, never block. Supervisor sees stop/kill as **intentional, not failure** — no restart, no `max_restarts` hit. `kill()` upgrades a `DRAINING` actor. `stop()`/`kill()` against an `INITIALIZING` actor latch the flag — observed at the `init`-returns boundary (`INITIALIZING → DRAINING` for stop, `INITIALIZING → DEAD` for kill). Init panic → `DEAD`, latched flag discarded.
+Direct self request/reply → `Err(ActorError::SelfCall)`. Self-sends (`send self.handle.method(args)`) are legal. Self-stop / self-kill via `self.handle.stop()` / `.kill()` are legal and not SelfCall — signal observed after current handler returns.
+Dead/DRAINING actor: `send` drops, `send_timeout` → `Err(SendError::Dead)`, request/reply → `Err(ActorError::Dead)`.
 Blocked senders wake immediately on destination death; no transparent redirect after supervisor restart.
 `select { msg = rx.recv() => handle(msg), _ = timeout(5000) => err() }` — arms top-to-bottom deterministic.
 

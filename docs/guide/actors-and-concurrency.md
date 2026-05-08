@@ -28,13 +28,14 @@ Actors process one message at a time. No data races by construction.
 
 ## Actor Lifecycle
 
-Every actor is always in one of three states:
+Every actor is always in one of four states:
 
 - **INITIALIZING** -- `spawn` has returned a handle, but `init` is still running. Messages queue in the mailbox and are delivered once the actor is ready.
 - **READY** -- `init` has returned. The actor is processing messages under the one-handler-at-a-time rule.
+- **DRAINING** -- A `handle.stop()` request has been observed (see "Stopping Actors" below). Messages already in the mailbox keep draining in FIFO order, but new sends are rejected (`send` drops, `send_timeout` and request/reply return `Err(_::Dead)`). The actor transitions to `DEAD` when the mailbox empties — or earlier if a `handle.kill()` upgrade arrives.
 - **DEAD** -- The actor has terminated. Its state has been dropped and it will never process another message.
 
-If `init` panics (bounds check, overflow, failed `assert`), the actor transitions `INITIALIZING → DEAD` without ever reaching `READY`. The handle returned by `spawn` may therefore be observationally dead on the very first call: request/reply returns `Err(ActorError::Dead)`, and `send` silently drops. If the actor is supervised, its parent is notified as if a `READY` child had died — init failures count toward `max_restarts`.
+If `init` panics (bounds check, overflow, failed `assert`), the actor transitions `INITIALIZING → DEAD` without ever reaching `READY` (the `DRAINING` state is skipped on the failure path). The handle returned by `spawn` may therefore be observationally dead on the very first call: request/reply returns `Err(ActorError::Dead)`, and `send` silently drops. If the actor is supervised, its parent is notified as if a `READY` child had died — init failures count toward `max_restarts`.
 
 Need recoverable initialization? Store the work as an `Option<T>` field and run a handshake message after spawn:
 
@@ -58,7 +59,49 @@ let counter: Handle<Counter> = spawn Counter::init(0);
 
 `Handle<T>` implements `Clone` and `Send`. Handles can be stored in structs, passed between actors, and put in collections.
 
-**Handle drops do not kill the actor.** Unlike `Rc<T>` / `Arc<T>` (not available in Sploosh), `Handle<T>` is *not* reference-counted — dropping the last live handle has no effect on the actor's lifetime. Actors terminate only via runtime failure, supervisor termination, or runtime shutdown when `main()` returns. An actor with no live handle and an empty mailbox is *orphaned* and continues running until the runtime shuts down; clean shutdown is the supervisor's job. For shared immutable reference-counting (configs, lookup tables, read-only caches) use `Shared<T>` — see §4.4a of the language spec and the "Sharing Read-Heavy Data" section below.
+**Handle drops do not kill the actor.** Unlike `Rc<T>` / `Arc<T>` (not available in Sploosh), `Handle<T>` is *not* reference-counted — dropping the last live handle has no effect on the actor's lifetime. Five termination paths replace handle-drop: `handle.stop()` (cooperative drain, see "Stopping Actors" below), `handle.kill()` (immediate after the current handler), runtime failure, supervisor decision, or runtime shutdown when `main()` returns. An actor with no live handle and an empty mailbox is *orphaned* — it keeps running until you call `stop()`/`kill()` or the runtime shuts down. For shared immutable reference-counting (configs, lookup tables, read-only caches) use `Shared<T>` — see §4.4a of the language spec and the "Sharing Read-Heavy Data" section below.
+
+## Stopping Actors
+
+`Handle<T>` exposes two cooperative termination methods:
+
+```sploosh
+let _ = worker.stop();   // graceful: drain mailbox, then DEAD
+let _ = worker.kill();   // immediate: finish current handler, discard rest
+```
+
+Both return `Result<(), StopError>`. The error variants are `AlreadyStopping` (you called `stop()` on an already-stopping actor) and `AlreadyDead` (the actor is already `DEAD`, or you called `kill()` on an already-killed actor). Repeat calls are observable, not silent. `kill()` while the actor is draining is a valid **upgrade** that returns `Ok(())`.
+
+| Method | Semantics |
+|---|---|
+| `stop()` | Sets the actor's termination flag to `StopRequested`. Messages already in the mailbox keep draining in FIFO order; new sends are rejected from this moment (`send` drops, `send_timeout` → `Err(SendError::Dead)`, request/reply → `Err(ActorError::Dead)`). When the mailbox empties, the actor transitions to `DEAD` and `Drop` runs on its state. |
+| `kill()` | Sets the flag to `Killed`. The currently executing handler runs to completion (Sploosh does not interrupt user code mid-handler), then the rest of the mailbox is discarded and the actor transitions to `DEAD`. |
+
+**Out-of-band delivery.** Stop and kill signals do **not** go through the mailbox — they set a per-actor atomic flag, never block on backpressure, and never count against `@mailbox(capacity: N)`. This is the only out-of-band signal in the actor model.
+
+**Self-stop is legal.** A handler may call `self.handle.stop()` or `self.handle.kill()` on a stored self-handle; the signal is observed after the current handler returns, so self-stop never deadlocks and is **not** an `ActorError::SelfCall`.
+
+**Supervisor interaction.** A child terminated via `stop()` or `kill()` is treated as **intentionally terminated**, not as a failure. The supervisor does not restart it under any strategy, and the termination does not count toward `max_restarts`. Use `stop()`/`kill()` when you want a child to exit without triggering its restart strategy.
+
+```sploosh
+fn main() -> Result<(), AppError> {
+    let logger = spawn Logger::init();
+    let workers: Vec<Handle<Worker>> = (0..4)
+        |> map(|_| spawn Worker::init(logger.clone()))
+        |> collect;
+
+    run_workload(&workers)?;
+
+    // Cooperative shutdown: workers drain in-flight tasks first, then logger
+    // drains its log queue. No supervisor involved; no orphaned actors left.
+    for w in &workers { let _ = w.stop(); }
+    let _ = logger.stop();
+
+    Ok(())
+}
+```
+
+For a stricter shutdown — e.g., a deadline-bounded one — call `stop()` first and escalate to `kill()` if the deadline elapses without the actor reaching `DEAD`.
 
 ## Message Passing
 

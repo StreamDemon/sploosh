@@ -36,7 +36,7 @@
 | Checked arithmetic (debug only) | Checked arithmetic (all modes) | Overflow always panics, no silent wrapping in release |
 | `tokio::task::spawn_blocking` | Not available yet | The only way to run blocking work from an actor handler is an `extern "C" async` FFI wrapper, which the compiler offloads to the runtime's blocking pool. Calling plain `extern "C"` from a handler is a compile error. |
 | `tokio::sync::Mutex` held across `.await` | Not needed | The actor holds its `&mut self` lock automatically until the handler returns (including across `.await`). Direct re-entrant self-calls are detected as `ActorError::SelfCall` rather than deadlocking. |
-| `Arc::strong_count` / dropping the last `Arc` frees the inner value | `Handle<T>` is not reference-counted; `Shared<T>` is | Dropping the last `Handle<T>` does not kill the actor — terminate via supervisor or runtime shutdown; orphaned actors keep running. `Shared<T>` *is* refcounted and is deterministically freed at count zero, matching `Arc<T>` drop semantics. |
+| `Arc::strong_count` / dropping the last `Arc` frees the inner value | `Handle<T>` is not reference-counted; `Shared<T>` is | Dropping the last `Handle<T>` does not kill the actor. Use `handle.stop()` (graceful drain) or `handle.kill()` (immediate after current handler) for explicit cooperative termination — Rust's `Arc<T>` drop has no direct analog because Rust threads stop themselves, not their handle holders. Supervisor and runtime shutdown remain the involuntary paths. `Shared<T>` *is* refcounted and is deterministically freed at count zero, matching `Arc<T>` drop semantics. |
 
 ## New Concepts for Rust Developers
 - **Actors** (`actor`, `spawn`, `send`, `Handle<T>`) -- structured concurrency primitive
