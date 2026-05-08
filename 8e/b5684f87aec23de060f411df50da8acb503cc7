@@ -1,0 +1,19 @@
+docs/runbooks/actor-debugging.md
+  s_fd1fc96f52e94b::t_419776433741fb 112-115,120-130,135
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "8eb5684f87aec23de060f411df50da8acb503cc7",
+  "prompts": {},
+  "sessions": {
+    "s_fd1fc96f52e94b": {
+      "agent_id": {
+        "tool": "droid",
+        "id": "5ecfa2eb-be12-4cd9-b70d-7facb7846e32",
+        "model": "custom:claude-opus-4-7-0"
+      },
+      "human_author": "StreamDemon <revenantpulse@gmail.com>"
+    }
+  }
+}
