@@ -1,0 +1,40 @@
+docs/guide/actors-and-concurrency.md
+  s_6206e163aeab3a::t_34285b0733745a 106-196
+docs/spec-plans/LANGUAGE_SPEC.md
+  s_6206e163aeab3a::t_26483af4557568 2303-2574
+  s_6206e163aeab3a::t_30f64731d2b783 3538-3541
+  s_6206e163aeab3a::t_3f36284d3d180b 4642
+  s_6206e163aeab3a::t_50fca06ffd048e 3333
+  s_6206e163aeab3a::t_8798b421ee9990 3675
+  s_6206e163aeab3a::t_365aa235ebb7fa 3643
+  s_6206e163aeab3a::t_145234395b1a84 4849
+  s_6206e163aeab3a::t_9ff5513a864cd1 1
+  s_6206e163aeab3a::t_04cdc43402857b 4858
+docs/spec-plans/LANGUAGE_SPEC_PROMPT.md
+  s_6206e163aeab3a::t_36b6b8fc3c59fa 135-137
+  s_6206e163aeab3a::t_617648ecb3611c 1
+docs/runbooks/actor-debugging.md
+  s_6206e163aeab3a::t_b613dc9b300a4d 3,5,7-152,155-165,167,171,173-175,179,191,197-199,201,203,205-211,213,215-221,229,231,234,238-255,257,259-263
+docs/stdlib/actor.md
+  s_6206e163aeab3a::t_70f66bc96d95e4 1-294
+docs/reference/attributes.md
+  s_6206e163aeab3a::t_d0e4496aa9a4c5 16
+docs/reference/compiler-errors.md
+  s_6206e163aeab3a::t_4715815ab4c164 55-64
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "928e5cb655e84f978989680ae2c99e989c4be611",
+  "prompts": {},
+  "sessions": {
+    "s_6206e163aeab3a": {
+      "agent_id": {
+        "tool": "droid",
+        "id": "7f7a77bb-77f8-4889-8a52-e10e5b521e79",
+        "model": "custom:claude-opus-4-7-0"
+      },
+      "human_author": "StreamDemon <revenantpulse@gmail.com>"
+    }
+  }
+}
