@@ -87,8 +87,8 @@ If you spot drift outside the scope of your task, **flag it in the PR descriptio
 ### Quick-find commands (PowerShell-friendly, ripgrep preferred)
 
 ```pwsh
-# Find a spec section
-rg -n "^## §?4\.4a" docs/spec-plans/LANGUAGE_SPEC.md
+# Find a spec section (note: spec uses ### for sub-sections like 4.4a, ## for top-level)
+rg -n "^### 4\.4a" docs/spec-plans/LANGUAGE_SPEC.md
 
 # Find every mention of a keyword across docs
 rg -n "Shared<T>" docs

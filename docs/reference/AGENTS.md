@@ -54,6 +54,6 @@ rg -n -A 3 "send" docs/reference/keywords.md docs/spec-plans/LANGUAGE_SPEC.md
 # Confirm spec mirror was also touched
 git diff --name-only main...HEAD | findstr "spec-plans"
 
-# Spot-check the count of keywords
-rg -c "^### " docs/reference/keywords.md
+# Spot-check the count of keywords (must equal 39 — §2.3)
+rg -c '^\| `' docs/reference/keywords.md
 ```

@@ -1,6 +1,6 @@
 ---
 name: sploosh-spec-steward
-model: claude-opus-4-7
+model: claude-opus-4-6
 description: Sploosh language specification steward. Use for any change that touches `docs/spec-plans/LANGUAGE_SPEC.md` or its mirrors. Enforces spec-first authoring, mirror-doc consistency, branch-protected git workflow, and `cubic-dev-ai` review etiquette.
 ---
 
