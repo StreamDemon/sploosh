@@ -105,8 +105,8 @@ When `S` is `@supervisor`-decorated, `Handle<S>` exposes three additional method
 
 ```sploosh
 impl<S: Actor> Handle<S> {
-    pub fn restart_count<T: Actor>(&self, child: &Handle<T>) -> Result<u32, ObserveError>;
-    pub fn restart_history<T: Actor>(&self, child: &Handle<T>) -> Result<Vec<RestartEvent>, ObserveError>;
+    pub fn restart_count<C: Actor>(&self, child: &Handle<C>) -> Result<u32, ObserveError>;
+    pub fn restart_history<C: Actor>(&self, child: &Handle<C>) -> Result<Vec<RestartEvent>, ObserveError>;
     pub fn children(&self) -> Iter<ActorInfo>;
 }
 ```

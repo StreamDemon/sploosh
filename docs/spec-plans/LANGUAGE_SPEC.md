@@ -2430,8 +2430,8 @@ therefore no history to expose. Three methods are added to
 ```sploosh
 impl<S: Actor> Handle<S> {
     // Available only when S is @supervisor-decorated:
-    pub fn restart_count(&self, child: &Handle<T>) -> Result<u32, ObserveError>;
-    pub fn restart_history(&self, child: &Handle<T>) -> Result<Vec<RestartEvent>, ObserveError>;
+    pub fn restart_count<C: Actor>(&self, child: &Handle<C>) -> Result<u32, ObserveError>;
+    pub fn restart_history<C: Actor>(&self, child: &Handle<C>) -> Result<Vec<RestartEvent>, ObserveError>;
     pub fn children(&self) -> Iter<ActorInfo>;
 }
 
