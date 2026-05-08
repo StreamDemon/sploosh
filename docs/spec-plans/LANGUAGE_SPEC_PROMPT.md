@@ -1,4 +1,4 @@
-# SPLOOSH Quick Reference — LLM System Prompt Edition (v0.5.2)
+# SPLOOSH Quick Reference — LLM System Prompt Edition (v0.5.6)
 
 Sploosh: AI-native language. Rust safety + Elixir concurrency + web3 targeting.
 
@@ -131,6 +131,9 @@ Direct self request/reply → `Err(ActorError::SelfCall)`. Self-sends (`send sel
 Dead/DRAINING actor: `send` drops, `send_timeout` → `Err(SendError::Dead)`, request/reply → `Err(ActorError::Dead)`.
 Blocked senders wake immediately on destination death; no transparent redirect after supervisor restart.
 `select { msg = rx.recv() => handle(msg), _ = timeout(5000) => err() }` — arms top-to-bottom deterministic.
+
+## Observability (§8.12)
+Always-on, every build mode. **Direct on `Handle<T>`** (constant time, infallible, work on dead handles): `handle.mailbox_len() -> usize`, `handle.mailbox_capacity() -> usize`, `handle.alive() -> bool`, `handle.actor_id() -> ActorId`. **Module `std::actor::observe`** (richer queries, walks runtime registry): `observe::actor_info(&handle) -> Option<ActorInfo>`, `observe::actors() -> Iter<ActorInfo>`, `.by_supervisor(&sup)`, `.by_name(name)`. **Supervisor-rooted restart history** (only on `@supervisor`-decorated `Handle<S>`): `sup.restart_count(&child) -> Result<u32, ObserveError>`, `sup.restart_history(&child) -> Result<Vec<RestartEvent>, ObserveError>` (default cap 16, tunable via `@supervisor(restart_history: N)`), `sup.children() -> Iter<ActorInfo>`. `ActorId`: opaque `Copy + Eq + Hash`, monotonic per spawn, never reused, not `Send` across runtime instances. `ActorInfo { id, name, spawn_location, supervisor: Option<ActorId>, lifecycle_state, mailbox_len, mailbox_capacity, death_cause: Option<DeathCause> }`. `DeathCause`: `RuntimeFailure { panic } | Stopped | Killed | Supervised { restart_pending } | RuntimeShutdown`. **Dead-actor snapshot retained until last `Handle<T>` clone drops** — refcount on the snapshot side-table only, *not* on the actor (§8.2 unchanged). Compile error inside `onchain` (rides on §11.1/§12.3 actor prohibition).
 
 ## Channels
 ```sploosh

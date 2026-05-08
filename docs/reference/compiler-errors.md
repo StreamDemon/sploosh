@@ -52,7 +52,16 @@ codes in this range as they land.
 Reserved range. Actor runtime and concurrency-primitive diagnostics will
 earn codes in this range as they land.
 
-<!-- TODO: Populate once actor-runtime diagnostics are implemented. -->
+| Code | Kind | Cluster | Status | Message / meaning | Spec ref |
+|------|------|---------|--------|-------------------|----------|
+| `E1210` | runtime error | D | reserved | `ObserveError::NotASupervisedChild` — `Handle<S>.restart_count(&child)` or `Handle<S>.restart_history(&child)` was called with a child handle that this supervisor does not actually supervise. Restart history is rooted on the spawning supervisor only. | §8.12.3 |
+| `E1211` | compile error | D | reserved | `ActorId` comparison across runtime instances. v0.5.6 has one runtime per process; comparing `ActorId`s produced by different runtime instances is a compile error wherever the compiler can detect it. The multi-runtime story is deferred to a future amendment. | §8.12.5 |
+
+<!-- TODO: Promote E1210 / E1211 from `reserved` to `stable` when the
+runtime/compiler emits the exact wording specified above. -->
+
+<!-- TODO: Populate the rest of cluster D once actor-runtime
+diagnostics are implemented. -->
 
 ## Cluster E — FFI / extern · `E1300–E1399`
 

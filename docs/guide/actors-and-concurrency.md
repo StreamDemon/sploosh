@@ -103,6 +103,97 @@ fn main() -> Result<(), AppError> {
 
 For a stricter shutdown — e.g., a deadline-bounded one — call `stop()` first and escalate to `kill()` if the deadline elapses without the actor reaching `DEAD`.
 
+## Observability
+
+Every running Sploosh program carries enough metadata to answer *what is this actor doing right now*, *why did this one die*, and *which actors are pinning memory*. The introspection surface is **always available** in every build mode — no `@observable` attribute, no debug-only gating, no feature flag.
+
+The surface is split into two layers by cost. **Cheap, constant-time reads** are direct methods on `Handle<T>`. **Richer queries** that walk the runtime registry live in the `std::actor::observe` module.
+
+### Tailing mailbox depth
+
+A common operational question is "is this actor falling behind?". Use `mailbox_len()` (current queued count) and `mailbox_capacity()` (configured size) on the handle:
+
+```sploosh
+fn watchdog(workers: &[Handle<Worker>]) {
+    for w in workers {
+        let len = w.mailbox_len();
+        let cap = w.mailbox_capacity();
+        if len > cap * 8 / 10 {
+            log::warn(format("worker {} backed up: {}/{}", w.actor_id(), len, cap));
+        }
+        if !w.alive() {
+            log::error(format("worker {} died", w.actor_id()));
+        }
+    }
+}
+```
+
+`mailbox_len` is an atomic snapshot — it may be stale by one increment by the time you read it, which is the right tradeoff for a hot-path observation. `alive()` returns `false` only when the actor is `DEAD`; a `true` reading does not guarantee the actor is alive *after* the call returns.
+
+### Walking a supervision tree
+
+Restart history is exposed on the **supervisor's** handle, not on the child's, because only `@supervisor`-decorated actors run a restart loop. Three methods are available on `Handle<S>` whenever `S` is a supervisor:
+
+```sploosh
+@supervisor(strategy: "one_for_one", max_restarts: 5, window_secs: 60, restart_history: 32)
+actor WorkerPool {
+    children: Vec<Handle<Worker>>,
+    fn init(size: u32) -> Self { /* spawn children */ }
+    pub fn child_at(&self, idx: usize) -> Handle<Worker> { self.children[idx].clone() }
+}
+
+fn audit(pool: &Handle<WorkerPool>) {
+    for child_info in pool.children() {
+        log::info(format("child {} state={:?} mailbox={}/{}",
+            child_info.id, child_info.lifecycle_state,
+            child_info.mailbox_len, child_info.mailbox_capacity));
+    }
+
+    let target = pool.child_at(0);
+    match pool.restart_count(&target) {
+        Ok(n) => log::info(format("worker has restarted {} times", n)),
+        Err(ObserveError::NotASupervisedChild) => log::warn("not supervised here"),
+    }
+}
+```
+
+`restart_count` returns the **total** restart count since the supervisor first spawned the child — not just the count within the current `window_secs` sliding window. `restart_history(&child)` returns up to *N* most-recent `RestartEvent`s in chronological order; the cap is configurable via `@supervisor(restart_history: N)` (default 16).
+
+### Triaging a dead actor
+
+When an actor reaches `DEAD`, the runtime captures a final snapshot — including its cause of death — and retains it as long as any `Handle<T>` clone targeting that actor remains live. This is a refcount on the **snapshot side-table only**; `Handle<T>` itself is still not reference-counted, and dropping the last handle still does not kill the actor. The snapshot exists to give post-mortem queries a stable observation window.
+
+```sploosh
+use std::actor::observe;
+
+fn explain_failure(handle: &Handle<Worker>) -> String {
+    match observe::actor_info(handle) {
+        Some(info) => match info.death_cause {
+            Some(DeathCause::RuntimeFailure { panic }) =>
+                format("worker {} died: {}", info.id, panic),
+            Some(DeathCause::Stopped) =>
+                format("worker {} was stopped cooperatively", info.id),
+            Some(DeathCause::Killed) =>
+                format("worker {} was killed", info.id),
+            Some(DeathCause::Supervised { restart_pending }) =>
+                format("worker {} terminated by supervisor (restart_pending={})", info.id, restart_pending),
+            Some(DeathCause::RuntimeShutdown) =>
+                format("worker {} dropped on runtime shutdown", info.id),
+            None => format("worker {} is still {:?}", info.id, info.lifecycle_state),
+        },
+        None => "snapshot already gc'd".into(),
+    }
+}
+```
+
+Calls on a dead handle keep their existing semantics — `send` silently drops, `send_timeout` returns `Err(SendError::Dead)`, request/reply returns `Err(ActorError::Dead)`. The §8.12 surface only adds new observation methods; it does not change how dead handles behave for messaging.
+
+### Cost
+
+The bookkeeping is paid on every spawn, whether or not anything ever calls `observe::*`: roughly 24 bytes for the registry entry plus a reused atomic mailbox counter per actor; ~384 bytes (16 × 24) for the supervisor's per-child restart-history ring buffer; ~256 bytes per retained `ActorInfo` snapshot until the last handle drops. `observe::actors()` walks the registry and is O(N_actors) — fine for triage, not for hot paths.
+
+`std::actor::observe`, every method introduced in this section, and the `ActorId` type are **compile errors inside `onchain` modules**. The actor surface is already an on-chain compile error; observability rides on the same prohibition.
+
 ## Message Passing
 
 | Method type | Call style | Behavior |
