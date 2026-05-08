@@ -1,0 +1,39 @@
+docs/reference/attributes.md
+  s_0267f876a024c6::t_c274718f0bb456 9-10
+docs/spec-plans/LANGUAGE_SPEC.md
+  s_0267f876a024c6::t_d6c3fdc78696c6 4365
+  s_0267f876a024c6::t_cf4cf2a42b5804 4571
+  s_0267f876a024c6::t_cefbbf7d3eccc1 4579
+  s_0267f876a024c6::t_e6dd79b20b9660 3054-3055
+  s_0267f876a024c6::t_4f2178c12ad720 1
+  s_0267f876a024c6::t_0a5189e5024bb3 3403-3675
+  s_0267f876a024c6::t_dbb7a3a611e792 3250-3252
+  s_0267f876a024c6::t_da68fcc828f038 3373-3383
+  s_0267f876a024c6::t_1abb503c778a7a 3350
+docs/runbooks/testing-strategies.md
+  s_0267f876a024c6::t_afe2b5b45e2287 3-10,14,17-22,25,29,33-34,39,42-44,49-142,144-149,151-221,226-243,245,247-251
+docs/reference/compiler-errors.md
+  s_0267f876a024c6::t_327fd354ed6879 70-79
+docs/stdlib/test.md
+  s_0267f876a024c6::t_5770e9e776688c 3,5,7-86,90-93,97-103,106-163,168-262
+docs/tooling/build-system.md
+  s_0267f876a024c6::t_9518072374e1ef 50-85
+docs/spec-plans/LANGUAGE_SPEC_PROMPT.md
+  s_0267f876a024c6::t_a94df9b09c4b94 218,224-226
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "f9e95ad7dada176e06bdee152f5586e838e00165",
+  "prompts": {},
+  "sessions": {
+    "s_0267f876a024c6": {
+      "agent_id": {
+        "tool": "droid",
+        "id": "c7671059-fa86-4ba1-9d0a-3eea4ded2f97",
+        "model": "custom:claude-opus-4-7-0"
+      },
+      "human_author": "StreamDemon <revenantpulse@gmail.com>"
+    }
+  }
+}
