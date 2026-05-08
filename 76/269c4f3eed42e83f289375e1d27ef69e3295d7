@@ -1,0 +1,29 @@
+docs/runbooks/adding-onchain-module.md
+  s_1c0103bc3e1dca::t_1627308b5ecec5 51
+docs/spec-plans/LANGUAGE_SPEC.md
+  s_1c0103bc3e1dca::t_9c641209add0d0 3362
+  s_1c0103bc3e1dca::t_b31f0410c89247 3347
+  s_1c0103bc3e1dca::t_8b5de326870611 3845
+  s_1c0103bc3e1dca::t_71a0ca248748c3 4051
+docs/tooling/sploosh-toml.md
+  s_1c0103bc3e1dca::t_17b0cfe8c7a1c6 19
+  s_1c0103bc3e1dca::t_f7ad65001c4c06 191
+docs/tooling/build-system.md
+  s_1c0103bc3e1dca::t_56317883505d54 77
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "76269c4f3eed42e83f289375e1d27ef69e3295d7",
+  "prompts": {},
+  "sessions": {
+    "s_1c0103bc3e1dca": {
+      "agent_id": {
+        "tool": "droid",
+        "id": "bc57b4ca-f550-42aa-a9d0-fb5eda263018",
+        "model": "custom:claude-opus-4-7-0"
+      },
+      "human_author": "StreamDemon <revenantpulse@gmail.com>"
+    }
+  }
+}
