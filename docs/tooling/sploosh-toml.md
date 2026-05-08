@@ -16,6 +16,7 @@ license = "Apache-2.0"
 [dependencies]
 sploosh_web   = "0.3"
 sploosh_chain = { version = "0.2", features = ["evm"] }
+sploosh_db    = { version = "0.2", optional = true }
 
 [dev-dependencies]
 sploosh_test_utils = "0.1"
@@ -187,7 +188,7 @@ strip = "symbols"
 
 `codegen-units` and `panic` are intentionally **not** exposed —
 `codegen-units` is an LLVM-specific implementation detail; Sploosh's
-failure model (§4.7) is fixed, so there is no abort/unwind choice.
+failure model (§4.8) is fixed, so there is no abort/unwind choice.
 
 Per-target profile overrides (e.g., `[profile.release.evm]`) are not
 permitted in v0.5.3. Use `#[cfg(target = "evm")]` and feature flags for

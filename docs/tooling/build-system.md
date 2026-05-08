@@ -74,7 +74,7 @@ Source (.sp)
 - `overflow-checks` is **frozen `true` for `evm` and `svm` targets**
   regardless of the profile's setting. Setting `overflow-checks = false`
   in a profile only affects `native`/`wasm` builds; on-chain builds
-  override it and emit a warning. See §14.1.6 and §4.7.
+  override it and emit a warning. See §14.1.6 and §4.8.
 - Per-target profile overrides (e.g., `[profile.release.evm]`) are not
   permitted in v0.5.3. Use `#[cfg(target = "...")]` (§12.3) and feature
   flags for target-specific code paths.
