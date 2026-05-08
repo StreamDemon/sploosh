@@ -1,4 +1,4 @@
-# SPLOOSH Language Specification v0.5.4-draft
+# SPLOOSH Language Specification v0.5.5-draft
 
 > **AI-Native · Systems-Grade · Web2/Web3 Dual-Target**
 >
@@ -3051,7 +3051,8 @@ function-level attributes.
 
 | Attribute | Purpose |
 |---|---|
-| `@test` | Mark a function as a test case |
+| `@test` | Mark a function as a test case (§13.3.1) |
+| `@property` | Mark a function as a randomized property test (§13.3.6) |
 | `@derive(...)` | Auto-generate trait impls |
 | `@error` | Auto-generate `From`, `Display`, `Error` for error enums |
 | `@inline` | Hint to inline a function |
@@ -3246,6 +3247,9 @@ user-defined.
 | `print(value)` | `fn(impl Display)` | native, wasm | Write to stdout + newline |
 | `assert(cond)` | `fn(bool)` | native, wasm | Abort/actor death on false |
 | `assert(cond, msg)` | `fn(bool, &str)` | native, wasm | Assert with message |
+| `assert_eq(a, b)` | `fn<T: Eq + Debug>(&T, &T)` | native, wasm (test only) | Equality assertion; reports both values on failure (§13.3.3) |
+| `assert_ne(a, b)` | `fn<T: Eq + Debug>(&T, &T)` | native, wasm (test only) | Inequality assertion; reports both values on failure (§13.3.3) |
+| `assert_matches(v, p)` | `(value, pattern)` special form | native, wasm (test only) | Pattern-match assertion (§13.3.3) |
 | `vec![a, b, c]` | `-> Vec<T>` | All | Vec literal |
 | `vec![val; count]` | `(T: Clone, usize) -> Vec<T>` | All | Vec repeat |
 
@@ -3343,6 +3347,7 @@ equivalent sequence of primitive operations and lets the optimizer handle the re
 - `format()` template strings are validated at compile time — mismatched `{}` count is an error.
 - `print()` and `assert()` are not available in `onchain` modules (compile error).
 - `assert()` failure in an actor causes actor death. In non-actor code, it aborts the program.
+- `assert_eq`, `assert_ne`, and `assert_matches` are **test-only** intrinsics — calling them outside a `@test`-annotated function or `#[cfg(test)]` module is a compile error (`E1410`, reserved). Inside tests, their failure semantics are identical to `assert()` (panic, observed by the per-test isolation actor — §13.3.4).
 - The optimizer may fuse adjacent `.sin()` and `.cos()` calls on the same input into a single `llvm.sincos` call. Math calls inside loops are auto-vectorized when the target has a SIMD libm (SVML on Intel, libmvec on glibc).
 - Constant expressions involving math intrinsics are folded at compile time: `(0.0f64).sin()` becomes `0.0` during codegen, with no runtime call.
 
@@ -3365,6 +3370,17 @@ Address, u256
 FpCategory
 ```
 
+**Test-only prelude additions** (auto-imported only under `#[cfg(test)]`,
+i.e., during `sploosh test`; see §13.3):
+
+```
+assert_eq, assert_ne, assert_matches
+TestFailure, Gen, Rng
+```
+
+Referencing any of these outside a `@test`-annotated function or
+`#[cfg(test)]` module is a compile error (`E1411`, reserved).
+
 ### 13.2 Core Modules
 
 | Module         | Purpose                                  | Targets |
@@ -3383,6 +3399,279 @@ FpCategory
 | `std::web`     | HTTP server, routing, middleware         | native, wasm |
 | `std::db`      | Database connection, query builder       | native |
 | `std::chain`   | Web3 utilities, ABI encoding, addresses  | all |
+
+### 13.3 Testing
+
+The Sploosh test framework is a first-class spec artifact, not a library
+add-on. `@test` is the attribute, `std::test` is the runtime surface, and
+`sploosh test` is the runner. This section specifies all three together
+because they are not separable — a model writing tests must know the
+attribute, the assertions, the failure semantics, and the runner contract
+all at once.
+
+`std::test` is a **compile error inside `onchain` modules** (§11.1, §12.3).
+On-chain code is tested off-chain by spawning a simulated execution context;
+the `@onchain_test` shape is deferred to a future amendment.
+
+#### 13.3.1 The `@test` attribute
+
+```sploosh
+@test
+fn add_works() {
+    assert_eq(2 + 3, 5);
+}
+```
+
+**Function shape requirements.** A `@test`-annotated function must:
+
+1. Take **zero parameters** unless it is `@property` (see §13.3.6).
+2. Return `()` or `Result<(), TestFailure>`.
+3. Be a **free function** at module scope. `@test` on an associated function,
+   trait method, or actor handler is a compile error.
+4. Be `pub` or private — visibility does not affect discovery. The runner
+   discovers tests by attribute, not by name or path.
+5. Optionally be `async`. An `async @test fn` runs on a fresh per-test
+   runtime (§13.3.5).
+
+`@test` is **only honored when `#[cfg(test)]` is true** — i.e., during
+`sploosh test`. In other build modes, `@test`-annotated functions are
+removed by dead-code elimination after type-checking; they do not appear
+in the produced binary, do not contribute to binary size, and may
+reference `#[cfg(test)]`-only code.
+
+**Naming convention.** Test functions are conventionally named
+`test_<thing>` or `<thing>_works` / `<thing>_rejects_<x>`. The compiler
+does not enforce a convention, but the test runner orders output
+alphabetically by fully-qualified path.
+
+#### 13.3.2 Test discovery and layout
+
+Tests live in two locations:
+
+- **Unit tests** — inline in the module they exercise, conventionally
+  inside a `#[cfg(test)] mod tests { ... }` block. They have access to
+  the parent module's private items.
+- **Integration tests** — files under `tests/` at the package root. Each
+  `tests/*.sp` file is compiled as its own crate root and only sees the
+  package's `pub` surface. `tests/` is implicitly `#[cfg(test)]` — every
+  file inside is included only by `sploosh test`.
+
+```
+my_pkg/
+├── sploosh.toml
+├── src/
+│   ├── lib.sp
+│   └── auth.sp           # contains `#[cfg(test)] mod tests { ... }`
+└── tests/
+    └── login_flow.sp     # integration test crate
+```
+
+**Doc tests are deferred** to a future amendment. The `@test` attribute is
+the only test-bearing surface in v0.5.5.
+
+#### 13.3.3 Assertions
+
+The test framework uses three intrinsics that complement the existing
+§13.0 `assert(cond, msg)`. All three are available **only inside
+`@test`-annotated functions and `#[cfg(test)]` modules** — calling them
+from production code is a compile error (`E1410`, reserved). They lower
+to `panic` on failure, which the runner observes via the per-test
+isolation actor (§13.3.4):
+
+| Intrinsic               | Signature                                       | Purpose                                       |
+|-------------------------|-------------------------------------------------|-----------------------------------------------|
+| `assert_eq(a, b)`       | `fn<T: Eq + Debug>(&T, &T)`                     | Assert `a == b`; failure reports both values  |
+| `assert_ne(a, b)`       | `fn<T: Eq + Debug>(&T, &T)`                     | Assert `a != b`; failure reports both values  |
+| `assert_matches(v, p)`  | Special syntax — `p` is a §5.2 match pattern    | Assert `v` matches pattern `p`                |
+
+`assert_eq` and `assert_ne` borrow their operands (`&T` internally) so
+they do not consume non-`Copy` values. `assert_matches` uses the §5.2
+match-binding rules: pattern variables introduced inside `p` are not
+available after the assertion (the macro discards them). Failure
+messages are produced by `Debug`, not `Display` — every type that
+participates in an assertion must therefore satisfy `Debug` (typically
+via `@derive(Debug)`).
+
+```sploosh
+@test
+fn parses_expected_shape() {
+    let result = parse("3 + 4");
+    assert_matches(result, Ok(Expr::Add(_, _)));
+    assert_eq(result.unwrap().to_string(), "(3 + 4)");
+}
+```
+
+`assert(cond, msg)` (already in §13.0) remains the universal fallback
+for predicates that are not equality- or pattern-shaped. Inside
+`@test`-annotated functions it has the same panic-and-report semantics
+as the test-only assertions.
+
+**`?` interaction.** When a `@test fn` is declared `-> Result<(),
+TestFailure>`, the body may use `?` to propagate errors from setup code.
+The test framework reports a propagated `Err` as a test failure
+(distinct from an assertion failure but indistinguishable to the runner
+exit code). This is the recommended shape for any test that involves
+fallible setup (`fs::read`, `net::connect`, etc.).
+
+```sploosh
+@test
+fn loads_config() -> Result<(), TestFailure> {
+    let cfg = Config::load("test.toml")?;   // fails the test if Err
+    assert_eq(cfg.name, "test");
+    Ok(())
+}
+```
+
+`TestFailure` is a library type defined in `std::test`; it implements
+`From<E>` for every `E: Error`, making `?` propagation transparent.
+
+#### 13.3.4 Failure semantics and per-test isolation
+
+Each test runs **inside its own runtime-spawned isolation actor**. The
+runner spawns the actor with a one-shot completion channel, sends a
+single `run` message, and observes one of three outcomes:
+
+1. **`Ok(())`** — the handler returned normally, including
+   `Ok(())`-returning `Result<(), TestFailure>` shapes. The test passes.
+2. **`Err(TestFailure)`** — the handler returned `Err`. The test fails;
+   the runner records the `TestFailure` payload.
+3. **Actor death** — the handler panicked (failed `assert*`, bounds
+   check, overflow, etc.). The runner observes
+   `Err(ActorError::Dead { panic: Some(msg) })` on the completion
+   channel and records the panic message as the failure cause.
+
+Per-test isolation means a single failing test never aborts the runner.
+The supervisor strategy for the test cohort is conceptually
+`one_for_one` with `max_restarts: 0` — a failed test is recorded, not
+restarted. The runner does not invoke `@supervisor`-decorated user
+code; supervisor strategies are unrelated to the test runner's own
+supervision.
+
+**Actor lifecycle inside tests.** Tests that `spawn` actors of their own
+must clean up via `handle.stop()` / `handle.kill()` (§8.2a) or rely on
+the runtime-shutdown path: when the per-test isolation actor reaches
+`DEAD`, every actor it spawned that has the test's runtime as its only
+keepalive is terminated as part of the runtime-shutdown sweep. Tests
+that share a runtime via `--test-threads=1` must clean up explicitly —
+a leaked spawn from one test is observable by the next.
+
+#### 13.3.5 Async and actor tests
+
+`async @test fn ...` is permitted. The runner spawns a fresh runtime
+per test and drives the future to completion under the same isolation
+actor. `.await` works exactly as in production code; channels, select,
+and timeouts are all available.
+
+```sploosh
+@test
+async fn fetches_payload() -> Result<(), TestFailure> {
+    let body = http::get("http://localhost:8080/health").await?;
+    assert_eq(body, "ok");
+    Ok(())
+}
+```
+
+A test that spawns its own actor system follows the same pattern; the
+test owns the supervisor handle and either lets it die at test end or
+calls `.stop()` explicitly.
+
+```sploosh
+@test
+fn counter_increments() {
+    let counter = spawn Counter::init(0);
+    send counter.inc(5);
+    send counter.inc(3);
+    assert_eq(counter.get(), 8);
+    let _ = counter.stop();
+}
+```
+
+#### 13.3.6 Property tests
+
+`@property` is a sibling attribute to `@test` for randomized testing.
+A `@property fn` takes one or more parameters of types that implement
+`Gen`; the runner generates `N` cases (default 256), shrinks failures
+to a minimum reproducer, and reports both the original failing input
+and the shrunk minimum.
+
+```sploosh
+@property
+fn reverse_reverse_is_identity(v: Vec<i32>) {
+    assert_eq(v.iter().rev().rev().collect::<Vec<i32>>(), v);
+}
+```
+
+**`Gen<T>` trait.** A type participates in property generation by
+implementing `std::test::Gen`:
+
+```sploosh
+trait Gen {
+    type Item;
+    fn generate(rng: &mut Rng, size: u32) -> Self::Item;
+    fn shrink(value: Self::Item) -> Iter<Self::Item>;
+}
+```
+
+`size` is a 0–`size_max` complexity bound the runner increases as it
+explores; `shrink` returns an iterator of strictly-smaller candidates
+the runner tries on a failed input. `Gen` impls are provided by the
+prelude for: every primitive integer type, `bool`, `f32`/`f64`, `char`,
+`String`, `Vec<T: Gen>`, `Option<T: Gen>`, `Result<T: Gen, E: Gen>`,
+and tuples up to arity 12.
+
+**Runner contract.** Failing inputs are reported with their RNG seed,
+case index, and shrunk minimum. The same seed reproduces the same
+shrunk minimum byte-for-byte (deterministic shrinking — implementations
+must use a deterministic shrinking schedule). Property failures use the
+same `TestFailure` reporting channel as `@test` failures; the runner
+adds the seed and shrink trace to the failure record.
+
+**CLI control.** `sploosh test --cases=N` overrides the default 256.
+`sploosh test --seed=0xCAFEBABE` fixes the seed for reproduction. Both
+flags are advisory (a property test may opt out via
+`@property(cases: M)`).
+
+#### 13.3.7 The `sploosh test` runner
+
+`sploosh test` is the canonical runner CLI. Its full surface lives in
+`docs/tooling/build-system.md`; the spec-level contract is:
+
+| Flag                          | Default | Purpose                                                         |
+|-------------------------------|---------|-----------------------------------------------------------------|
+| `--filter <pat>`              | none    | Only run tests whose fully-qualified path matches `<pat>`       |
+| `--exact`                     | off     | `--filter` is an exact match instead of a substring             |
+| `--test-threads <N>`          | core count | Run `N` tests concurrently (1 disables parallelism)          |
+| `--nocapture`                 | off     | Forward test stdout/stderr to the terminal during the run      |
+| `--seed <hex>`                | random  | Fix the property-test RNG seed for reproduction                |
+| `--cases <N>`                 | 256     | Override the per-property case count                           |
+| `--format <human\|json>`      | human   | Match `--error-format` (§18.5) — JSON is one event per line     |
+
+**Determinism.** With `--test-threads=1 --seed=<fixed>`, two runs of the
+same source against the same compiler version produce byte-identical
+output. This is the contract LLM agents and CI snapshot tests rely on;
+implementations must not introduce non-deterministic ordering, timing,
+or formatting under those flags.
+
+**Exit codes.** `0` if all tests pass; `1` if any test fails;
+`2` for runner errors (build failure, no tests found when a filter
+was specified, etc.).
+
+#### 13.3.8 What `std::test` exposes
+
+The `std::test` module is the assertion+property API surface. Its
+public items are:
+
+- `TestFailure` — failure record returned by `Result<(), TestFailure>`
+  shaped tests. Constructable via `TestFailure::new(msg: String)` and
+  via `From<E>` for every `E: Error`.
+- `Gen` — trait, see §13.3.6.
+- `Rng` — opaque deterministic random source passed to `Gen::generate`.
+  Methods: `next_u32`, `next_u64`, `gen_range(min, max)`, `shuffle(&mut [T])`.
+- Re-exports of `assert`, `assert_eq`, `assert_ne`, `assert_matches` for
+  documentation locality; the prelude already imports them.
+
+All of these are **`#[cfg(test)]`-only** — referencing them outside a
+test build is a compile error (`E1411`, reserved).
 
 ---
 
@@ -4073,6 +4362,7 @@ in prose.
 | `Shared<T>` immutable refcount primitive | Chosen over `Arc<T>` to eliminate interior-mutability pairing and cycle risk by construction. Split from `Handle<T>` by intent: reads → `Shared<T>`, writes → actor + `Handle<T>`. Strict `T: Send + Sync` requirement keeps the LLM surface narrow. |
 | Manifest: Cargo-shaped, four built-in profiles, Blake3 lockfile, edition = language version | The compiler trips on the manifest first; cheaper to spec it once, exactly, than to retrofit. Cargo-exact profiles (`dev`/`release`/`test`/`bench`) maximize Rust-trained-model recall. Blake3 is already present in `std::crypto` on every target and is faster than SHA-256 for typical lockfile sizes. `[target.X.dependencies]` sections group target-specific deps spatially rather than scattering `targets = [...]` flags inline. `edition = "0.5"` ties the language edition to the shipped spec version — pre-1.0 cadence is the language, not the calendar. `codegen-units` and `panic` are deliberately omitted: the former leaks LLVM, the latter has no choice to make under §4.8's fixed failure model. |
 | Cooperative termination via `handle.stop()` / `handle.kill()` | Method-form (§8.2a) rather than the `stop c` keyword form considered in v0.4.3 — keeps the keyword count at 39 and avoids any grammar change. Handle-drop continues to *not* kill the actor: non-refcounted handles are an intentional design choice (no atomic refcount on every clone), and explicit termination provides the path the original model was missing. Two methods rather than one (`stop()` graceful drain + `kill()` immediate) because the use cases are genuinely different — graceful is the OTP default, but immediate is needed for shedding a buggy or runaway actor without waiting for its mailbox to drain. Supervisor sees `stop`/`kill` as **intentional termination, not failure**: folding it into `max_restarts` would conflate user intent with bugs. The `Result<(), StopError>` return type follows the §6.1 "no exceptions, every fallible operation is `Result`" rule even though the only failure modes are already-dead and already-stopping. Both methods are `&self` because the handle is never mutated; multiple clones racing to stop the actor serialize on the per-actor termination flag, which is set out-of-band and never blocks on mailbox backpressure. |
+| Test framework (`@test` + `std::test` + `sploosh test`) is a first-class spec artifact, not a library add-on | The compiler needs a test harness to test itself; deferring testing to a third-party crate would force every implementer to invent the same surface differently. **Rust-shape assertions** (`assert_eq` / `assert_ne` / `assert_matches`) maximize Rust-trained-model recall and inherit the `Debug`-on-failure formatting users expect. **Per-test isolation actor** (§13.3.4) reuses §8 actor failure semantics — a panic in one test never aborts the runner, and there is no separate "test panic" mechanism to reason about. **`@test async fn`** runs on a fresh per-test runtime so async / actor / channel / select code is testable with no special syntax. **Property tests with `Gen<T>` + deterministic shrinking** (§13.3.6) ship in v0.5.5 rather than waiting for a later slice: shrinking is what makes property tests usable in CI, and locking the contract before the compiler emits its first `@property` keeps the trait shape stable. **Test-only prelude additions** (`assert_eq`, `assert_ne`, `assert_matches`, `TestFailure`, `Gen`, `Rng`) auto-import under `#[cfg(test)]` only — production code that references them is a compile error (`E1410` / `E1411`, reserved), preventing test code from leaking into release binaries. **`sploosh test` is deterministic with `--test-threads=1 --seed=<fixed>`** — byte-identical output across runs is the contract LLM agents and CI snapshot tests rely on. **No `@bench` in v0.5.5** — benchmarking has its own design space (warm-up, timer choice, statistical reporting) and is deferred. Doc tests are also deferred — they require a documentation-extraction pass the compiler does not have. |
 
 ---
 
@@ -4278,6 +4568,7 @@ Source (.sp)
 | v0.4.4 | **On-chain semantics — Cluster C** (§11): closes the four design-heavy gaps that prevented EVM/SVM codegen from starting. **Storage layout** (new §11.1a): target-pluggable abstraction with Solidity-compatible EVM reference realization — sequential `u256` slots in declaration order, Solidity-rule packing within slots, `Map<K, V>` entries at `keccak256(abi.encode(key, map_slot))`, nested maps recurse, `Vec<T>` / `String` with length at slot and data at `keccak256(slot)`, `[T; N]` inline. SVM layout deferred to a future Solana amendment; Sploosh surface stays identical across targets. **Reentrancy guard mechanism** (new §11.3a): runtime per-contract boolean flag set on entry to any non-`@reentrant` `pub` on-chain function and cleared on return (success, error, or revert). Cross-contract re-entry into a guarded function reverts with new error `ChainError::Reentrancy`; `@reentrant` disables the check and the set for that function only. Gas cost is qualitative (one TLOAD + one TSTORE per guarded call on EIP-1153 EVM forks (Cancun+), SLOAD/SSTORE fallback on earlier forks). Explicitly distinguished from §8.10.1 actor `SelfCall` — same word, different layers. **Cross-contract ABI and call semantics** (new §11.4a): new surface syntax `extern onchain mod X { pub fn ...; ... }` declares callee signatures at compile time; `chain::call(addr, callee, args) -> Result<T, ChainError>` blocks synchronously on EVM (lowers to `CALL`), Solidity ABI is the reference argument encoding on EVM, `?` propagates `ChainError::Reverted { data: Vec<u8> }` with revert bytes bounded by `RETURNDATACOPY` semantics. New error enum `ChainError { Reverted, OutOfGas, Reentrancy, InvalidTarget, DecodingError }` added to the on-chain error surface. No delegatecall in v0.4.x (deferred to v0.5.0). SVM divergence via Solana CPI with preserved user-level surface; concrete ABI deferred. **Explicit contrast with `extern "C"` (§4.9)**: both nest under `extern`, but calling conventions, safety models, and error surfaces differ — not interchangeable. **Gas model** (new §11.7a): target-pluggable metering abstraction. EVM references Yellow Paper + active-hard-fork EIP cost tables (Sploosh does not redefine opcode costs); `ctx::gas_remaining() -> u256` EVM-only, `#[gas_limit(N)]` EVM-only advisory in deployed ABI metadata. SVM uses compute units; `ctx::compute_units_remaining() -> u64` SVM-only. All three are compile errors on native and wasm. **Out-of-gas semantics**: transaction-wide revert, all storage mutations and emitted events unwound, and revert is **unaffected by per-function attributes including `@reentrant`** (explicit invariant). Transient-state unwind clears the reentrancy flag on revert, so failed calls cannot leave a contract with its guard stuck set. **`#[indexed]` event field marker** (§11.5, §12.3): up to three indexed fields per event variant on EVM (topic slots 1–3; topic 0 is the signature hash); compile error on more. SVM accepts `#[indexed]` for source-compatibility but treats it as a no-op. **§13.0 intrinsics table**: `ctx::gas_remaining` context column tightened to EVM-only, new row for `ctx::compute_units_remaining` (SVM-only), `chain::call` signature updated to `Result<T, ChainError>`, `storage::*` rows reference §11.1a, `chain::call` row references §11.4a. **§16 grammar**: `extern_block` production extended — `extern_target = STRING_LIT | "onchain" "mod" IDENT` — and `extern_fn` allows optional `pub`. No new keywords (still 40). No new item kinds; `extern onchain mod` is an extern-block variant. **Deferred to v0.5.0**: cross-contract ABI emission artifacts (bytecode + ABI JSON + metadata file), WASM target variants (`wasm32-unknown-unknown` vs `wasm32-wasi`), delegatecall support, SVM storage layout details, SVM CPI concrete ABI, per-call gas forwarding annotation. |
 | v0.5.0 | **Removed the `none` keyword** (§2.3, §16). Per the independent PR #9 review, `none` was reserved in the §2.3 keyword list and appeared as a literal in the §16 grammar `literal` production, but every example, every guide, and the `docs/` tree generally used `None` (the `Option::None` constructor exported from the §13.1 prelude). Lowercase `none` was reserved in two definitional sites and used in zero practical sites — the keyword reservation served no purpose while creating a contradiction with the prelude. Removed from `docs/spec-plans/LANGUAGE_SPEC.md` §2.3 and §16, and from the `docs/reference/keywords.md` and `docs/reference/grammar.md` mirrors. Keyword count: 40→39 (losing `none`). The capitalized `None` — an identifier resolving to `Option::None` via the prelude — is unchanged and remains the sole form for an absent `Option` value. No grammar reshape beyond the deleted alternative; no other sections touched. This amendment opens the v0.5.x cycle with a mechanical correctness fix identified by the PR #9 review (severity Blocker, action L1). |
 | v0.5.1 | **Compiler Diagnostics specification** (new §18). Formalizes the compiler's diagnostic contract as a first-class spec artifact — the highest-leverage missing piece for the AI-native positioning. New §18.1 Diagnostic record defines the canonical field layout (`code`, `severity`, `message`, `primary_span`, `labels`, `children`, `suggested_fixes`, `explanation_url`) that all renderings must preserve. §18.2 Error-code clusters reserves ranges: `E0001–E0999` lexical (A), `E1000–E1099` type/trait/ownership (B), `E1100–E1199` on-chain (C, already in use), `E1200–E1299` actors/concurrency (D), `E1300–E1399` FFI (E), `E1400–E1499` attributes (F), `W0001–W0999` warnings, `L0001–L0999` lints, `E9000+` ICE. §18.3 Suggested-fix applicability adopts rustc's vocabulary verbatim (`MachineApplicable`, `MaybeIncorrect`, `HasPlaceholders`, `Unspecified`) so Rust-trained models recognize the levels. §18.4 Stability contract: code→meaning is frozen on release; retired codes are marked `status: deprecated` with a `superseded_by` pointer and are never reassigned. §18.5 Output formats: `human` (default, rustc-style), `json` (newline-delimited JSON, one record per line, stable field layout with optional `$schema`), `short` (single line per diagnostic, grep-friendly). §18.6 LLM-integration contract: four invariants that hold for every diagnostic in `json` mode — every diagnostic carries a code; `MachineApplicable` fixes are complete (applying them preserves compilability); `primary_span` is always populated (file-less diagnostics use a synthetic `"<cli>"` file); `children` severities are limited to `note` / `help`. Explicit non-commitments: the spec does **not** mandate a hosted URL for `explanation_url` (implementations may leave it `None`) and does **not** commit to a specific JSON Schema artifact for `$schema` (draft-7 emission is a future follow-up). New §17 Design Decisions row documents the format-as-AI-native-lever rationale. **Registry expansion**: `docs/reference/compiler-errors.md` rewritten to distinguish "format" (§18) from "registry" (this file), adds `Cluster` and `Status` columns to the existing E1101–E1109 on-chain rows, and reserves cluster-header placeholders for the A/B/D/E/F/W/L/ICE ranges with TODO entries. Adds a "Growth policy" block (4 rules: registry-first workflow, spec-section anchoring, frozen-on-publish, deprecate-don't-reassign). **Tooling**: `docs/tooling/build-system.md` gains a Compiler Flags subsection documenting `--error-format=<human\|json\|short>` (default `human`) and `--explain <code>` (prints long-form explanation sourced from the local registry, not a network call). No new keywords (39 unchanged). No grammar changes. Closes PR #9 review Blocker U1. **Principle #7 softened** (§1): the 4,000-token claim is now framed as a soft target rather than a hard budget, acknowledging that the PROMPT edition was already 4,077 tokens (cl100k_base) before v0.5.1 and the Diagnostics bullet added ~133 more. This partially addresses review action L8 by tightening the claim to match reality; the stricter CI-enforcement path remains a strategy decision for a future amendment. |
+| v0.5.5 | **`std::test` framework — first-class spec artifact** (new §13.3, with rippling additions to §13.0 intrinsics, §13.1 prelude, §12.1 attributes, §17 design log). Closes issue #16 (slice 3 of 7 in the v0.5.3–v0.5.9 sequence) and review action U3. The compiler needs a test harness to test itself; speccing the surface before the compiler lands prevents every implementer from inventing the same shape differently. **Three new test-only intrinsics** (§13.0): `assert_eq(a, b)` and `assert_ne(a, b)` (Rust-shape, `T: Eq + Debug`, borrow operands so non-`Copy` values aren't consumed, report both sides via `Debug` on failure) and `assert_matches(value, pattern)` (special form using §5.2 match patterns; pattern bindings are not available after the assertion). All three are compile errors outside `@test`-annotated functions or `#[cfg(test)]` modules — diagnostic `E1410` reserved. **Test discovery and layout** (§13.3.2): unit tests live inline in `#[cfg(test)] mod tests { ... }`; integration tests live as standalone crates under `tests/*.sp` and only see the package's `pub` surface. Doc tests deferred. **Failure semantics — per-test isolation actor** (§13.3.4): each test runs inside its own runtime-spawned actor with a one-shot completion channel. Three observable outcomes: `Ok(())` (pass), `Err(TestFailure)` (returned-Err shape; `?`-friendly with the new `From<E>` for `E: Error` blanket on `TestFailure`), and actor death (panic, observed as `Err(ActorError::Dead { panic: Some(msg) })`). Reuses §8 actor failure semantics so there is no separate "test panic" mechanism to reason about — a single failing test never aborts the runner. **`async @test fn ...` is permitted** (§13.3.5): the runner spawns a fresh runtime per test; `.await`, channels, `select`, timeouts, and user-spawned actors all work as in production code. Tests that own actors clean them up via §8.2a `handle.stop()` / `.kill()` or rely on the runtime-shutdown sweep. **Property tests with `@property` attribute** (§13.3.6, new sibling to `@test` in §12.1): runner generates 256 cases per property by default, shrinks failures to a minimum reproducer, and reports both original and shrunk inputs with the RNG seed for reproduction. New `Gen<T>` trait (`type Item; fn generate(rng, size); fn shrink(value) -> Iter<Item>`) with prelude impls for every primitive integer, `bool`, `f32`/`f64`, `char`, `String`, `Vec<T: Gen>`, `Option<T: Gen>`, `Result<T: Gen, E: Gen>`, and tuples up to arity 12. Deterministic shrinking required — same seed reproduces the same shrunk minimum byte-for-byte. **`sploosh test` runner contract** (§13.3.7): flags `--filter`, `--exact`, `--test-threads`, `--nocapture`, `--seed`, `--cases`, `--format`. Deterministic output under `--test-threads=1 --seed=<fixed>`. Exit codes `0` (pass), `1` (any test failed), `2` (runner error). **`std::test` public surface** (§13.3.8): `TestFailure`, `Gen`, `Rng` library types; `assert_eq` / `assert_ne` / `assert_matches` re-exported for documentation locality. All `#[cfg(test)]`-only — outside-test references are `E1411` (reserved). **Test-only prelude additions** (§13.1): `assert_eq`, `assert_ne`, `assert_matches`, `TestFailure`, `Gen`, `Rng` auto-import only under `#[cfg(test)]`, preventing test code from leaking into release binaries. **`std::test` is a compile error inside `onchain` modules** — on-chain code is tested off-chain by spawning a simulated execution context; the `@onchain_test` shape is deferred to a future amendment. **Tooling mirrors**: `docs/stdlib/test.md` rewritten from 8-line stub to full API reference; `docs/tooling/build-system.md` adds the test-runner flag table; `docs/runbooks/testing-strategies.md` rewritten to cover unit / integration / async / property test patterns. **PROMPT edition**: a one-line `@test` / `@property` summary added to the Attributes section so LLMs can invoke the framework without the full spec in context. **§17 Design Decisions Log** adds a new v0.5.5 row capturing the four maintainer-locked choices (Rust-shape assertions, panic + per-test isolation, full property surface in v0.5.5, async/actor tests via `@test async fn`) and the principled deferrals (`@bench`, doc tests, on-chain test scaffolding). No grammar changes (the `@property` attribute reuses the existing §16 attribute production). No new keywords (39 unchanged). Two new diagnostic registry slots reserved (`E1410` test-only-intrinsic-outside-test; `E1411` test-only-prelude-outside-test) — concrete messages earned when the compiler lands per §18.4 Growth policy. **Deferred**: `@bench` for benchmarking (different design space — warm-up, timer choice, statistical reporting); doc tests (requires a documentation-extraction pass); on-chain test scaffolding (`@onchain_test` with simulated `ctx`); test fixtures / `@before` / `@after` (currently handled by per-test setup functions). |
 | v0.5.4 | **Cooperative actor termination — `handle.stop()` / `handle.kill()`** (new §8.2a; mechanics rippled through §8.1a, §8.2, §8.5, §8.7, §8.7a, §8.8, §8.10.1, §8.11). Closes issue #15 and review action P2 / item #4 (High). Resolves the orphaned-actor leak called out in the PR #9 review by introducing explicit cooperative termination as the missing fifth path to `DEAD`. **New `DRAINING` state** (§8.1a) sits between `READY` and `DEAD`: the actor handles messages already enqueued in FIFO order but rejects new sends from the moment the termination flag is set. The four-state lifecycle is `INITIALIZING → READY → DRAINING → DEAD`, with `READY → DEAD` still the failure path. **Two methods, two semantics**: `handle.stop() -> Result<(), StopError>` requests a graceful drain — the actor finishes the messages already in its mailbox, then transitions `DRAINING → DEAD`. `handle.kill() -> Result<(), StopError>` aborts after the **current handler** completes — Sploosh does not interrupt user code mid-handler, so any in-flight `.await` runs to completion before the remainder of the mailbox is discarded. `kill()` while `DRAINING` is a valid **upgrade** that returns `Ok(())`. **`StopError` enum** (new, §8.8): `AlreadyStopping` (re-stop while already stopping) and `AlreadyDead` (target is already `DEAD` or already-killed). Repeat-stop and repeat-kill are observable, not silent — the §6.1 "every fallible operation is `Result`" rule applies even though the only failure modes are these two. **Supervisor interaction** (§8.7): a child terminated via `stop()`/`kill()` is **intentional termination, not failure** — the supervisor does not restart it, and the termination does not count toward `max_restarts`. `rest_for_one` and `one_for_all` do not cascade for user-driven termination. **Handle drop semantics** (§8.2): rewritten — handle drop still does not kill the actor (non-refcounted handles are intentional), but the orphan-leak workaround now exists. Five termination paths replace the previous three: cooperative stop, immediate kill, runtime failure, supervisor decision, runtime shutdown. **Receiver convention**: method on `Handle<T>`, not a `stop` keyword (the v0.4.3 deferred `stop c` form was rejected to keep the keyword count at 39 and avoid any grammar change). Both methods are `&self` because the handle is never mutated; multiple clones racing to stop the same actor serialize on the per-actor 2-bit termination flag (`Running` / `StopRequested` / `Killed`). **Out-of-band delivery**: the termination flag is set via atomic CAS that bypasses the mailbox entirely — `stop()`/`kill()` never block on backpressure, never consume mailbox capacity, and do not interact with the §8.11 per-sender FIFO ordering. This is the only out-of-band signal in the actor model. **Self-stop / self-kill** (§8.10.1, §8.2a): legal, **not** a re-entrant call, **not** an `ActorError::SelfCall`. The signal is observed after the current handler returns, so self-stop never deadlocks. **Drop semantics** (§8.7a): unchanged — Drop on state fields runs identically when the cause is `stop()`, `kill()`, runtime failure, or supervisor restart. **Existing error variants suffice for already-rejected messages**: `SendError::Dead` (§8.5) covers `send_timeout` to a `DRAINING` actor, `ActorError::Dead` (§8.8) covers request/reply, and `send` silently drops — no new error variants on these enums. **`SendError::Dead` documentation extended** (§8.5) to call out the `DRAINING` case. **§13.0 Compiler Intrinsics**: two new rows for `Handle<A>.stop()` and `Handle<A>.kill()`, signature `fn(&Handle<A>) -> Result<(), StopError>`, native/wasm only. Both are method-call lowerings; no syntactic novelty. **On-chain availability**: rides on the existing §11.1 / §12.3 actor prohibition — `Handle<T>` itself is already a compile error inside `onchain` modules, so `stop()`/`kill()` are too. **`PROMPT` edition**: the existing `Lifecycle: INITIALIZING → READY → DEAD` line updated to four states with `DRAINING`; the "Handle drop does NOT kill the actor" line rewritten to point at the five termination paths; a one-line `handle.stop()` / `handle.kill()` summary added. **Guides updated**: `docs/guide/actors-and-concurrency.md` adds a "Stopping Actors" subsection after the existing handle-drop paragraph and rewrites the orphan-actor sentence to cross-link `stop()`. `docs/guide/ownership-and-borrowing.md` extends the "`Handle<T>` is not reference-counted" paragraph to mention the explicit termination methods. **Migration guides**: `docs/migration/from-rust.md` updates the `Arc::strong_count` row to reference `handle.stop()` as the explicit cleanup path Rust's `Arc<T>` drop has no analog for; `docs/migration/from-elixir.md` updates the PID-lifetime row to reference `handle.stop()` as Sploosh's equivalent of `Process.exit(pid, :normal)`. **§17 Design Decisions Log** adds a new v0.5.4 row capturing the method-form choice, the dual-method choice, the supervisor-as-intentional-termination choice, and the out-of-band signaling rationale. No grammar changes. No new keywords (39 unchanged). No new `docs/reference/compiler-errors.md` entries — `StopError` is a library enum, not a compiler diagnostic, and per §18.4 / Growth policy no codes are pre-assigned. **Deferred to a future amendment**: `stop_all()` on a supervisor (cohort-stop convenience), explicit "wait for DEAD" awaitable, handler-interruption semantics (POSIX-style cancellation). |
 | v0.5.3 | **Manifest specification fleshed out** (§14.1–§14.4 expanded; existing §14.1 stub replaced). Closes issue #14 (slice 1 of 7 in the v0.5.3–v0.5.9 sequence) and review action U2. Spec previously had 19 lines on `sploosh.toml`; the manifest is the first artifact a future compiler will load, so locking the contract before codegen makes assumptions is the cheapest form of debt prevention. **§14.1.1 `[project]`** formalizes `name` / `version` / `edition` (required) and `description` / `license` / `authors` / `repository` (optional); unknown fields are a hard error. **`edition` is the Sploosh language version** (`"0.5"`) — pre-1.0 cadence makes year strings (`"2026"`) misleading, and tying the edition to the shipped spec version aligns release artifacts. All existing `edition = "2026"` examples updated to `"0.5"` across `docs/spec-plans/`, `docs/tooling/`, `docs/guide/`, runbooks, and examples. **§14.1.2 dependency tables** introduce `[dev-dependencies]` (test-only, not forwarded to dependents) and `[build-dependencies]` (parsed and reserved for future build-script support; no invocation specified yet) alongside `[dependencies]`. Inline-table dep form documents `version`, `features`, `default-features`, `optional`, `git` + required `rev` (branches and tags rejected as non-reproducible floats), `path` (workspace-internal only). Source precedence `path > git > registry`; multiple sources on a single entry is a manifest error. **§14.1.3 `[features]`** adopts Cargo's modern syntax: `"name"` for local feature, `"crate/feature"` for transitive feature, `"dep:crate"` for explicit optional-dep activation (resolves the Cargo-2018 ambiguity). **§14.1.4 `[target.<target>.dependencies]`** — Cargo-style per-target dep sections (one per `native`/`wasm`/`evm`/`svm`); merged additively with `[dependencies]`; on-chain prohibitions (§11.1, §12.3) still apply. **§14.1.5 `[targets]`** clarifies the existing project-level `default` / `contracts` table is distinct from §14.1.4 — different role, different shape. **§14.1.6 `[profile.<name>]`** specifies four built-in profiles (`dev`, `release`, `test` inheriting from `dev`, `bench` inheriting from `release`) and custom profiles via `inherits`. Profile knobs: `opt-level` (`0`–`3`, `"s"`, `"z"`), `lto` (`false`/`"thin"`/`"fat"`), `debug` (`0`/`1`/`2`/`false`), `strip` (`"none"`/`"debuginfo"`/`"symbols"`), `incremental` (bool), `overflow-checks` (bool). **`overflow-checks` is frozen `true` for `evm` and `svm` targets**, overriding any user setting and emitting warning `W0xxx` (registry slot reserved, no entry assigned per §18.4 Growth policy). **`codegen-units` and `panic = "abort"|"unwind"` are deliberately not exposed** — the former leaks an LLVM-specific implementation detail; the latter has no choice to make under §4.8's fixed failure model (no unwind path). Per-target profile overrides (e.g., `[profile.release.evm]`) are deferred to a future amendment. **§14.1.7 `[runtime]`** consolidates the previously inline-mentioned `threads = N` knob with a new `mailbox_default_capacity` knob; both silently ignored on `evm` / `svm` (no Sploosh-level on-chain runtime). **§14.1.8 resolution semantics** — Cargo version requirement syntax (caret/tilde/exact/comparison/wildcard), resolver v2 unification (dev-dep features kept separate from non-test feature graphs), structural conflict detection, package-scoped editions. **§14.2 Workspaces** — root `[workspace]` manifest with no `[project]` (root is not buildable); `members` (globs allowed), `exclude`, `resolver = "2"` (required, future-proofing), `[workspace.package]` and `[workspace.dependencies]` for member inheritance via `field.workspace = true`; one `sploosh.lock` at workspace root, member lockfiles rejected. **§14.3 Lockfile (`sploosh.lock`)** — TOML, `[[package]]` array entries with `name` / `version` / `source` / `checksum` / `dependencies`. **Hash algorithm: Blake3** (already present in `std::crypto` on all four backends; faster than SHA-256 for typical 2KB–100KB lockfile sizes); 32-byte digest in RFC 4648 base32 without padding, prefixed `"blake3:"`. Deterministic ordering (alphabetical by name, then version), LF line endings, schema `version = 1`. Update semantics: `sploosh build`/`test`/`check` *verify only*, never write — manifest-incompatible lockfile fails the build with reserved diagnostic slot `E14xx` (no entry assigned per §18.4 Growth policy); `sploosh update` is the only command that may rewrite the lockfile. **§14.4 dependency sources** — registry (default; URL/auth/publishing flow deferred to v0.6+), git (with required `rev` SHA), path (workspace-internal only). **Tooling mirrors**: `docs/tooling/sploosh-toml.md` rewritten as the canonical schema mirror with TODO removed; `docs/tooling/build-system.md` adds `--profile <name>` and `--target <t>` flag rows, `sploosh update` and `sploosh tree` commands; `docs/tooling/package-management.md` rewritten with sources / version syntax / lockfile model and TODO removed (registry / publishing remain marked deferred). **Runbooks**: `new-project-setup.md` updated to the v0.5.3 schema with a workspace-bootstrap variant; `cross-target-builds.md` adds a `[target.wasm.dependencies]` worked example; `adding-onchain-module.md` updates the `[targets]` snippet and cross-links to the §14.1.6 `overflow-checks` on-chain freeze. **Guide**: `getting-started.md` updates `edition` to `"0.5"`. **PROMPT edition**: a one-line manifest summary added before the existing `## File ext` footer (Cargo-shape; `[dev-dependencies]`; `[target.X.dependencies]`; four built-in profiles; Blake3 lockfile). **§17 Design Decisions Log** adds a new v0.5.3 row capturing the four user-locked choices (Blake3, Cargo-exact profiles, `[target.X.dependencies]` sections, edition = language version) and the principled omissions (`codegen-units`, `panic`). No grammar changes. No new keywords (39 unchanged). No new diagnostic registry entries — overflow-check freeze warning and lockfile-mismatch error are *reserved-slot* references only, earned when the compiler lands per §18.4. **Deferred**: registry endpoint and publishing workflow (v0.6+), build-script invocation (only `[build-dependencies]` reserved), per-target profile overrides, lockfile-less library default. |
 | v0.5.2 | **`Shared<T>` immutable-refcounted primitive** (new §4.4a). Closes PR #9 review Blocker P1 — the shared-immutable-data gap that previously forced clone-everything, actor-wrap, or local-`&T`-only patterns for read-heavy data. New §4.4a "Shared Immutable Data with `Shared<T>`" defines an atomically refcounted pointer to an immutable `T`: `Shared::new(value) -> Shared<T>`; `Clone` bumps the atomic refcount O(1) with no allocation and no `T::clone` call; deterministic drop of the inner `T` when the last clone goes out of scope (preserves the "no GC" guarantee of §3.10). **Strictly less than Rust's `Arc<T>`**: immutable only (no `&mut *shared`, no `get_mut`, no `make_mut`, no `try_unwrap`); no `Weak<T>` (cycles impossible by construction because Sploosh has no `Cell` / `RefCell` / `UnsafeCell` / user-visible atomics); not `Copy` (explicit `.clone()` preserves the cost-signal of each refcount bump). **Strict `T: Send + Sync` requirement**: `Shared<T>` is `Clone + Send + Sync` iff `T: Send + Sync`, otherwise `Shared::new` is a compile error — the type exists to cross thread and actor boundaries so requiring thread-safe inner values is an enforced invariant, not a convention. **Deref semantics**: `*shared` produces `&T` only; unlike `Box<T>`'s `*boxed`, it can never move the inner value out. **Actor interop** (§8.2 addition): `Shared<T>` satisfies the §8.2 owned-parameter rule for `&mut self` methods (the wrapper moves; the inner data is shared via refcount bump), making it the idiomatic way to pass read-heavy data to actor handlers and the idiomatic reply type for `&self` request/reply methods returning cached data. **Not available on-chain** — a compile error inside `onchain` modules per both §11.1 and §12.3; reference counting has no gas or storage meaning, and every on-chain value is scoped to the transaction frame. **Drop-order clarification** (§3.10): the `Shared<T>` wrapper drops in scope-reverse order as usual; the inner `T` drops only when the last live clone goes out of scope, which may be earlier or later than any individual wrapper's lifetime — still deterministic given the set of holders. **Compound Types list** (§3.2) adds `Shared<T>`. **Prelude** (§13.1) adds `Shared` after `Box`. **§4.4** rewritten to cross-reference §4.4a and §8.2 instead of saying only "Use `Handle<T>` for sharing state". **§17 Design Decisions Log** adds a new v0.5.2 row (the v0.4 "No `Rc<T>`/`Arc<T>`" row is kept for chronological accuracy). **Guide updates**: `docs/guide/ownership-and-borrowing.md` rewrites the "No Rc/Arc" section with the two-primitive narrative (`Shared<T>` for immutable, `Handle<T>` for mutable, pick by intent); `docs/guide/actors-and-concurrency.md` updates its `Rc`/`Arc` mention to cross-reference `Shared<T>` and adds a worked example of `Shared<LookupTable>` crossing actor boundaries instead of actor-wrapping a read-heavy cache. **Migration update**: `docs/migration/from-rust.md` rewrites three rows (`Arc<Mutex<T>>`, `Rc<T>`/`Arc<T>`, `Arc::strong_count`) to contrast `Shared<T>` (immutable reads) and actor + `Handle<T>` (mutable writes). **PROMPT edition**: `Shared<T>` added to the Compounds line and the Ownership `Box<T>` bullet is rewritten to include the `Shared<T>` summary. No grammar changes. No new keywords (39 unchanged). No new `docs/reference/compiler-errors.md` entries — per §18.4 and the v0.5.1 Growth policy, Shared-specific diagnostic codes are earned when the compiler lands, not pre-assigned. |
@@ -4285,4 +4576,4 @@ Source (.sp)
 ---
 
 *Working title: Sploosh. Name subject to change.*
-*This spec is a living document. v0.5.4-draft — May 2026.*
+*This spec is a living document. v0.5.5-draft — May 2026.*
