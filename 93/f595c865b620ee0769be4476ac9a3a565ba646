@@ -1,0 +1,19 @@
+docs/runbooks/testing-strategies.md
+  s_b5282086ab96e4::t_ffeb977b2c7369 131,134-143,151-159
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "93f595c865b620ee0769be4476ac9a3a565ba646",
+  "prompts": {},
+  "sessions": {
+    "s_b5282086ab96e4": {
+      "agent_id": {
+        "tool": "droid",
+        "id": "a187f31d-a741-4a38-99bb-38d7773a5723",
+        "model": "custom:claude-opus-4-7-0"
+      },
+      "human_author": "StreamDemon <revenantpulse@gmail.com>"
+    }
+  }
+}
