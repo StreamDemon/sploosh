@@ -8,13 +8,18 @@
 
 Each diagnostic that the compiler or runtime emits carries a stable code of
 the form `E<NNNN>` (error), `W<NNNN>` (warning), or `L<NNNN>` (lint). The
-`Kind` column distinguishes **compile errors** (raised at build time, no
-deployed artifact) from **runtime reverts** (raised during transaction
-execution). Runtime-revert entries mirror variants defined in their spec
-sections (§8.7, §11.3a, §11.4a, §11.7a); the variant semantics are
-specified there, and this page is the canonical source of each stable code
-number. The `Cluster` column locates the code in the partitioning defined
-in §18.2. The `Status` column is one of `stable` (published code — the
+`Kind` column distinguishes three classes of diagnostic: **compile error**
+(raised at build time, no deployed artifact); **runtime revert** (raised
+during on-chain transaction execution — the entire transaction's state
+mutations and emitted events are unwound, per §11.7a); and **runtime
+error** (raised by an off-chain runtime API as a `Result::Err` value,
+returned to the caller for handling — actors do not have transaction-wide
+rollback semantics, so an actor-runtime error never unwinds prior state).
+Runtime-error and runtime-revert entries mirror variants defined in their
+spec sections (§8.7, §8.8, §8.12.3, §11.3a, §11.4a, §11.7a); the variant
+semantics are specified there, and this page is the canonical source of
+each stable code number. The `Cluster` column locates the code in the
+partitioning defined in §18.2. The `Status` column is one of `stable` (published code — the
 `code → meaning` mapping is frozen per §18.4), `deprecated` (superseded —
 carries a `superseded_by: <code>` note), or `reserved` (range reserved for
 future assignment by cluster).
@@ -52,7 +57,16 @@ codes in this range as they land.
 Reserved range. Actor runtime and concurrency-primitive diagnostics will
 earn codes in this range as they land.
 
-<!-- TODO: Populate once actor-runtime diagnostics are implemented. -->
+| Code | Kind | Cluster | Status | Message / meaning | Spec ref |
+|------|------|---------|--------|-------------------|----------|
+| `E1210` | runtime error | D | reserved | `ObserveError::NotASupervisedChild` — `Handle<S>.restart_count(&child)` or `Handle<S>.restart_history(&child)` was called with a child handle that this supervisor does not actually supervise. Restart history is rooted on the spawning supervisor only. | §8.12.3 |
+| `E1211` | compile error | D | reserved | `ActorId` comparison across runtime instances. v0.5.6 has one runtime per process; comparing `ActorId`s produced by different runtime instances is a compile error wherever the compiler can detect it. The multi-runtime story is deferred to a future amendment. | §8.12.5 |
+
+<!-- TODO: Promote E1210 / E1211 from `reserved` to `stable` when the
+runtime/compiler emits the exact wording specified above. -->
+
+<!-- TODO: Populate the rest of cluster D once actor-runtime
+diagnostics are implemented. -->
 
 ## Cluster E — FFI / extern · `E1300–E1399`
 

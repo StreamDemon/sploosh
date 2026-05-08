@@ -1,4 +1,4 @@
-# SPLOOSH Language Specification v0.5.5-draft
+# SPLOOSH Language Specification v0.5.6-draft
 
 > **AI-Native · Systems-Grade · Web2/Web3 Dual-Target**
 >
@@ -2300,6 +2300,278 @@ intrinsic for offloading ad-hoc blocking work; currently, the only way to
 invoke blocking code from a handler is via an `extern "C" async` wrapper or by
 forwarding to a non-actor `spawn async` task.
 
+### 8.12 Observability
+
+Actor observability is a first-class spec artifact. Every running Sploosh
+program carries enough runtime metadata to answer the operational
+questions a developer or supervising agent inevitably asks: *how full is
+this actor's mailbox, is this actor still alive, what restarted this
+child and why, how many actors are live right now, and why did this
+particular actor die*. The introspection surface is **always available
+in every build mode** — there is no `@observable` attribute, no
+debug-only gating, and no feature flag. The bookkeeping cost is paid on
+every spawn (§8.12.6); the alternative — letting users discover their
+program is unobservable in production — is worse than the bytes.
+
+The surface is split into two layers by cost. **Cheap, constant-time
+reads** live as direct methods on `Handle<T>` (§8.12.1). **Richer
+queries** that walk runtime state live in the new `std::actor::observe`
+module (§8.12.2). **Restart history** is rooted on the supervisor's
+handle rather than the child's, because only `@supervisor`-decorated
+actors run a restart loop in the first place (§8.12.3, cross-references
+§8.7 and §8.7a). Dead actors retain a snapshot — including their cause
+of death — for as long as any `Handle<T>` clone targeting them remains
+live (§8.12.4); this is the **only** refcount in the actor model, and
+it lives on a side-table next to the snapshot rather than on the actor
+itself, leaving §8.2 handle-drop semantics unchanged.
+
+Every method introduced in this section is a compile error inside
+`onchain` modules under the existing §11.1 / §12.3 prohibition on
+actor-runtime surface, restated in §8.12.7. The new intrinsics are
+listed in §13.0; the new `std::actor` module entry is in §13.2.
+
+#### 8.12.1 Handle introspection
+
+`Handle<T>` exposes four direct methods. All four are `&self`,
+infallible, and remain callable on a dead handle — they return the
+last-known values rather than failing. Constant time except
+`mailbox_len`, which is an atomic load.
+
+```sploosh
+impl<A: Actor> Handle<A> {
+    pub fn mailbox_len(&self) -> usize;
+    pub fn mailbox_capacity(&self) -> usize;
+    pub fn alive(&self) -> bool;
+    pub fn actor_id(&self) -> ActorId;
+}
+```
+
+- `mailbox_len()` returns the current queued message count. The value
+  is an atomic snapshot and may be **stale by one increment** by the
+  time the caller observes it; senders racing with the read may have
+  enqueued or dequeued a message in the interval between the load and
+  any subsequent action. For dead actors the value is the last
+  observed count (typically 0 — `DRAINING` or runtime-failure paths
+  drain or discard the mailbox before the `DEAD` transition; see §8.7,
+  §8.8).
+- `mailbox_capacity()` returns the configured capacity — the value
+  passed to `@mailbox(capacity: N)` (§12.1) or the runtime default
+  (1024; see §8.11). The value never changes over an actor's lifetime.
+- `alive()` returns `true` if the actor is `INITIALIZING`, `READY`, or
+  `DRAINING` (§8.1a) and `false` if it is `DEAD`. A `true` reading
+  does not guarantee that subsequent calls succeed — the actor may
+  transition to `DEAD` between `alive()` returning and the next call —
+  but a `false` reading is final.
+- `actor_id()` returns the actor's `ActorId` (§8.12.5). The same
+  handle (and every clone of it) always returns the same `ActorId`,
+  including after the actor has died.
+
+#### 8.12.2 The `std::actor::observe` module
+
+Richer queries that need to walk runtime state live in
+`std::actor::observe`. The module is `not onchain` (§11.1, §12.3).
+
+```sploosh
+use std::actor::observe;
+
+let info: Option<ActorInfo> = observe::actor_info(&handle);
+let live: Iter<ActorInfo>   = observe::actors();
+let pool: Iter<ActorInfo>   = observe::actors().by_supervisor(&pool_handle);
+let named: Iter<ActorInfo>  = observe::actors().by_name("worker");
+```
+
+- `observe::actor_info(&handle) -> Option<ActorInfo>` returns the
+  full snapshot for the actor the handle targets. The value is
+  `Some(...)` whenever the runtime still retains an entry for the
+  actor — i.e., whenever any `Handle<T>` clone is live (§8.12.4) —
+  and `None` only for stale handles whose snapshot has been gc'd.
+- `observe::actors() -> Iter<ActorInfo>` enumerates every live actor
+  in the runtime. Iteration order is **unspecified but deterministic
+  for a given runtime instance and observation point** — two
+  back-to-back calls within one runtime will yield the same order
+  for the same population, but the spec does not commit to an
+  ordering across runtime instances or across releases.
+- `actors().by_supervisor(&sup) -> Iter<ActorInfo>` filters to actors
+  whose supervisor's `ActorId` matches `sup`'s. Returns an empty
+  iterator if `sup` is not a `@supervisor`-decorated actor.
+- `actors().by_name(name) -> Iter<ActorInfo>` filters by `ActorInfo.name`.
+
+`ActorInfo` is the snapshot record:
+
+```sploosh
+struct ActorInfo {
+    id:                ActorId,
+    name:              String,
+    spawn_location:    String,        // file:line of the spawn site (best-effort)
+    supervisor:        Option<ActorId>,
+    lifecycle_state:   LifecycleState, // Initializing | Ready | Draining | Dead
+    mailbox_len:       usize,
+    mailbox_capacity:  usize,
+    death_cause:       Option<DeathCause>,
+}
+
+enum LifecycleState { Initializing, Ready, Draining, Dead }
+```
+
+`name` is the unqualified type name of the actor (e.g. `"Worker"`).
+`spawn_location` is best-effort — the runtime captures the call-site
+file and line at `spawn` when debug info is available; otherwise the
+field is `"<unknown>"`. `supervisor` is `Some(parent_id)` when the
+actor was spawned from inside a `@supervisor`-decorated actor's `init`
+or handler, and `None` otherwise.
+
+#### 8.12.3 Supervisor-rooted restart history
+
+Restart history is exposed on the **supervisor's** handle, not on the
+child's. Non-supervised actors have no restart path (§8.7) and
+therefore no history to expose. Three methods are added to
+`Handle<S>` whenever `S` is `@supervisor`-decorated:
+
+```sploosh
+impl<S: Actor> Handle<S> {
+    // Available only when S is @supervisor-decorated:
+    pub fn restart_count<C: Actor>(&self, child: &Handle<C>) -> Result<u32, ObserveError>;
+    pub fn restart_history<C: Actor>(&self, child: &Handle<C>) -> Result<Vec<RestartEvent>, ObserveError>;
+    pub fn children(&self) -> Iter<ActorInfo>;
+}
+
+struct RestartEvent {
+    timestamp_ms_since_spawn: u64,
+    cause:                    DeathCause,
+}
+
+@error
+enum ObserveError {
+    NotASupervisedChild,    // see §18 / E1210 (reserved)
+}
+```
+
+- `restart_count(child)` returns the **total** restart count for that
+  child since the supervisor first spawned it — not just the count
+  within the current `window_secs` sliding window (§8.7). Calling
+  `restart_count` with a child that this supervisor does not supervise
+  returns `Err(ObserveError::NotASupervisedChild)`.
+- `restart_history(child)` returns the retained `RestartEvent`s in
+  chronological order, oldest first. The retained history is **capped
+  at a configurable limit (default 16)**; older events are dropped
+  FIFO. The cap is tunable via the new `restart_history: N` parameter
+  on `@supervisor` (§12.1). `cause` is the `DeathCause` of the
+  termination that triggered the restart (§8.12.4); for `one_for_all`
+  and `rest_for_one` strategies the cause is propagated from the
+  failed sibling. Same `NotASupervisedChild` error path as
+  `restart_count`.
+- `children() -> Iter<ActorInfo>` enumerates currently-supervised
+  children. Order matches the supervisor's internal child collection
+  (e.g., insertion order for `Vec<Handle<T>>`), and that order is the
+  same order `rest_for_one` uses (§8.7a).
+
+A child terminated via `handle.stop()` or `handle.kill()` (§8.2a) is
+**not a restart** — supervisors treat it as intentional termination
+(§8.7) and do not restart the child. Such terminations therefore do
+**not** appear in `restart_history`. They do appear in `children()`
+(briefly, until the child reaches `DEAD`) and in `actor_info`'s
+`death_cause` once dead.
+
+#### 8.12.4 Dead-actor snapshot retention
+
+When an actor reaches `DEAD` (any of the five termination paths in
+§8.2), the runtime captures a final `ActorInfo` snapshot and stores
+it in a side-table keyed by `ActorId`. The snapshot has
+`lifecycle_state = Dead` and a populated `death_cause`:
+
+```sploosh
+enum DeathCause {
+    RuntimeFailure { panic: String },     // bounds, overflow, assert (§8.8)
+    Stopped,                              // handle.stop() drained the mailbox (§8.2a)
+    Killed,                               // handle.kill() (§8.2a)
+    Supervised { restart_pending: bool }, // supervisor terminated the child (§8.7)
+                                          //   restart_pending: true if a restart is queued
+    RuntimeShutdown,                      // main() returned (§8.11)
+}
+```
+
+**Retention contract.** The snapshot is retained as long as any
+`Handle<T>` clone targeting the actor remains live. This is a
+**refcount-driven retention on the snapshot side-table**, not on the
+actor itself. The contrast with §8.2 is deliberate: handle drop has
+no effect on actor lifetime (§8.2 retains that property unchanged),
+but handle drop *does* affect snapshot lifetime — once the **last**
+handle clone drops, the snapshot is GC'd. This is the **only**
+refcount in the actor model, and it exists specifically to give
+post-mortem `observe::actor_info(handle)` a stable observation
+window.
+
+After GC, `observe::actor_info(handle)` against a stale handle
+reconstructed from elsewhere (e.g., serialized and rebuilt — the
+mechanism is implementation-defined and out of scope for v0.5.6)
+returns `None`. While the snapshot is still retained,
+`observe::actor_info(handle)` returns `Some(info)` with
+`info.lifecycle_state == LifecycleState::Dead`.
+
+**Behavior of other handle methods on a dead handle is unchanged.**
+`handle.alive()` returns `false`. `send` silently drops
+(§8.2). `send_timeout` returns `Err(SendError::Dead)` (§8.5).
+Request/reply returns `Err(ActorError::Dead)` (§8.8). The §8.12
+additions only add new observation surface; they do not alter the
+existing dead-handle behavior.
+
+#### 8.12.5 The `ActorId` type
+
+`ActorId` is an opaque, `Copy + Eq + Hash` identifier assigned at
+`spawn`. Two distinct actors never share an `ActorId`, and an
+`ActorId` is never reused — even after the actor it identified has
+died and its snapshot has been GC'd, that numeric value is retired.
+The runtime assigns IDs monotonically within a runtime instance from
+a non-zero counter; `ActorId(0)` is reserved as a sentinel and is
+not a valid actor identifier.
+
+`ActorId` is **not** `Send` across runtime instances. v0.5.6 has one
+runtime per process — `main()` starts the runtime and runtime
+shutdown on `main()` return ends it (§8.11). Comparing `ActorId`s
+produced by different runtime instances is a compile error in any
+context the compiler can see; see §18 / `E1211` (reserved). The
+multi-runtime story is deferred to a future amendment.
+
+`ActorId` is exported from the prelude (§13.1) because users see it
+in every `ActorInfo` and every `RestartEvent`.
+
+#### 8.12.6 Cost model
+
+The observability surface is pay-always — every spawn pays
+bookkeeping whether or not anything ever calls `observe::*`. The
+explicit costs are:
+
+- **Per-actor.** A registry entry of approximately 24 bytes (the
+  `ActorId`, a pointer to the actor's runtime cell, and the
+  supervisor's `ActorId` if any) plus an atomic `usize` mailbox
+  counter. The mailbox counter is reused from the existing
+  backpressure machinery (§8.11) — `mailbox_len()` reads the same
+  atomic that `send` and `send_timeout` consult.
+- **Per-supervised child.** A ring buffer of the last *N*
+  `RestartEvent`s (default 16; ~24 bytes each → ~384 bytes per
+  child). Tunable via `@supervisor(restart_history: N)`. A
+  supervisor with no restart-history readers still pays this cost.
+- **Per snapshot retention.** When an actor dies, an `ActorInfo`
+  (~256 bytes assuming a short type name) is held until the last
+  `Handle<T>` clone targeting that actor drops.
+
+`observe::actors()` walks the registry and is **O(N_actors)** in the
+total live-actor count. It is intended for diagnostics and triage,
+not for hot paths. Holding an `Iter<ActorInfo>` across an `.await`
+inside an actor handler is permitted but inadvisable — it pins
+snapshots and observably delays GC of dead-actor entries whose only
+remaining reference is the iterator.
+
+#### 8.12.7 On-chain prohibition
+
+Every method, type, and module introduced in §8.12 is a **compile
+error inside `onchain` modules**. This is a one-line restatement of
+the existing actor prohibition in §11.1 and §12.3 — `Handle<T>`
+itself is already an `onchain` compile error, so all its methods are
+too; `std::actor::observe` is an actor-runtime module; and
+`ActorId` is an actor identifier. There is no on-chain observability
+analog in v0.5.6.
+
 ---
 
 ## 9. String Formatting and Methods
@@ -3058,7 +3330,7 @@ function-level attributes.
 | `@inline` | Hint to inline a function |
 | `@payable` | On-chain: function accepts native tokens |
 | `@reentrant` | On-chain: opt-in to reentrancy; disables the §11.3a guard for this function only. Does not alter guard state observed by other functions in the same contract. |
-| `@supervisor(...)` | Mark an actor as a supervisor |
+| `@supervisor(...)` | Mark an actor as a supervisor. Parameters: `strategy`, `max_restarts` (default 5), `window_secs` (default 60, sliding), and `restart_history: N` (default 16) — the per-child cap on the retained `RestartEvent` ring buffer surfaced by `Handle<S>.restart_history(child)` (§8.12.3). Older events are dropped FIFO. |
 | `@mailbox(capacity: N)` | Set actor mailbox capacity (default: 1024) |
 | `@overflow(wrapping)` | Opt function into wrapping arithmetic (compile error on-chain) |
 | `@fast_math(flags)` | Enable LLVM fast-math flags for floating-point operations (compile error on-chain) |
@@ -3263,6 +3535,10 @@ user-defined.
 | `send_timeout(expr, ms)` | `-> Result<(), SendError>` | not onchain | Bounded send |
 | `Handle<A>.stop()` | `fn(&Handle<A>) -> Result<(), StopError>` | not onchain | Cooperative graceful drain (§8.2a) |
 | `Handle<A>.kill()` | `fn(&Handle<A>) -> Result<(), StopError>` | not onchain | Immediate termination after current handler (§8.2a) |
+| `Handle<A>.mailbox_len()` | `fn(&Handle<A>) -> usize` | not onchain | Current queued message count, atomic snapshot (§8.12.1) |
+| `Handle<A>.mailbox_capacity()` | `fn(&Handle<A>) -> usize` | not onchain | Configured mailbox capacity (§8.12.1) |
+| `Handle<A>.alive()` | `fn(&Handle<A>) -> bool` | not onchain | True if the actor is not `DEAD` (§8.12.1) |
+| `Handle<A>.actor_id()` | `fn(&Handle<A>) -> ActorId` | not onchain | Opaque per-spawn identifier (§8.12.1, §8.12.5) |
 | `select { arms }` | Special syntax | not onchain | Multiplexed receive |
 | `timeout(ms)` | `fn(u64) -> TimeoutFuture` | not onchain | Timeout in select |
 
@@ -3364,7 +3640,7 @@ Drop, Error
 Fn, FnMut, FnOnce
 Iter, FromIter
 Send, Sync
-Handle, JoinHandle
+Handle, JoinHandle, ActorId
 Channel, Sender, Receiver
 Address, u256
 FpCategory
@@ -3396,6 +3672,7 @@ Referencing any of these outside a `@test`-annotated function or
 | `std::env`     | Environment variables, CLI args          | native |
 | `std::log`     | Structured logging                       | native, wasm |
 | `std::test`    | Test framework, assertions               | native (test) |
+| `std::actor`   | Actor observability and introspection (§8.12) | native, wasm |
 | `std::web`     | HTTP server, routing, middleware         | native, wasm |
 | `std::db`      | Database connection, query builder       | native |
 | `std::chain`   | Web3 utilities, ABI encoding, addresses  | all |
@@ -4362,6 +4639,7 @@ in prose.
 | `Shared<T>` immutable refcount primitive | Chosen over `Arc<T>` to eliminate interior-mutability pairing and cycle risk by construction. Split from `Handle<T>` by intent: reads → `Shared<T>`, writes → actor + `Handle<T>`. Strict `T: Send + Sync` requirement keeps the LLM surface narrow. |
 | Manifest: Cargo-shaped, four built-in profiles, Blake3 lockfile, edition = language version | The compiler trips on the manifest first; cheaper to spec it once, exactly, than to retrofit. Cargo-exact profiles (`dev`/`release`/`test`/`bench`) maximize Rust-trained-model recall. Blake3 is already present in `std::crypto` on every target and is faster than SHA-256 for typical lockfile sizes. `[target.X.dependencies]` sections group target-specific deps spatially rather than scattering `targets = [...]` flags inline. `edition = "0.5"` ties the language edition to the shipped spec version — pre-1.0 cadence is the language, not the calendar. `codegen-units` and `panic` are deliberately omitted: the former leaks LLVM, the latter has no choice to make under §4.8's fixed failure model. |
 | Cooperative termination via `handle.stop()` / `handle.kill()` | Method-form (§8.2a) rather than the `stop c` keyword form considered in v0.4.3 — keeps the keyword count at 39 and avoids any grammar change. Handle-drop continues to *not* kill the actor: non-refcounted handles are an intentional design choice (no atomic refcount on every clone), and explicit termination provides the path the original model was missing. Two methods rather than one (`stop()` graceful drain + `kill()` immediate) because the use cases are genuinely different — graceful is the OTP default, but immediate is needed for shedding a buggy or runaway actor without waiting for its mailbox to drain. Supervisor sees `stop`/`kill` as **intentional termination, not failure**: folding it into `max_restarts` would conflate user intent with bugs. The `Result<(), StopError>` return type follows the §6.1 "no exceptions, every fallible operation is `Result`" rule even though the only failure modes are already-dead and already-stopping. Both methods are `&self` because the handle is never mutated; multiple clones racing to stop the actor serialize on the per-actor termination flag, which is set out-of-band and never blocks on mailbox backpressure. |
+| Actor observability (`std::actor::observe` + handle introspection + supervisor restart history) is a first-class spec artifact, always-on in every build mode | The runtime needs an answer to *what is this actor doing right now* before the compiler exists; deferring observability would force every implementer to invent the same surface differently and would let users discover their program is unobservable in production. **Hybrid placement** (cheap reads on `Handle<T>`, richer queries in `std::actor::observe`) keeps `mailbox_len` / `mailbox_capacity` / `alive` / `actor_id` constant-time and discoverable on the type users already hold, while reserving the registry-walking surface for an explicit module so users opt in by importing it. **Restart history rooted on the supervisor's handle** rather than the child's because only `@supervisor`-decorated actors run a restart loop — non-supervised actors have no restart path (§8.7) and therefore no history to expose. **Global runtime registry** (BEAM `:observer` shape) for `observe::actors()` because answering "which actors are pinning memory right now" is the operational question users ask first; the per-actor registry entry is paid anyway for the existing supervisor and mailbox machinery. **Last-known dead-actor snapshot retained until last handle drops** — this is the only refcount in the actor model, and it lives on a side-table next to the snapshot rather than on the actor itself, leaving §8.2 handle-drop semantics unchanged. The contrast was called out explicitly in §8.12.4 to prevent future readers from concluding `Handle<T>` is now refcounted. **Always-available, all-build-modes** rather than a `@observable` attribute or a debug-only feature flag because conditional observability fails the moment it is most needed (production triage), and the bookkeeping cost (~24 bytes registry + atomic mailbox counter + ~384 bytes per supervised child) is dwarfed by an actor's own footprint. **`@supervisor(restart_history: N)` extends an existing attribute** rather than introducing a new one — the keyword count stays at 39 and the grammar is unchanged. **Two new diagnostic registry slots reserved** (`E1210` non-supervised-child, `E1211` ActorId-cross-runtime) — concrete messages earned when the compiler lands per §18.4 Growth policy. **Multi-runtime deferred** — v0.5.6 has one runtime per process, and `ActorId` cross-runtime comparison is reserved-only with an explicit "deferred to a future amendment" note. |
 | Test framework (`@test` + `std::test` + `sploosh test`) is a first-class spec artifact, not a library add-on | The compiler needs a test harness to test itself; deferring testing to a third-party crate would force every implementer to invent the same surface differently. **Rust-shape assertions** (`assert_eq` / `assert_ne` / `assert_matches`) maximize Rust-trained-model recall and inherit the `Debug`-on-failure formatting users expect. **Per-test isolation actor** (§13.3.4) reuses §8 actor failure semantics — a panic in one test never aborts the runner, and there is no separate "test panic" mechanism to reason about. **`@test async fn`** runs on a fresh per-test runtime so async / actor / channel / select code is testable with no special syntax. **Property tests with `Gen<T>` + deterministic shrinking** (§13.3.6) ship in v0.5.5 rather than waiting for a later slice: shrinking is what makes property tests usable in CI, and locking the contract before the compiler emits its first `@property` keeps the trait shape stable. **Test-only prelude additions** (`assert_eq`, `assert_ne`, `assert_matches`, `TestFailure`, `Gen`, `Rng`) auto-import under `#[cfg(test)]` only — production code that references them is a compile error (`E1410` / `E1411`, reserved), preventing test code from leaking into release binaries. **`sploosh test` is deterministic with `--test-threads=1 --seed=<fixed>`** — byte-identical output across runs is the contract LLM agents and CI snapshot tests rely on. **No `@bench` in v0.5.5** — benchmarking has its own design space (warm-up, timer choice, statistical reporting) and is deferred. Doc tests are also deferred — they require a documentation-extraction pass the compiler does not have. |
 
 ---
@@ -4568,6 +4846,7 @@ Source (.sp)
 | v0.4.4 | **On-chain semantics — Cluster C** (§11): closes the four design-heavy gaps that prevented EVM/SVM codegen from starting. **Storage layout** (new §11.1a): target-pluggable abstraction with Solidity-compatible EVM reference realization — sequential `u256` slots in declaration order, Solidity-rule packing within slots, `Map<K, V>` entries at `keccak256(abi.encode(key, map_slot))`, nested maps recurse, `Vec<T>` / `String` with length at slot and data at `keccak256(slot)`, `[T; N]` inline. SVM layout deferred to a future Solana amendment; Sploosh surface stays identical across targets. **Reentrancy guard mechanism** (new §11.3a): runtime per-contract boolean flag set on entry to any non-`@reentrant` `pub` on-chain function and cleared on return (success, error, or revert). Cross-contract re-entry into a guarded function reverts with new error `ChainError::Reentrancy`; `@reentrant` disables the check and the set for that function only. Gas cost is qualitative (one TLOAD + one TSTORE per guarded call on EIP-1153 EVM forks (Cancun+), SLOAD/SSTORE fallback on earlier forks). Explicitly distinguished from §8.10.1 actor `SelfCall` — same word, different layers. **Cross-contract ABI and call semantics** (new §11.4a): new surface syntax `extern onchain mod X { pub fn ...; ... }` declares callee signatures at compile time; `chain::call(addr, callee, args) -> Result<T, ChainError>` blocks synchronously on EVM (lowers to `CALL`), Solidity ABI is the reference argument encoding on EVM, `?` propagates `ChainError::Reverted { data: Vec<u8> }` with revert bytes bounded by `RETURNDATACOPY` semantics. New error enum `ChainError { Reverted, OutOfGas, Reentrancy, InvalidTarget, DecodingError }` added to the on-chain error surface. No delegatecall in v0.4.x (deferred to v0.5.0). SVM divergence via Solana CPI with preserved user-level surface; concrete ABI deferred. **Explicit contrast with `extern "C"` (§4.9)**: both nest under `extern`, but calling conventions, safety models, and error surfaces differ — not interchangeable. **Gas model** (new §11.7a): target-pluggable metering abstraction. EVM references Yellow Paper + active-hard-fork EIP cost tables (Sploosh does not redefine opcode costs); `ctx::gas_remaining() -> u256` EVM-only, `#[gas_limit(N)]` EVM-only advisory in deployed ABI metadata. SVM uses compute units; `ctx::compute_units_remaining() -> u64` SVM-only. All three are compile errors on native and wasm. **Out-of-gas semantics**: transaction-wide revert, all storage mutations and emitted events unwound, and revert is **unaffected by per-function attributes including `@reentrant`** (explicit invariant). Transient-state unwind clears the reentrancy flag on revert, so failed calls cannot leave a contract with its guard stuck set. **`#[indexed]` event field marker** (§11.5, §12.3): up to three indexed fields per event variant on EVM (topic slots 1–3; topic 0 is the signature hash); compile error on more. SVM accepts `#[indexed]` for source-compatibility but treats it as a no-op. **§13.0 intrinsics table**: `ctx::gas_remaining` context column tightened to EVM-only, new row for `ctx::compute_units_remaining` (SVM-only), `chain::call` signature updated to `Result<T, ChainError>`, `storage::*` rows reference §11.1a, `chain::call` row references §11.4a. **§16 grammar**: `extern_block` production extended — `extern_target = STRING_LIT | "onchain" "mod" IDENT` — and `extern_fn` allows optional `pub`. No new keywords (still 40). No new item kinds; `extern onchain mod` is an extern-block variant. **Deferred to v0.5.0**: cross-contract ABI emission artifacts (bytecode + ABI JSON + metadata file), WASM target variants (`wasm32-unknown-unknown` vs `wasm32-wasi`), delegatecall support, SVM storage layout details, SVM CPI concrete ABI, per-call gas forwarding annotation. |
 | v0.5.0 | **Removed the `none` keyword** (§2.3, §16). Per the independent PR #9 review, `none` was reserved in the §2.3 keyword list and appeared as a literal in the §16 grammar `literal` production, but every example, every guide, and the `docs/` tree generally used `None` (the `Option::None` constructor exported from the §13.1 prelude). Lowercase `none` was reserved in two definitional sites and used in zero practical sites — the keyword reservation served no purpose while creating a contradiction with the prelude. Removed from `docs/spec-plans/LANGUAGE_SPEC.md` §2.3 and §16, and from the `docs/reference/keywords.md` and `docs/reference/grammar.md` mirrors. Keyword count: 40→39 (losing `none`). The capitalized `None` — an identifier resolving to `Option::None` via the prelude — is unchanged and remains the sole form for an absent `Option` value. No grammar reshape beyond the deleted alternative; no other sections touched. This amendment opens the v0.5.x cycle with a mechanical correctness fix identified by the PR #9 review (severity Blocker, action L1). |
 | v0.5.1 | **Compiler Diagnostics specification** (new §18). Formalizes the compiler's diagnostic contract as a first-class spec artifact — the highest-leverage missing piece for the AI-native positioning. New §18.1 Diagnostic record defines the canonical field layout (`code`, `severity`, `message`, `primary_span`, `labels`, `children`, `suggested_fixes`, `explanation_url`) that all renderings must preserve. §18.2 Error-code clusters reserves ranges: `E0001–E0999` lexical (A), `E1000–E1099` type/trait/ownership (B), `E1100–E1199` on-chain (C, already in use), `E1200–E1299` actors/concurrency (D), `E1300–E1399` FFI (E), `E1400–E1499` attributes (F), `W0001–W0999` warnings, `L0001–L0999` lints, `E9000+` ICE. §18.3 Suggested-fix applicability adopts rustc's vocabulary verbatim (`MachineApplicable`, `MaybeIncorrect`, `HasPlaceholders`, `Unspecified`) so Rust-trained models recognize the levels. §18.4 Stability contract: code→meaning is frozen on release; retired codes are marked `status: deprecated` with a `superseded_by` pointer and are never reassigned. §18.5 Output formats: `human` (default, rustc-style), `json` (newline-delimited JSON, one record per line, stable field layout with optional `$schema`), `short` (single line per diagnostic, grep-friendly). §18.6 LLM-integration contract: four invariants that hold for every diagnostic in `json` mode — every diagnostic carries a code; `MachineApplicable` fixes are complete (applying them preserves compilability); `primary_span` is always populated (file-less diagnostics use a synthetic `"<cli>"` file); `children` severities are limited to `note` / `help`. Explicit non-commitments: the spec does **not** mandate a hosted URL for `explanation_url` (implementations may leave it `None`) and does **not** commit to a specific JSON Schema artifact for `$schema` (draft-7 emission is a future follow-up). New §17 Design Decisions row documents the format-as-AI-native-lever rationale. **Registry expansion**: `docs/reference/compiler-errors.md` rewritten to distinguish "format" (§18) from "registry" (this file), adds `Cluster` and `Status` columns to the existing E1101–E1109 on-chain rows, and reserves cluster-header placeholders for the A/B/D/E/F/W/L/ICE ranges with TODO entries. Adds a "Growth policy" block (4 rules: registry-first workflow, spec-section anchoring, frozen-on-publish, deprecate-don't-reassign). **Tooling**: `docs/tooling/build-system.md` gains a Compiler Flags subsection documenting `--error-format=<human\|json\|short>` (default `human`) and `--explain <code>` (prints long-form explanation sourced from the local registry, not a network call). No new keywords (39 unchanged). No grammar changes. Closes PR #9 review Blocker U1. **Principle #7 softened** (§1): the 4,000-token claim is now framed as a soft target rather than a hard budget, acknowledging that the PROMPT edition was already 4,077 tokens (cl100k_base) before v0.5.1 and the Diagnostics bullet added ~133 more. This partially addresses review action L8 by tightening the claim to match reality; the stricter CI-enforcement path remains a strategy decision for a future amendment. |
+| v0.5.6 | **Actor observability — `std::actor::observe`, handle introspection, supervisor restart history** (new §8.12, with rippling additions to §13.0 intrinsics, §13.1 prelude, §13.2 core modules, §12.1 attributes, §17 design log). Closes issue #17 (slice 4 of 7 in the v0.5.3–v0.5.9 sequence). The runtime needs an answer to *what is this actor doing right now* before the compiler exists; speccing the observability surface before codegen prevents every implementer from inventing the same shape differently. **Hybrid placement** (§8.12.1, §8.12.2): cheap, constant-time reads live as direct methods on `Handle<T>` — `mailbox_len()`, `mailbox_capacity()`, `alive()`, `actor_id()` — all `&self`, infallible, available on dead handles. Richer queries (`actor_info(handle)`, `actors()`, `actors().by_supervisor(sup)`, `actors().by_name(name)`) live in the new `std::actor::observe` module. **Supervisor-rooted restart history** (§8.12.3): three new methods on `Handle<S>` when `S` is `@supervisor`-decorated — `restart_count(child) -> Result<u32, ObserveError>`, `restart_history(child) -> Result<Vec<RestartEvent>, ObserveError>`, `children() -> Iter<ActorInfo>`. New `RestartEvent { timestamp_ms_since_spawn, cause }` and `ObserveError::NotASupervisedChild`. Non-supervised actors have no restart path (§8.7) and therefore no history to expose. **Dead-actor snapshot retention** (§8.12.4): on transition to `DEAD` the runtime captures an `ActorInfo` with `lifecycle_state = Dead` and a populated `death_cause` — `RuntimeFailure { panic }`, `Stopped`, `Killed`, `Supervised { restart_pending }`, or `RuntimeShutdown`. Retained as long as any `Handle<T>` clone targeting the actor remains live (refcount-driven retention on the snapshot side-table — the **only** refcount in the actor model, explicitly distinct from the actor's own non-refcount lifetime in §8.2). **`ActorId` type** (§8.12.5): opaque `Copy + Eq + Hash`, monotonically assigned at spawn, never reused even after death. Not `Send` across runtime instances; multi-runtime story deferred. **`ActorInfo` snapshot record** (§8.12.2): `id`, `name` (unqualified actor type name), `spawn_location` (best-effort file:line), `supervisor: Option<ActorId>`, `lifecycle_state` (new `LifecycleState { Initializing, Ready, Draining, Dead }` enum), `mailbox_len`, `mailbox_capacity`, `death_cause: Option<DeathCause>`. **Cost model** (§8.12.6): per-actor ~24 bytes registry + atomic mailbox counter (already paid for backpressure); per-supervised-child ring buffer of last *N* `RestartEvent`s (default 16, ~384 bytes); per-snapshot ~256 bytes until last handle drop. `observe::actors()` is O(N_actors), not for hot paths. **Always-on in every build mode** — no `@observable`, no debug-only gating, no feature flag. Maintainer-locked tradeoff: pay the bookkeeping bytes always rather than letting users discover unobservability in production. **`@supervisor` extended with optional `restart_history: N` parameter** (§12.1), default 16. No new attribute, no new keyword. **§13.0 intrinsics**: four new rows for `Handle<A>.mailbox_len/mailbox_capacity/alive/actor_id` (signature `fn(&Handle<A>) -> usize|usize|bool|ActorId`, all `not onchain`). `std::actor::observe::*` items are stdlib, not intrinsics. **§13.1 prelude** adds `ActorId` after `Handle, JoinHandle`. **§13.2 core modules** adds a new `std::actor` row (native, wasm — actor observability and introspection). **On-chain prohibition** (§8.12.7): every `Handle<T>` method, the `std::actor::observe` module, and `ActorId` are compile errors inside `onchain` modules — restated from the existing §11.1 / §12.3 actor prohibition; `Handle<T>` itself is already an on-chain compile error so all its methods are too. **Stdlib mirror**: new `docs/stdlib/actor.md` page with Targets table, full Sploosh signatures, `observe` API, supervisor-rooted methods, and the `ActorId` / `ActorInfo` / `DeathCause` / `RestartEvent` / `LifecycleState` / `ObserveError` type reference. **Guide mirror**: `docs/guide/actors-and-concurrency.md` adds an "Observability" section after "Stopping Actors" with worked examples for tailing mailbox depth, walking a supervision tree, and triaging a dead actor's death cause. **Runbook mirror**: `docs/runbooks/actor-debugging.md` rewritten to be the operational counterpart to §8.12 — recipes for "is this actor stuck", "why did this actor die", "which actors are pinning memory", "what's our supervisor tree", with a troubleshooting table at the bottom. **Reference mirrors**: `docs/reference/attributes.md` extends the `@supervisor` row with the `restart_history` parameter; `docs/reference/compiler-errors.md` reserves two new Cluster D slots — `E1210` (observability method called on a non-supervised parent) and `E1211` (`ActorId` comparison across runtime instances; multi-runtime deferred). **PROMPT edition**: a one-paragraph "Observability" block added in the Concurrency section so LLMs know the API exists. **§17 Design Decisions Log** adds a new v0.5.6 row capturing the five maintainer-locked choices (hybrid placement, supervisor-rooted history, global runtime registry, snapshot-until-last-handle-drop, always-on bookkeeping). No grammar changes. No new keywords (39 unchanged). |
 | v0.5.5 | **`std::test` framework — first-class spec artifact** (new §13.3, with rippling additions to §13.0 intrinsics, §13.1 prelude, §12.1 attributes, §17 design log). Closes issue #16 (slice 3 of 7 in the v0.5.3–v0.5.9 sequence) and review action U3. The compiler needs a test harness to test itself; speccing the surface before the compiler lands prevents every implementer from inventing the same shape differently. **Three new test-only intrinsics** (§13.0): `assert_eq(a, b)` and `assert_ne(a, b)` (Rust-shape, `T: Eq + Debug`, borrow operands so non-`Copy` values aren't consumed, report both sides via `Debug` on failure) and `assert_matches(value, pattern)` (special form using §5.2 match patterns; pattern bindings are not available after the assertion). All three are compile errors outside `@test`-annotated functions or `#[cfg(test)]` modules — diagnostic `E1410` reserved. **Test discovery and layout** (§13.3.2): unit tests live inline in `#[cfg(test)] mod tests { ... }`; integration tests live as standalone crates under `tests/*.sp` and only see the package's `pub` surface. Doc tests deferred. **Failure semantics — per-test isolation actor** (§13.3.4): each test runs inside its own runtime-spawned actor with a one-shot completion channel. Three observable outcomes: `Ok(())` (pass), `Err(TestFailure)` (returned-Err shape; `?`-friendly with the new `From<E>` for `E: Error` blanket on `TestFailure`), and actor death (panic, observed as `Err(ActorError::Dead { panic: Some(msg) })`). Reuses §8 actor failure semantics so there is no separate "test panic" mechanism to reason about — a single failing test never aborts the runner. **`async @test fn ...` is permitted** (§13.3.5): the runner spawns a fresh runtime per test; `.await`, channels, `select`, timeouts, and user-spawned actors all work as in production code. Tests that own actors clean them up via §8.2a `handle.stop()` / `.kill()` or rely on the runtime-shutdown sweep. **Property tests with `@property` attribute** (§13.3.6, new sibling to `@test` in §12.1): runner generates 256 cases per property by default, shrinks failures to a minimum reproducer, and reports both original and shrunk inputs with the RNG seed for reproduction. New `Gen<T>` trait (`type Item; fn generate(rng, size); fn shrink(value) -> Iter<Item>`) with prelude impls for every primitive integer, `bool`, `f32`/`f64`, `char`, `String`, `Vec<T: Gen>`, `Option<T: Gen>`, `Result<T: Gen, E: Gen>`, and tuples up to arity 12. Deterministic shrinking required — same seed reproduces the same shrunk minimum byte-for-byte. **`sploosh test` runner contract** (§13.3.7): flags `--filter`, `--exact`, `--test-threads`, `--nocapture`, `--seed`, `--cases`, `--format`. Deterministic output under `--test-threads=1 --seed=<fixed>`. Exit codes `0` (pass), `1` (any test failed), `2` (runner error). **`std::test` public surface** (§13.3.8): `TestFailure`, `Gen`, `Rng` library types; `assert_eq` / `assert_ne` / `assert_matches` re-exported for documentation locality. All `#[cfg(test)]`-only — outside-test references are `E1411` (reserved). **Test-only prelude additions** (§13.1): `assert_eq`, `assert_ne`, `assert_matches`, `TestFailure`, `Gen`, `Rng` auto-import only under `#[cfg(test)]`, preventing test code from leaking into release binaries. **`std::test` is a compile error inside `onchain` modules** — on-chain code is tested off-chain by spawning a simulated execution context; the `@onchain_test` shape is deferred to a future amendment. **Tooling mirrors**: `docs/stdlib/test.md` rewritten from 8-line stub to full API reference; `docs/tooling/build-system.md` adds the test-runner flag table; `docs/runbooks/testing-strategies.md` rewritten to cover unit / integration / async / property test patterns. **PROMPT edition**: a one-line `@test` / `@property` summary added to the Attributes section so LLMs can invoke the framework without the full spec in context. **§17 Design Decisions Log** adds a new v0.5.5 row capturing the four maintainer-locked choices (Rust-shape assertions, panic + per-test isolation, full property surface in v0.5.5, async/actor tests via `@test async fn`) and the principled deferrals (`@bench`, doc tests, on-chain test scaffolding). No grammar changes (the `@property` attribute reuses the existing §16 attribute production). No new keywords (39 unchanged). Two new diagnostic registry slots reserved (`E1410` test-only-intrinsic-outside-test; `E1411` test-only-prelude-outside-test) — concrete messages earned when the compiler lands per §18.4 Growth policy. **Deferred**: `@bench` for benchmarking (different design space — warm-up, timer choice, statistical reporting); doc tests (requires a documentation-extraction pass); on-chain test scaffolding (`@onchain_test` with simulated `ctx`); test fixtures / `@before` / `@after` (currently handled by per-test setup functions). |
 | v0.5.4 | **Cooperative actor termination — `handle.stop()` / `handle.kill()`** (new §8.2a; mechanics rippled through §8.1a, §8.2, §8.5, §8.7, §8.7a, §8.8, §8.10.1, §8.11). Closes issue #15 and review action P2 / item #4 (High). Resolves the orphaned-actor leak called out in the PR #9 review by introducing explicit cooperative termination as the missing fifth path to `DEAD`. **New `DRAINING` state** (§8.1a) sits between `READY` and `DEAD`: the actor handles messages already enqueued in FIFO order but rejects new sends from the moment the termination flag is set. The four-state lifecycle is `INITIALIZING → READY → DRAINING → DEAD`, with `READY → DEAD` still the failure path. **Two methods, two semantics**: `handle.stop() -> Result<(), StopError>` requests a graceful drain — the actor finishes the messages already in its mailbox, then transitions `DRAINING → DEAD`. `handle.kill() -> Result<(), StopError>` aborts after the **current handler** completes — Sploosh does not interrupt user code mid-handler, so any in-flight `.await` runs to completion before the remainder of the mailbox is discarded. `kill()` while `DRAINING` is a valid **upgrade** that returns `Ok(())`. **`StopError` enum** (new, §8.8): `AlreadyStopping` (re-stop while already stopping) and `AlreadyDead` (target is already `DEAD` or already-killed). Repeat-stop and repeat-kill are observable, not silent — the §6.1 "every fallible operation is `Result`" rule applies even though the only failure modes are these two. **Supervisor interaction** (§8.7): a child terminated via `stop()`/`kill()` is **intentional termination, not failure** — the supervisor does not restart it, and the termination does not count toward `max_restarts`. `rest_for_one` and `one_for_all` do not cascade for user-driven termination. **Handle drop semantics** (§8.2): rewritten — handle drop still does not kill the actor (non-refcounted handles are intentional), but the orphan-leak workaround now exists. Five termination paths replace the previous three: cooperative stop, immediate kill, runtime failure, supervisor decision, runtime shutdown. **Receiver convention**: method on `Handle<T>`, not a `stop` keyword (the v0.4.3 deferred `stop c` form was rejected to keep the keyword count at 39 and avoid any grammar change). Both methods are `&self` because the handle is never mutated; multiple clones racing to stop the same actor serialize on the per-actor 2-bit termination flag (`Running` / `StopRequested` / `Killed`). **Out-of-band delivery**: the termination flag is set via atomic CAS that bypasses the mailbox entirely — `stop()`/`kill()` never block on backpressure, never consume mailbox capacity, and do not interact with the §8.11 per-sender FIFO ordering. This is the only out-of-band signal in the actor model. **Self-stop / self-kill** (§8.10.1, §8.2a): legal, **not** a re-entrant call, **not** an `ActorError::SelfCall`. The signal is observed after the current handler returns, so self-stop never deadlocks. **Drop semantics** (§8.7a): unchanged — Drop on state fields runs identically when the cause is `stop()`, `kill()`, runtime failure, or supervisor restart. **Existing error variants suffice for already-rejected messages**: `SendError::Dead` (§8.5) covers `send_timeout` to a `DRAINING` actor, `ActorError::Dead` (§8.8) covers request/reply, and `send` silently drops — no new error variants on these enums. **`SendError::Dead` documentation extended** (§8.5) to call out the `DRAINING` case. **§13.0 Compiler Intrinsics**: two new rows for `Handle<A>.stop()` and `Handle<A>.kill()`, signature `fn(&Handle<A>) -> Result<(), StopError>`, native/wasm only. Both are method-call lowerings; no syntactic novelty. **On-chain availability**: rides on the existing §11.1 / §12.3 actor prohibition — `Handle<T>` itself is already a compile error inside `onchain` modules, so `stop()`/`kill()` are too. **`PROMPT` edition**: the existing `Lifecycle: INITIALIZING → READY → DEAD` line updated to four states with `DRAINING`; the "Handle drop does NOT kill the actor" line rewritten to point at the five termination paths; a one-line `handle.stop()` / `handle.kill()` summary added. **Guides updated**: `docs/guide/actors-and-concurrency.md` adds a "Stopping Actors" subsection after the existing handle-drop paragraph and rewrites the orphan-actor sentence to cross-link `stop()`. `docs/guide/ownership-and-borrowing.md` extends the "`Handle<T>` is not reference-counted" paragraph to mention the explicit termination methods. **Migration guides**: `docs/migration/from-rust.md` updates the `Arc::strong_count` row to reference `handle.stop()` as the explicit cleanup path Rust's `Arc<T>` drop has no analog for; `docs/migration/from-elixir.md` updates the PID-lifetime row to reference `handle.stop()` as Sploosh's equivalent of `Process.exit(pid, :normal)`. **§17 Design Decisions Log** adds a new v0.5.4 row capturing the method-form choice, the dual-method choice, the supervisor-as-intentional-termination choice, and the out-of-band signaling rationale. No grammar changes. No new keywords (39 unchanged). No new `docs/reference/compiler-errors.md` entries — `StopError` is a library enum, not a compiler diagnostic, and per §18.4 / Growth policy no codes are pre-assigned. **Deferred to a future amendment**: `stop_all()` on a supervisor (cohort-stop convenience), explicit "wait for DEAD" awaitable, handler-interruption semantics (POSIX-style cancellation). |
 | v0.5.3 | **Manifest specification fleshed out** (§14.1–§14.4 expanded; existing §14.1 stub replaced). Closes issue #14 (slice 1 of 7 in the v0.5.3–v0.5.9 sequence) and review action U2. Spec previously had 19 lines on `sploosh.toml`; the manifest is the first artifact a future compiler will load, so locking the contract before codegen makes assumptions is the cheapest form of debt prevention. **§14.1.1 `[project]`** formalizes `name` / `version` / `edition` (required) and `description` / `license` / `authors` / `repository` (optional); unknown fields are a hard error. **`edition` is the Sploosh language version** (`"0.5"`) — pre-1.0 cadence makes year strings (`"2026"`) misleading, and tying the edition to the shipped spec version aligns release artifacts. All existing `edition = "2026"` examples updated to `"0.5"` across `docs/spec-plans/`, `docs/tooling/`, `docs/guide/`, runbooks, and examples. **§14.1.2 dependency tables** introduce `[dev-dependencies]` (test-only, not forwarded to dependents) and `[build-dependencies]` (parsed and reserved for future build-script support; no invocation specified yet) alongside `[dependencies]`. Inline-table dep form documents `version`, `features`, `default-features`, `optional`, `git` + required `rev` (branches and tags rejected as non-reproducible floats), `path` (workspace-internal only). Source precedence `path > git > registry`; multiple sources on a single entry is a manifest error. **§14.1.3 `[features]`** adopts Cargo's modern syntax: `"name"` for local feature, `"crate/feature"` for transitive feature, `"dep:crate"` for explicit optional-dep activation (resolves the Cargo-2018 ambiguity). **§14.1.4 `[target.<target>.dependencies]`** — Cargo-style per-target dep sections (one per `native`/`wasm`/`evm`/`svm`); merged additively with `[dependencies]`; on-chain prohibitions (§11.1, §12.3) still apply. **§14.1.5 `[targets]`** clarifies the existing project-level `default` / `contracts` table is distinct from §14.1.4 — different role, different shape. **§14.1.6 `[profile.<name>]`** specifies four built-in profiles (`dev`, `release`, `test` inheriting from `dev`, `bench` inheriting from `release`) and custom profiles via `inherits`. Profile knobs: `opt-level` (`0`–`3`, `"s"`, `"z"`), `lto` (`false`/`"thin"`/`"fat"`), `debug` (`0`/`1`/`2`/`false`), `strip` (`"none"`/`"debuginfo"`/`"symbols"`), `incremental` (bool), `overflow-checks` (bool). **`overflow-checks` is frozen `true` for `evm` and `svm` targets**, overriding any user setting and emitting warning `W0xxx` (registry slot reserved, no entry assigned per §18.4 Growth policy). **`codegen-units` and `panic = "abort"|"unwind"` are deliberately not exposed** — the former leaks an LLVM-specific implementation detail; the latter has no choice to make under §4.8's fixed failure model (no unwind path). Per-target profile overrides (e.g., `[profile.release.evm]`) are deferred to a future amendment. **§14.1.7 `[runtime]`** consolidates the previously inline-mentioned `threads = N` knob with a new `mailbox_default_capacity` knob; both silently ignored on `evm` / `svm` (no Sploosh-level on-chain runtime). **§14.1.8 resolution semantics** — Cargo version requirement syntax (caret/tilde/exact/comparison/wildcard), resolver v2 unification (dev-dep features kept separate from non-test feature graphs), structural conflict detection, package-scoped editions. **§14.2 Workspaces** — root `[workspace]` manifest with no `[project]` (root is not buildable); `members` (globs allowed), `exclude`, `resolver = "2"` (required, future-proofing), `[workspace.package]` and `[workspace.dependencies]` for member inheritance via `field.workspace = true`; one `sploosh.lock` at workspace root, member lockfiles rejected. **§14.3 Lockfile (`sploosh.lock`)** — TOML, `[[package]]` array entries with `name` / `version` / `source` / `checksum` / `dependencies`. **Hash algorithm: Blake3** (already present in `std::crypto` on all four backends; faster than SHA-256 for typical 2KB–100KB lockfile sizes); 32-byte digest in RFC 4648 base32 without padding, prefixed `"blake3:"`. Deterministic ordering (alphabetical by name, then version), LF line endings, schema `version = 1`. Update semantics: `sploosh build`/`test`/`check` *verify only*, never write — manifest-incompatible lockfile fails the build with reserved diagnostic slot `E14xx` (no entry assigned per §18.4 Growth policy); `sploosh update` is the only command that may rewrite the lockfile. **§14.4 dependency sources** — registry (default; URL/auth/publishing flow deferred to v0.6+), git (with required `rev` SHA), path (workspace-internal only). **Tooling mirrors**: `docs/tooling/sploosh-toml.md` rewritten as the canonical schema mirror with TODO removed; `docs/tooling/build-system.md` adds `--profile <name>` and `--target <t>` flag rows, `sploosh update` and `sploosh tree` commands; `docs/tooling/package-management.md` rewritten with sources / version syntax / lockfile model and TODO removed (registry / publishing remain marked deferred). **Runbooks**: `new-project-setup.md` updated to the v0.5.3 schema with a workspace-bootstrap variant; `cross-target-builds.md` adds a `[target.wasm.dependencies]` worked example; `adding-onchain-module.md` updates the `[targets]` snippet and cross-links to the §14.1.6 `overflow-checks` on-chain freeze. **Guide**: `getting-started.md` updates `edition` to `"0.5"`. **PROMPT edition**: a one-line manifest summary added before the existing `## File ext` footer (Cargo-shape; `[dev-dependencies]`; `[target.X.dependencies]`; four built-in profiles; Blake3 lockfile). **§17 Design Decisions Log** adds a new v0.5.3 row capturing the four user-locked choices (Blake3, Cargo-exact profiles, `[target.X.dependencies]` sections, edition = language version) and the principled omissions (`codegen-units`, `panic`). No grammar changes. No new keywords (39 unchanged). No new diagnostic registry entries — overflow-check freeze warning and lockfile-mismatch error are *reserved-slot* references only, earned when the compiler lands per §18.4. **Deferred**: registry endpoint and publishing workflow (v0.6+), build-script invocation (only `[build-dependencies]` reserved), per-target profile overrides, lockfile-less library default. |
@@ -4576,4 +4855,4 @@ Source (.sp)
 ---
 
 *Working title: Sploosh. Name subject to change.*
-*This spec is a living document. v0.5.5-draft — May 2026.*
+*This spec is a living document. v0.5.6-draft — May 2026.*
