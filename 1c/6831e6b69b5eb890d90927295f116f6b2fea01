@@ -1,0 +1,28 @@
+docs/guide/ownership-and-borrowing.md
+  s_0267f876a024c6::t_29b9b4b370d0eb 122
+docs/spec-plans/LANGUAGE_SPEC.md
+  s_0267f876a024c6::t_8fb882f5448b5e 1678-1696
+  s_0267f876a024c6::t_9b1047f04c2da7 1722-1728
+docs/spec-plans/LANGUAGE_SPEC_PROMPT.md
+  s_0267f876a024c6::t_8775f4554f41ed 129
+docs/migration/from-elixir.md
+  s_0267f876a024c6::t_f34e12e73d8b47 30
+docs/guide/actors-and-concurrency.md
+  s_0267f876a024c6::t_2c069597988e0a 31,35,38
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "1c6831e6b69b5eb890d90927295f116f6b2fea01",
+  "prompts": {},
+  "sessions": {
+    "s_0267f876a024c6": {
+      "agent_id": {
+        "tool": "droid",
+        "id": "c7671059-fa86-4ba1-9d0a-3eea4ded2f97",
+        "model": "custom:claude-opus-4-7-0"
+      },
+      "human_author": "StreamDemon <revenantpulse@gmail.com>"
+    }
+  }
+}
