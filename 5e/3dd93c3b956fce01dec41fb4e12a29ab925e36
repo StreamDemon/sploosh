@@ -1,0 +1,43 @@
+docs/stdlib/AGENTS.md
+  s_4c8de837211627::t_4c461a5eedc562 1-59
+VISION.md
+  s_4c8de837211627::t_dbe5cfe381f186 1-122
+docs/spec-plans/AGENTS.md
+  s_4c8de837211627::t_64ade62e5995cd 1-67
+docs/tooling/AGENTS.md
+  s_4c8de837211627::t_785fbb00450ee0 1-56
+docs/guide/AGENTS.md
+  s_4c8de837211627::t_49b707bab55b60 1-63
+docs/migration/AGENTS.md
+  s_4c8de837211627::t_937d3f85cf8870 1-54
+AGENTS.md
+  s_4c8de837211627::t_dd2ca3d7fa909f 1-89,92-121
+docs/examples/AGENTS.md
+  s_4c8de837211627::t_f95218746ae233 1-59
+.gitignore
+  s_4c8de837211627::t_d754f13d04f2b3 27,32-33
+.factory/droids/sploosh-spec-steward.md
+  s_4c8de837211627::t_f3a9568e4f7629 1-2,4-67
+docs/reference/AGENTS.md
+  s_4c8de837211627::t_a98af6976afa9f 1-56,59
+docs/runbooks/AGENTS.md
+  s_4c8de837211627::t_b4642243426b9a 1-57
+docs/web3/AGENTS.md
+  s_4c8de837211627::t_ef175563268a07 1-65
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "5e3dd93c3b956fce01dec41fb4e12a29ab925e36",
+  "prompts": {},
+  "sessions": {
+    "s_4c8de837211627": {
+      "agent_id": {
+        "tool": "droid",
+        "id": "80b22747-1835-406e-abcb-d52156ce6c56",
+        "model": "custom:claude-opus-4-7-0"
+      },
+      "human_author": "StreamDemon <revenantpulse@gmail.com>"
+    }
+  }
+}

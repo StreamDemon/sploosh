@@ -1,0 +1,34 @@
+AGENTS.md
+  s_4c8de837211627::t_dd2ca3d7fa909f 1-89,92-121
+  s_1c0103bc3e1dca::t_a2d90d779f0b32 90-91
+.factory/droids/sploosh-spec-steward.md
+  s_4c8de837211627::t_f3a9568e4f7629 1-2,4-67
+  s_1c0103bc3e1dca::t_470d031c736d0b 3
+docs/reference/AGENTS.md
+  s_4c8de837211627::t_a98af6976afa9f 1-56,59
+  s_1c0103bc3e1dca::t_2d99bddcb4ac98 57-58
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "d6a8bc923acbf95faf5e8c9a4ce8cb0a3780f197",
+  "prompts": {},
+  "sessions": {
+    "s_1c0103bc3e1dca": {
+      "agent_id": {
+        "tool": "droid",
+        "id": "bc57b4ca-f550-42aa-a9d0-fb5eda263018",
+        "model": "custom:claude-opus-4-7-0"
+      },
+      "human_author": "StreamDemon <revenantpulse@gmail.com>"
+    },
+    "s_4c8de837211627": {
+      "agent_id": {
+        "tool": "droid",
+        "id": "80b22747-1835-406e-abcb-d52156ce6c56",
+        "model": "custom:claude-opus-4-7-0"
+      },
+      "human_author": "StreamDemon <revenantpulse@gmail.com>"
+    }
+  }
+}
