@@ -1,4 +1,4 @@
-# SPLOOSH Language Specification v0.5.3-draft
+# SPLOOSH Language Specification v0.5.4-draft
 
 > **AI-Native · Systems-Grade · Web2/Web3 Dual-Target**
 >
@@ -1492,12 +1492,13 @@ context column.
 
 ### 8.1a Actor Lifecycle States
 
-Every actor observable through a `Handle<T>` is always in one of three states:
+Every actor observable through a `Handle<T>` is always in one of four states:
 
 | State | Meaning |
 |---|---|
 | `INITIALIZING` | `spawn` has returned a handle, but `init` has not yet produced the initial `Self`. Incoming messages queue in the mailbox. |
 | `READY` | `init` has returned. The actor is processing messages from its mailbox under the normal one-handler-at-a-time rule. |
+| `DRAINING` | A `handle.stop()` request has been observed (§8.2a). The actor continues to handle messages already enqueued in its mailbox in normal FIFO order, but no new messages are accepted: `send` silently drops, `send_timeout` returns `Err(SendError::Dead)`, request/reply returns `Err(ActorError::Dead)`. When the mailbox empties — or a `handle.kill()` upgrade is observed — the actor transitions to `DEAD`. |
 | `DEAD` | The actor has terminated and will never process another message. Its state has been dropped. |
 
 **`init` is infallible in signature** — it returns `Self`, not `Result<Self, E>`,
@@ -1547,15 +1548,25 @@ let counter: Handle<Counter> = spawn Counter::init(0);
 - Sending to a dead actor: request/reply returns `Err(ActorError::Dead)`. `send` silently drops.
 
 **Handle drop semantics.** Dropping a `Handle<T>` — including the last live
-handle in the program — has **no effect on the actor's lifetime**. Actors
-terminate only via (a) runtime failure (bounds, overflow, failed `assert`),
-(b) supervisor termination under the applicable strategy (§8.7), or (c) runtime
-shutdown when `main()` returns (§8.11). An actor that is reachable from no live
-handle and has an empty mailbox is said to be **orphaned**; it continues running
-until the runtime shuts down. Orphaned actors are a known tradeoff of the
-non-reference-counted handle model — clean shutdown is the supervisor's job. A
-future amendment may introduce explicit self-termination; the current
-revision deliberately does not.
+handle in the program — has **no effect on the actor's lifetime**. An actor
+that is reachable from no live handle and has an empty mailbox is said to be
+**orphaned**. Orphaned actors are recovered by one of the following five
+termination paths, never by handle-drop:
+
+1. **Cooperative stop** — `handle.stop() -> Result<(), StopError>` requests a
+   graceful drain (§8.2a).
+2. **Immediate kill** — `handle.kill() -> Result<(), StopError>` aborts after
+   the current handler (§8.2a).
+3. **Runtime failure** — bounds, overflow, or failed `assert` (§8.8).
+4. **Supervisor decision** under the applicable strategy (§8.7).
+5. **Runtime shutdown** when `main()` returns (§8.11).
+
+Non-refcounted handles are an intentional design choice: cloning a `Handle<T>`
+must be free of atomic refcount traffic, and lifetime is decoupled from
+reachability so that supervisors and explicit termination remain the only
+sources of authority over an actor's death. `handle.stop()` is the explicit
+user-controlled exit path that closes the orphan-leak gap that would otherwise
+exist for non-supervised actors.
 
 **Message ownership rules.** The rule is keyed to the method's receiver:
 
@@ -1634,6 +1645,158 @@ fn main() -> Result<(), AppError> {
 **Private (non-pub) methods** within an actor can use references freely since they
 are only called internally during message handling, when the actor's own scope is alive.
 
+### 8.2a Cooperative Termination (`stop` and `kill`)
+
+Two methods on every `Handle<T>` provide explicit user-controlled termination
+paths that complement the runtime-driven paths in §8.7 / §8.8 / §8.11:
+
+```sploosh
+impl<A: Actor> Handle<A> {
+    pub fn stop(&self) -> Result<(), StopError>;
+    pub fn kill(&self) -> Result<(), StopError>;
+}
+```
+
+Both methods are `&self` — the handle is never mutated. Any clone of the handle
+may stop or kill the actor; concurrent stop calls from different threads
+serialize on the per-actor termination flag described below. `stop()` and
+`kill()` are **method calls on a handle**, not statements — there is no `stop`
+keyword (the keyword count is unchanged at 39, §2.3).
+
+**Per-actor termination flag.** The runtime maintains a 2-bit flag per actor
+with values `Running`, `StopRequested`, and `Killed`. The flag is set
+out-of-band by `stop()` / `kill()` via an atomic CAS that does not consume
+mailbox capacity, never blocks on backpressure, and does not interact with
+the per-sender FIFO guarantees of §8.11. This is the only out-of-band signal
+in the actor model.
+
+**`stop()` semantics:**
+
+1. CAS `Running → StopRequested`. If the flag was already `StopRequested`,
+   returns `Err(StopError::AlreadyStopping)`. If the flag was `Killed` or the
+   actor was already `DEAD`, returns `Err(StopError::AlreadyDead)`. Otherwise
+   returns `Ok(())`.
+2. The actor's observable state transitions `READY → DRAINING` (§8.1a) at the
+   moment the flag is set. Messages **already in the mailbox** continue to
+   drain in normal FIFO order. **New sends are rejected** the moment the flag
+   is set: `send` silently drops, `send_timeout` returns
+   `Err(SendError::Dead)`, request/reply returns `Err(ActorError::Dead)`. No
+   new error variants are introduced — these match the existing
+   dead-mailbox behaviour of §8.5 and §8.8 exactly.
+3. After each handler completes, the runtime checks the flag. When the flag is
+   `StopRequested` and the mailbox is empty, the runtime transitions the actor
+   to `DEAD` and runs `Drop` on the actor's state fields per §8.7a step 1.
+4. `stop()` does **not** block until the actor reaches `DEAD`. It returns as
+   soon as the signal is recorded. To observe completion, the caller may
+   re-call any `&self` method on the handle and rely on `Err(ActorError::Dead)`
+   as the terminal observation, or hold the handle alongside a separate
+   completion channel populated by the actor before its last handler returns.
+5. Senders **already blocked** on the mailbox at the moment of stop wake the
+   same way they would for a death (§8.11): `send` resumes with the message
+   silently dropped, `send_timeout` returns `Err(SendError::Dead)`, request/
+   reply returns `Err(ActorError::Dead)`. Wake order is unspecified, matching
+   §8.11.
+6. Messages already produced by the actor's own `.await` (network calls,
+   channel reads) complete normally; the actor processes their results in the
+   current handler before yielding. Sploosh does not interrupt user code
+   mid-handler.
+
+**`kill()` semantics:**
+
+1. CAS the flag to `Killed`. If the flag was already `Killed`, returns
+   `Err(StopError::AlreadyDead)`. A `kill()` while the flag is `StopRequested`
+   is **valid and upgrades**: the CAS succeeds, returns `Ok(())`, and the
+   actor transitions `DRAINING → DEAD` after the current handler returns —
+   the remainder of the mailbox is discarded.
+2. Sploosh does not interrupt user code mid-handler. The runtime allows the
+   currently executing handler (including any in-flight `.await`) to run to
+   completion; only after the handler returns does the runtime discard the
+   mailbox and transition the actor to `DEAD`. There is no equivalent of
+   POSIX `pthread_cancel`.
+3. Pending messages in the discarded mailbox return `Err(ActorError::Dead)`
+   to their request/reply callers and silently drop for `send`, exactly per
+   §8.11.
+
+**`StopError`:** the new error enum is defined alongside `ActorError` in §8.8.
+
+```sploosh
+@error
+enum StopError {
+    AlreadyStopping,    // stop() called on an actor whose flag is already StopRequested
+    AlreadyDead,        // actor is already DEAD, or kill() on already-Killed
+}
+```
+
+`kill()` upgrading a `StopRequested` actor returns `Ok(())`, not an error —
+the upgrade is a defined operation, not a redundant one.
+
+**Self-stop and self-kill.** A handler may call `self.handle.stop()` or
+`self.handle.kill()` on a stored self-handle. The signal is observed only
+**after the current handler returns** — there is no "die now" effect mid-
+method. This is *not* a re-entrant call and does **not** raise
+`ActorError::SelfCall` (§8.10.1): `stop()` and `kill()` are out-of-band flag
+operations, not request/reply calls on the actor's mailbox.
+
+```sploosh
+actor Worker {
+    self_handle: Option<Handle<Worker>>,
+    job_count: u64,
+
+    fn init() -> Self {
+        Worker { self_handle: None, job_count: 0 }
+    }
+
+    pub fn set_self_handle(&mut self, h: Handle<Worker>) {
+        self.self_handle = Some(h);
+    }
+
+    pub fn shut_down_when_done(&mut self) {
+        if let Some(h) = &self.self_handle {
+            // Returns Ok(()); the stop flag is observed after this handler exits.
+            // Any messages already enqueued ahead of this one continue to drain.
+            let _ = h.stop();
+        }
+    }
+}
+```
+
+**Supervisor interaction.** A child terminated via `stop()` or `kill()` is
+treated as **intentionally terminated**, not as a failure. The supervisor
+does **not** restart the child under any strategy (`one_for_one`,
+`one_for_all`, `rest_for_one`), and the termination does **not** count toward
+`max_restarts`. This is the explicit user-controlled exit path for a
+supervised child. As a side effect, if the user wants a `one_for_all` cohort
+to die together when one child is intentionally stopped, they must call
+`stop()` on each child themselves — supervisor-managed cascading restart does
+not apply to user-driven termination. The supervisor's stored handle
+becomes permanently dead exactly as in §8.7a step 3, but no fresh `init`
+follows.
+
+**Worked example.** Clean shutdown of a non-supervised actor cluster — the
+orphaned-actor scenario the v0.5.4 amendment was introduced to fix:
+
+```sploosh
+fn main() -> Result<(), AppError> {
+    let logger = spawn Logger::init();
+    let workers: Vec<Handle<Worker>> = (0..4)
+        |> map(|_| spawn Worker::init(logger.clone()))
+        |> collect;
+
+    run_workload(&workers)?;
+
+    // Cooperative shutdown: workers drain in-flight tasks first, then logger
+    // drains its log queue. No supervisor involved; no orphaned actors left.
+    for w in &workers { let _ = w.stop(); }
+    let _ = logger.stop();
+
+    Ok(())
+}
+```
+
+For an immediate-shutdown variant, replace the two loops with `kill()` calls.
+A common pattern is `stop()` first, with a deadline; if the deadline elapses
+without the actors reaching `DEAD`, escalate to `kill()`.
+
 ### 8.3 Generic Actors
 
 Actors can be generic. **Every type parameter on an `actor` declaration must be
@@ -1710,6 +1873,10 @@ let msg = rx.recv()?;
 - `send_timeout(tx.send(val), duration_ms)` returns `Result<(), SendError>` where
   `SendError` has variants `Timeout` (bounded wait elapsed) and `Dead`
   (destination actor died — raised for actor-targeted `send_timeout`, see §8.11).
+  `SendError::Dead` is also raised when the destination is in `DRAINING` state
+  (§8.1a, §8.2a): a stopping actor rejects new sends from the moment its
+  termination flag is set, even though the actor itself has not yet reached
+  `DEAD`.
 
 ### 8.6 Select (multiplexed receive)
 
@@ -1765,6 +1932,16 @@ actor WorkerPool {
 - When a supervisor dies, it propagates to ITS supervisor (cascading failure).
 - If the top-level supervisor dies, the runtime returns an error from `main()`.
 
+**Intentional termination is not a failure.** A child terminated via
+`handle.stop()` or `handle.kill()` (§8.2a) is treated as **intentionally
+terminated**: the supervisor does **not** restart it under any strategy,
+and the termination does **not** count toward `max_restarts`. `rest_for_one`
+and `one_for_all` do not cascade for user-driven termination. The
+supervisor's stored handle becomes permanently dead per §8.7a step 3, but
+no fresh `init` follows. Folding user-driven termination into the failure
+path would conflate intent with bugs; the v0.5.4 amendment keeps them
+distinct.
+
 ### 8.7a Restart Semantics
 
 When a supervisor restarts a child under any strategy (`one_for_one`,
@@ -1772,7 +1949,9 @@ When a supervisor restarts a child under any strategy (`one_for_one`,
 
 1. **Drop the failed actor's state.** RAII runs via any `Drop` impls on state
    fields. The failed actor's mailbox is discarded (consistent with §8.8 —
-   pending messages are lost).
+   pending messages are lost). This Drop step runs identically when the cause
+   of termination is `handle.stop()`, `handle.kill()` (§8.2a), runtime
+   failure, or supervisor restart — the cause does not affect Drop semantics.
 2. **Run a fresh `init`** with the arguments the supervisor originally used to
    spawn the child. The new instance begins in `INITIALIZING` per §8.1a and
    transitions to `READY` once `init` completes. The new state is **fresh** —
@@ -1821,10 +2000,19 @@ explicit `assert` failures). When an actor fails:
 ```sploosh
 @error
 enum ActorError {
-    Dead,                           // Actor has terminated
+    Dead,                           // Actor has terminated, or has entered DRAINING (§8.1a)
+                                    //   and is rejecting new request/reply attempts.
     Timeout,                        // Request/reply timed out
     SelfCall,                       // Direct re-entrant self-call detected (§8.10.1)
     PanicMessage { msg: String },   // What went wrong (for logging)
+}
+
+@error
+enum StopError {
+    AlreadyStopping,                // stop() called on an actor whose flag is
+                                    //   already StopRequested (§8.2a)
+    AlreadyDead,                    // actor is already DEAD, or kill() called
+                                    //   on already-Killed (§8.2a)
 }
 
 fn main() -> Result<(), AppError> {
@@ -1848,7 +2036,16 @@ fn main() -> Result<(), AppError> {
 **There is no `panic` keyword.** Actors die from runtime checks (bounds, overflow,
 failed assertions), not from explicit panic calls. The "no panics in safe code" principle
 means the language has no user-callable panic — runtime checks are the only source of
-actor death.
+*failure-driven* actor death. Cooperative termination via `handle.stop()` or
+`handle.kill()` (§8.2a) is the orthogonal user-driven path; both classes converge
+on the `DEAD` state and run `Drop` identically (§8.7a).
+
+**Request/reply against a `DRAINING` actor.** An actor that has observed a
+`stop()` request but has not yet emptied its mailbox is in `DRAINING` (§8.1a).
+Request/reply attempts initiated *after* the stop signal return
+`Err(ActorError::Dead)` immediately, even though the actor has not yet reached
+`DEAD`: a draining actor has already rejected new work. Request/reply messages
+already enqueued before the stop signal continue to drain in FIFO order.
 
 ### 8.9 Async/Await (for non-actor async)
 
@@ -1951,6 +2148,15 @@ after the current one returns. This is the correct pattern for self-scheduling
 work, splitting long computations, or retrying a handler with modified
 arguments.
 
+**Self-stop and self-kill are legal and do not deadlock.** A handler may call
+`self.handle.stop()` or `self.handle.kill()` on a stored self-handle (§8.2a).
+These are out-of-band flag operations on the actor's termination state, not
+request/reply calls on the mailbox; they do **not** raise
+`ActorError::SelfCall`. The signal is observed only after the current handler
+returns, so the running handler completes normally and then the actor
+transitions to `DEAD` (or `DRAINING → DEAD` once the remaining mailbox is
+processed, in the `stop()` case).
+
 This rule is distinct from the on-chain reentrancy guard in §11.3; on-chain
 execution has no actors and no scheduler, so the two mechanisms never overlap.
 
@@ -1983,7 +2189,10 @@ The actor runtime is the execution engine for all actors and async tasks.
 
 **Death while sender blocked.** If the destination actor dies while a sender is
 blocked on its full mailbox, the sender **wakes immediately** regardless of the
-mailbox's current fill state. Wake semantics by call style:
+mailbox's current fill state. The same wake semantics apply when the cause of
+death is a runtime failure, a supervisor decision, the completion of `DRAINING`
+after `handle.stop()` (§8.2a), or a `handle.kill()` upgrade. Wake semantics by
+call style:
 
 - `send handle.method(args)` (fire-and-forget, blocking on backpressure): the
   message is silently dropped, the sender's `send` call returns `()`, and
@@ -3030,6 +3239,8 @@ user-defined.
 | `spawn async { block }` | `-> JoinHandle<T>` | not onchain | Spawn async task |
 | `send expr` | `ActorMethod -> ()` | not onchain | Fire-and-forget message |
 | `send_timeout(expr, ms)` | `-> Result<(), SendError>` | not onchain | Bounded send |
+| `Handle<A>.stop()` | `fn(&Handle<A>) -> Result<(), StopError>` | not onchain | Cooperative graceful drain (§8.2a) |
+| `Handle<A>.kill()` | `fn(&Handle<A>) -> Result<(), StopError>` | not onchain | Immediate termination after current handler (§8.2a) |
 | `select { arms }` | Special syntax | not onchain | Multiplexed receive |
 | `timeout(ms)` | `fn(u64) -> TimeoutFuture` | not onchain | Timeout in select |
 
@@ -3843,6 +4054,7 @@ in prose.
 | Diagnostic format + stable error codes | Machine-actionable compiler output is the AI-native lever. Stable `E<NNNN>` codes, rustc-compatible applicability vocabulary, and an NDJSON mode let LLM agents round-trip fix-and-retry loops deterministically. |
 | `Shared<T>` immutable refcount primitive | Chosen over `Arc<T>` to eliminate interior-mutability pairing and cycle risk by construction. Split from `Handle<T>` by intent: reads → `Shared<T>`, writes → actor + `Handle<T>`. Strict `T: Send + Sync` requirement keeps the LLM surface narrow. |
 | Manifest: Cargo-shaped, four built-in profiles, Blake3 lockfile, edition = language version | The compiler trips on the manifest first; cheaper to spec it once, exactly, than to retrofit. Cargo-exact profiles (`dev`/`release`/`test`/`bench`) maximize Rust-trained-model recall. Blake3 is already present in `std::crypto` on every target and is faster than SHA-256 for typical lockfile sizes. `[target.X.dependencies]` sections group target-specific deps spatially rather than scattering `targets = [...]` flags inline. `edition = "0.5"` ties the language edition to the shipped spec version — pre-1.0 cadence is the language, not the calendar. `codegen-units` and `panic` are deliberately omitted: the former leaks LLVM, the latter has no choice to make under §4.8's fixed failure model. |
+| Cooperative termination via `handle.stop()` / `handle.kill()` | Method-form (§8.2a) rather than the `stop c` keyword form considered in v0.4.3 — keeps the keyword count at 39 and avoids any grammar change. Handle-drop continues to *not* kill the actor: non-refcounted handles are an intentional design choice (no atomic refcount on every clone), and explicit termination provides the path the original model was missing. Two methods rather than one (`stop()` graceful drain + `kill()` immediate) because the use cases are genuinely different — graceful is the OTP default, but immediate is needed for shedding a buggy or runaway actor without waiting for its mailbox to drain. Supervisor sees `stop`/`kill` as **intentional termination, not failure**: folding it into `max_restarts` would conflate user intent with bugs. The `Result<(), StopError>` return type follows the §6.1 "no exceptions, every fallible operation is `Result`" rule even though the only failure modes are already-dead and already-stopping. Both methods are `&self` because the handle is never mutated; multiple clones racing to stop the actor serialize on the per-actor termination flag, which is set out-of-band and never blocks on mailbox backpressure. |
 
 ---
 
@@ -4048,10 +4260,11 @@ Source (.sp)
 | v0.4.4 | **On-chain semantics — Cluster C** (§11): closes the four design-heavy gaps that prevented EVM/SVM codegen from starting. **Storage layout** (new §11.1a): target-pluggable abstraction with Solidity-compatible EVM reference realization — sequential `u256` slots in declaration order, Solidity-rule packing within slots, `Map<K, V>` entries at `keccak256(abi.encode(key, map_slot))`, nested maps recurse, `Vec<T>` / `String` with length at slot and data at `keccak256(slot)`, `[T; N]` inline. SVM layout deferred to a future Solana amendment; Sploosh surface stays identical across targets. **Reentrancy guard mechanism** (new §11.3a): runtime per-contract boolean flag set on entry to any non-`@reentrant` `pub` on-chain function and cleared on return (success, error, or revert). Cross-contract re-entry into a guarded function reverts with new error `ChainError::Reentrancy`; `@reentrant` disables the check and the set for that function only. Gas cost is qualitative (one TLOAD + one TSTORE per guarded call on EIP-1153 EVM forks (Cancun+), SLOAD/SSTORE fallback on earlier forks). Explicitly distinguished from §8.10.1 actor `SelfCall` — same word, different layers. **Cross-contract ABI and call semantics** (new §11.4a): new surface syntax `extern onchain mod X { pub fn ...; ... }` declares callee signatures at compile time; `chain::call(addr, callee, args) -> Result<T, ChainError>` blocks synchronously on EVM (lowers to `CALL`), Solidity ABI is the reference argument encoding on EVM, `?` propagates `ChainError::Reverted { data: Vec<u8> }` with revert bytes bounded by `RETURNDATACOPY` semantics. New error enum `ChainError { Reverted, OutOfGas, Reentrancy, InvalidTarget, DecodingError }` added to the on-chain error surface. No delegatecall in v0.4.x (deferred to v0.5.0). SVM divergence via Solana CPI with preserved user-level surface; concrete ABI deferred. **Explicit contrast with `extern "C"` (§4.9)**: both nest under `extern`, but calling conventions, safety models, and error surfaces differ — not interchangeable. **Gas model** (new §11.7a): target-pluggable metering abstraction. EVM references Yellow Paper + active-hard-fork EIP cost tables (Sploosh does not redefine opcode costs); `ctx::gas_remaining() -> u256` EVM-only, `#[gas_limit(N)]` EVM-only advisory in deployed ABI metadata. SVM uses compute units; `ctx::compute_units_remaining() -> u64` SVM-only. All three are compile errors on native and wasm. **Out-of-gas semantics**: transaction-wide revert, all storage mutations and emitted events unwound, and revert is **unaffected by per-function attributes including `@reentrant`** (explicit invariant). Transient-state unwind clears the reentrancy flag on revert, so failed calls cannot leave a contract with its guard stuck set. **`#[indexed]` event field marker** (§11.5, §12.3): up to three indexed fields per event variant on EVM (topic slots 1–3; topic 0 is the signature hash); compile error on more. SVM accepts `#[indexed]` for source-compatibility but treats it as a no-op. **§13.0 intrinsics table**: `ctx::gas_remaining` context column tightened to EVM-only, new row for `ctx::compute_units_remaining` (SVM-only), `chain::call` signature updated to `Result<T, ChainError>`, `storage::*` rows reference §11.1a, `chain::call` row references §11.4a. **§16 grammar**: `extern_block` production extended — `extern_target = STRING_LIT | "onchain" "mod" IDENT` — and `extern_fn` allows optional `pub`. No new keywords (still 40). No new item kinds; `extern onchain mod` is an extern-block variant. **Deferred to v0.5.0**: cross-contract ABI emission artifacts (bytecode + ABI JSON + metadata file), WASM target variants (`wasm32-unknown-unknown` vs `wasm32-wasi`), delegatecall support, SVM storage layout details, SVM CPI concrete ABI, per-call gas forwarding annotation. |
 | v0.5.0 | **Removed the `none` keyword** (§2.3, §16). Per the independent PR #9 review, `none` was reserved in the §2.3 keyword list and appeared as a literal in the §16 grammar `literal` production, but every example, every guide, and the `docs/` tree generally used `None` (the `Option::None` constructor exported from the §13.1 prelude). Lowercase `none` was reserved in two definitional sites and used in zero practical sites — the keyword reservation served no purpose while creating a contradiction with the prelude. Removed from `docs/spec-plans/LANGUAGE_SPEC.md` §2.3 and §16, and from the `docs/reference/keywords.md` and `docs/reference/grammar.md` mirrors. Keyword count: 40→39 (losing `none`). The capitalized `None` — an identifier resolving to `Option::None` via the prelude — is unchanged and remains the sole form for an absent `Option` value. No grammar reshape beyond the deleted alternative; no other sections touched. This amendment opens the v0.5.x cycle with a mechanical correctness fix identified by the PR #9 review (severity Blocker, action L1). |
 | v0.5.1 | **Compiler Diagnostics specification** (new §18). Formalizes the compiler's diagnostic contract as a first-class spec artifact — the highest-leverage missing piece for the AI-native positioning. New §18.1 Diagnostic record defines the canonical field layout (`code`, `severity`, `message`, `primary_span`, `labels`, `children`, `suggested_fixes`, `explanation_url`) that all renderings must preserve. §18.2 Error-code clusters reserves ranges: `E0001–E0999` lexical (A), `E1000–E1099` type/trait/ownership (B), `E1100–E1199` on-chain (C, already in use), `E1200–E1299` actors/concurrency (D), `E1300–E1399` FFI (E), `E1400–E1499` attributes (F), `W0001–W0999` warnings, `L0001–L0999` lints, `E9000+` ICE. §18.3 Suggested-fix applicability adopts rustc's vocabulary verbatim (`MachineApplicable`, `MaybeIncorrect`, `HasPlaceholders`, `Unspecified`) so Rust-trained models recognize the levels. §18.4 Stability contract: code→meaning is frozen on release; retired codes are marked `status: deprecated` with a `superseded_by` pointer and are never reassigned. §18.5 Output formats: `human` (default, rustc-style), `json` (newline-delimited JSON, one record per line, stable field layout with optional `$schema`), `short` (single line per diagnostic, grep-friendly). §18.6 LLM-integration contract: four invariants that hold for every diagnostic in `json` mode — every diagnostic carries a code; `MachineApplicable` fixes are complete (applying them preserves compilability); `primary_span` is always populated (file-less diagnostics use a synthetic `"<cli>"` file); `children` severities are limited to `note` / `help`. Explicit non-commitments: the spec does **not** mandate a hosted URL for `explanation_url` (implementations may leave it `None`) and does **not** commit to a specific JSON Schema artifact for `$schema` (draft-7 emission is a future follow-up). New §17 Design Decisions row documents the format-as-AI-native-lever rationale. **Registry expansion**: `docs/reference/compiler-errors.md` rewritten to distinguish "format" (§18) from "registry" (this file), adds `Cluster` and `Status` columns to the existing E1101–E1109 on-chain rows, and reserves cluster-header placeholders for the A/B/D/E/F/W/L/ICE ranges with TODO entries. Adds a "Growth policy" block (4 rules: registry-first workflow, spec-section anchoring, frozen-on-publish, deprecate-don't-reassign). **Tooling**: `docs/tooling/build-system.md` gains a Compiler Flags subsection documenting `--error-format=<human\|json\|short>` (default `human`) and `--explain <code>` (prints long-form explanation sourced from the local registry, not a network call). No new keywords (39 unchanged). No grammar changes. Closes PR #9 review Blocker U1. **Principle #7 softened** (§1): the 4,000-token claim is now framed as a soft target rather than a hard budget, acknowledging that the PROMPT edition was already 4,077 tokens (cl100k_base) before v0.5.1 and the Diagnostics bullet added ~133 more. This partially addresses review action L8 by tightening the claim to match reality; the stricter CI-enforcement path remains a strategy decision for a future amendment. |
+| v0.5.4 | **Cooperative actor termination — `handle.stop()` / `handle.kill()`** (new §8.2a; mechanics rippled through §8.1a, §8.2, §8.5, §8.7, §8.7a, §8.8, §8.10.1, §8.11). Closes issue #15 and review action P2 / item #4 (High). Resolves the orphaned-actor leak called out in the PR #9 review by introducing explicit cooperative termination as the missing fifth path to `DEAD`. **New `DRAINING` state** (§8.1a) sits between `READY` and `DEAD`: the actor handles messages already enqueued in FIFO order but rejects new sends from the moment the termination flag is set. The four-state lifecycle is `INITIALIZING → READY → DRAINING → DEAD`, with `READY → DEAD` still the failure path. **Two methods, two semantics**: `handle.stop() -> Result<(), StopError>` requests a graceful drain — the actor finishes the messages already in its mailbox, then transitions `DRAINING → DEAD`. `handle.kill() -> Result<(), StopError>` aborts after the **current handler** completes — Sploosh does not interrupt user code mid-handler, so any in-flight `.await` runs to completion before the remainder of the mailbox is discarded. `kill()` while `DRAINING` is a valid **upgrade** that returns `Ok(())`. **`StopError` enum** (new, §8.8): `AlreadyStopping` (re-stop while already stopping) and `AlreadyDead` (target is already `DEAD` or already-killed). Repeat-stop and repeat-kill are observable, not silent — the §6.1 "every fallible operation is `Result`" rule applies even though the only failure modes are these two. **Supervisor interaction** (§8.7): a child terminated via `stop()`/`kill()` is **intentional termination, not failure** — the supervisor does not restart it, and the termination does not count toward `max_restarts`. `rest_for_one` and `one_for_all` do not cascade for user-driven termination. **Handle drop semantics** (§8.2): rewritten — handle drop still does not kill the actor (non-refcounted handles are intentional), but the orphan-leak workaround now exists. Five termination paths replace the previous three: cooperative stop, immediate kill, runtime failure, supervisor decision, runtime shutdown. **Receiver convention**: method on `Handle<T>`, not a `stop` keyword (the v0.4.3 deferred `stop c` form was rejected to keep the keyword count at 39 and avoid any grammar change). Both methods are `&self` because the handle is never mutated; multiple clones racing to stop the same actor serialize on the per-actor 2-bit termination flag (`Running` / `StopRequested` / `Killed`). **Out-of-band delivery**: the termination flag is set via atomic CAS that bypasses the mailbox entirely — `stop()`/`kill()` never block on backpressure, never consume mailbox capacity, and do not interact with the §8.11 per-sender FIFO ordering. This is the only out-of-band signal in the actor model. **Self-stop / self-kill** (§8.10.1, §8.2a): legal, **not** a re-entrant call, **not** an `ActorError::SelfCall`. The signal is observed after the current handler returns, so self-stop never deadlocks. **Drop semantics** (§8.7a): unchanged — Drop on state fields runs identically when the cause is `stop()`, `kill()`, runtime failure, or supervisor restart. **Existing error variants suffice for already-rejected messages**: `SendError::Dead` (§8.5) covers `send_timeout` to a `DRAINING` actor, `ActorError::Dead` (§8.8) covers request/reply, and `send` silently drops — no new error variants on these enums. **`SendError::Dead` documentation extended** (§8.5) to call out the `DRAINING` case. **§13.0 Compiler Intrinsics**: two new rows for `Handle<A>.stop()` and `Handle<A>.kill()`, signature `fn(&Handle<A>) -> Result<(), StopError>`, native/wasm only. Both are method-call lowerings; no syntactic novelty. **On-chain availability**: rides on the existing §11.1 / §12.3 actor prohibition — `Handle<T>` itself is already a compile error inside `onchain` modules, so `stop()`/`kill()` are too. **`PROMPT` edition**: the existing `Lifecycle: INITIALIZING → READY → DEAD` line updated to four states with `DRAINING`; the "Handle drop does NOT kill the actor" line rewritten to point at the five termination paths; a one-line `handle.stop()` / `handle.kill()` summary added. **Guides updated**: `docs/guide/actors-and-concurrency.md` adds a "Stopping Actors" subsection after the existing handle-drop paragraph and rewrites the orphan-actor sentence to cross-link `stop()`. `docs/guide/ownership-and-borrowing.md` extends the "`Handle<T>` is not reference-counted" paragraph to mention the explicit termination methods. **Migration guides**: `docs/migration/from-rust.md` updates the `Arc::strong_count` row to reference `handle.stop()` as the explicit cleanup path Rust's `Arc<T>` drop has no analog for; `docs/migration/from-elixir.md` updates the PID-lifetime row to reference `handle.stop()` as Sploosh's equivalent of `Process.exit(pid, :normal)`. **§17 Design Decisions Log** adds a new v0.5.4 row capturing the method-form choice, the dual-method choice, the supervisor-as-intentional-termination choice, and the out-of-band signaling rationale. No grammar changes. No new keywords (39 unchanged). No new `docs/reference/compiler-errors.md` entries — `StopError` is a library enum, not a compiler diagnostic, and per §18.4 / Growth policy no codes are pre-assigned. **Deferred to a future amendment**: `stop_all()` on a supervisor (cohort-stop convenience), explicit "wait for DEAD" awaitable, handler-interruption semantics (POSIX-style cancellation). |
 | v0.5.3 | **Manifest specification fleshed out** (§14.1–§14.4 expanded; existing §14.1 stub replaced). Closes issue #14 (slice 1 of 7 in the v0.5.3–v0.5.9 sequence) and review action U2. Spec previously had 19 lines on `sploosh.toml`; the manifest is the first artifact a future compiler will load, so locking the contract before codegen makes assumptions is the cheapest form of debt prevention. **§14.1.1 `[project]`** formalizes `name` / `version` / `edition` (required) and `description` / `license` / `authors` / `repository` (optional); unknown fields are a hard error. **`edition` is the Sploosh language version** (`"0.5"`) — pre-1.0 cadence makes year strings (`"2026"`) misleading, and tying the edition to the shipped spec version aligns release artifacts. All existing `edition = "2026"` examples updated to `"0.5"` across `docs/spec-plans/`, `docs/tooling/`, `docs/guide/`, runbooks, and examples. **§14.1.2 dependency tables** introduce `[dev-dependencies]` (test-only, not forwarded to dependents) and `[build-dependencies]` (parsed and reserved for future build-script support; no invocation specified yet) alongside `[dependencies]`. Inline-table dep form documents `version`, `features`, `default-features`, `optional`, `git` + required `rev` (branches and tags rejected as non-reproducible floats), `path` (workspace-internal only). Source precedence `path > git > registry`; multiple sources on a single entry is a manifest error. **§14.1.3 `[features]`** adopts Cargo's modern syntax: `"name"` for local feature, `"crate/feature"` for transitive feature, `"dep:crate"` for explicit optional-dep activation (resolves the Cargo-2018 ambiguity). **§14.1.4 `[target.<target>.dependencies]`** — Cargo-style per-target dep sections (one per `native`/`wasm`/`evm`/`svm`); merged additively with `[dependencies]`; on-chain prohibitions (§11.1, §12.3) still apply. **§14.1.5 `[targets]`** clarifies the existing project-level `default` / `contracts` table is distinct from §14.1.4 — different role, different shape. **§14.1.6 `[profile.<name>]`** specifies four built-in profiles (`dev`, `release`, `test` inheriting from `dev`, `bench` inheriting from `release`) and custom profiles via `inherits`. Profile knobs: `opt-level` (`0`–`3`, `"s"`, `"z"`), `lto` (`false`/`"thin"`/`"fat"`), `debug` (`0`/`1`/`2`/`false`), `strip` (`"none"`/`"debuginfo"`/`"symbols"`), `incremental` (bool), `overflow-checks` (bool). **`overflow-checks` is frozen `true` for `evm` and `svm` targets**, overriding any user setting and emitting warning `W0xxx` (registry slot reserved, no entry assigned per §18.4 Growth policy). **`codegen-units` and `panic = "abort"|"unwind"` are deliberately not exposed** — the former leaks an LLVM-specific implementation detail; the latter has no choice to make under §4.8's fixed failure model (no unwind path). Per-target profile overrides (e.g., `[profile.release.evm]`) are deferred to a future amendment. **§14.1.7 `[runtime]`** consolidates the previously inline-mentioned `threads = N` knob with a new `mailbox_default_capacity` knob; both silently ignored on `evm` / `svm` (no Sploosh-level on-chain runtime). **§14.1.8 resolution semantics** — Cargo version requirement syntax (caret/tilde/exact/comparison/wildcard), resolver v2 unification (dev-dep features kept separate from non-test feature graphs), structural conflict detection, package-scoped editions. **§14.2 Workspaces** — root `[workspace]` manifest with no `[project]` (root is not buildable); `members` (globs allowed), `exclude`, `resolver = "2"` (required, future-proofing), `[workspace.package]` and `[workspace.dependencies]` for member inheritance via `field.workspace = true`; one `sploosh.lock` at workspace root, member lockfiles rejected. **§14.3 Lockfile (`sploosh.lock`)** — TOML, `[[package]]` array entries with `name` / `version` / `source` / `checksum` / `dependencies`. **Hash algorithm: Blake3** (already present in `std::crypto` on all four backends; faster than SHA-256 for typical 2KB–100KB lockfile sizes); 32-byte digest in RFC 4648 base32 without padding, prefixed `"blake3:"`. Deterministic ordering (alphabetical by name, then version), LF line endings, schema `version = 1`. Update semantics: `sploosh build`/`test`/`check` *verify only*, never write — manifest-incompatible lockfile fails the build with reserved diagnostic slot `E14xx` (no entry assigned per §18.4 Growth policy); `sploosh update` is the only command that may rewrite the lockfile. **§14.4 dependency sources** — registry (default; URL/auth/publishing flow deferred to v0.6+), git (with required `rev` SHA), path (workspace-internal only). **Tooling mirrors**: `docs/tooling/sploosh-toml.md` rewritten as the canonical schema mirror with TODO removed; `docs/tooling/build-system.md` adds `--profile <name>` and `--target <t>` flag rows, `sploosh update` and `sploosh tree` commands; `docs/tooling/package-management.md` rewritten with sources / version syntax / lockfile model and TODO removed (registry / publishing remain marked deferred). **Runbooks**: `new-project-setup.md` updated to the v0.5.3 schema with a workspace-bootstrap variant; `cross-target-builds.md` adds a `[target.wasm.dependencies]` worked example; `adding-onchain-module.md` updates the `[targets]` snippet and cross-links to the §14.1.6 `overflow-checks` on-chain freeze. **Guide**: `getting-started.md` updates `edition` to `"0.5"`. **PROMPT edition**: a one-line manifest summary added before the existing `## File ext` footer (Cargo-shape; `[dev-dependencies]`; `[target.X.dependencies]`; four built-in profiles; Blake3 lockfile). **§17 Design Decisions Log** adds a new v0.5.3 row capturing the four user-locked choices (Blake3, Cargo-exact profiles, `[target.X.dependencies]` sections, edition = language version) and the principled omissions (`codegen-units`, `panic`). No grammar changes. No new keywords (39 unchanged). No new diagnostic registry entries — overflow-check freeze warning and lockfile-mismatch error are *reserved-slot* references only, earned when the compiler lands per §18.4. **Deferred**: registry endpoint and publishing workflow (v0.6+), build-script invocation (only `[build-dependencies]` reserved), per-target profile overrides, lockfile-less library default. |
 | v0.5.2 | **`Shared<T>` immutable-refcounted primitive** (new §4.4a). Closes PR #9 review Blocker P1 — the shared-immutable-data gap that previously forced clone-everything, actor-wrap, or local-`&T`-only patterns for read-heavy data. New §4.4a "Shared Immutable Data with `Shared<T>`" defines an atomically refcounted pointer to an immutable `T`: `Shared::new(value) -> Shared<T>`; `Clone` bumps the atomic refcount O(1) with no allocation and no `T::clone` call; deterministic drop of the inner `T` when the last clone goes out of scope (preserves the "no GC" guarantee of §3.10). **Strictly less than Rust's `Arc<T>`**: immutable only (no `&mut *shared`, no `get_mut`, no `make_mut`, no `try_unwrap`); no `Weak<T>` (cycles impossible by construction because Sploosh has no `Cell` / `RefCell` / `UnsafeCell` / user-visible atomics); not `Copy` (explicit `.clone()` preserves the cost-signal of each refcount bump). **Strict `T: Send + Sync` requirement**: `Shared<T>` is `Clone + Send + Sync` iff `T: Send + Sync`, otherwise `Shared::new` is a compile error — the type exists to cross thread and actor boundaries so requiring thread-safe inner values is an enforced invariant, not a convention. **Deref semantics**: `*shared` produces `&T` only; unlike `Box<T>`'s `*boxed`, it can never move the inner value out. **Actor interop** (§8.2 addition): `Shared<T>` satisfies the §8.2 owned-parameter rule for `&mut self` methods (the wrapper moves; the inner data is shared via refcount bump), making it the idiomatic way to pass read-heavy data to actor handlers and the idiomatic reply type for `&self` request/reply methods returning cached data. **Not available on-chain** — a compile error inside `onchain` modules per both §11.1 and §12.3; reference counting has no gas or storage meaning, and every on-chain value is scoped to the transaction frame. **Drop-order clarification** (§3.10): the `Shared<T>` wrapper drops in scope-reverse order as usual; the inner `T` drops only when the last live clone goes out of scope, which may be earlier or later than any individual wrapper's lifetime — still deterministic given the set of holders. **Compound Types list** (§3.2) adds `Shared<T>`. **Prelude** (§13.1) adds `Shared` after `Box`. **§4.4** rewritten to cross-reference §4.4a and §8.2 instead of saying only "Use `Handle<T>` for sharing state". **§17 Design Decisions Log** adds a new v0.5.2 row (the v0.4 "No `Rc<T>`/`Arc<T>`" row is kept for chronological accuracy). **Guide updates**: `docs/guide/ownership-and-borrowing.md` rewrites the "No Rc/Arc" section with the two-primitive narrative (`Shared<T>` for immutable, `Handle<T>` for mutable, pick by intent); `docs/guide/actors-and-concurrency.md` updates its `Rc`/`Arc` mention to cross-reference `Shared<T>` and adds a worked example of `Shared<LookupTable>` crossing actor boundaries instead of actor-wrapping a read-heavy cache. **Migration update**: `docs/migration/from-rust.md` rewrites three rows (`Arc<Mutex<T>>`, `Rc<T>`/`Arc<T>`, `Arc::strong_count`) to contrast `Shared<T>` (immutable reads) and actor + `Handle<T>` (mutable writes). **PROMPT edition**: `Shared<T>` added to the Compounds line and the Ownership `Box<T>` bullet is rewritten to include the `Shared<T>` summary. No grammar changes. No new keywords (39 unchanged). No new `docs/reference/compiler-errors.md` entries — per §18.4 and the v0.5.1 Growth policy, Shared-specific diagnostic codes are earned when the compiler lands, not pre-assigned. |
 
 ---
 
 *Working title: Sploosh. Name subject to change.*
-*This spec is a living document. v0.5.3-draft — May 2026.*
+*This spec is a living document. v0.5.4-draft — May 2026.*
