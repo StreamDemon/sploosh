@@ -1,0 +1,23 @@
+.factory/droids/sploosh-spec-steward.md
+  s_1c0103bc3e1dca::t_470d031c736d0b 3
+docs/reference/AGENTS.md
+  s_1c0103bc3e1dca::t_2d99bddcb4ac98 57-58
+AGENTS.md
+  s_1c0103bc3e1dca::t_a2d90d779f0b32 90-91
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "21bad7063413166f0201cdb60ba7e798296d71cc",
+  "prompts": {},
+  "sessions": {
+    "s_1c0103bc3e1dca": {
+      "agent_id": {
+        "tool": "droid",
+        "id": "bc57b4ca-f550-42aa-a9d0-fb5eda263018",
+        "model": "custom:claude-opus-4-7-0"
+      },
+      "human_author": "StreamDemon <revenantpulse@gmail.com>"
+    }
+  }
+}
