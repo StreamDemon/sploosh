@@ -3480,8 +3480,8 @@ isolation actor (§13.3.4):
 
 | Intrinsic               | Signature                                       | Purpose                                       |
 |-------------------------|-------------------------------------------------|-----------------------------------------------|
-| `assert_eq(a, b)`       | `fn<T: Eq + Debug>(T, T)`                       | Assert `a == b`; failure reports both values  |
-| `assert_ne(a, b)`       | `fn<T: Eq + Debug>(T, T)`                       | Assert `a != b`; failure reports both values  |
+| `assert_eq(a, b)`       | `fn<T: Eq + Debug>(&T, &T)`                     | Assert `a == b`; failure reports both values  |
+| `assert_ne(a, b)`       | `fn<T: Eq + Debug>(&T, &T)`                     | Assert `a != b`; failure reports both values  |
 | `assert_matches(v, p)`  | Special syntax — `p` is a §5.2 match pattern    | Assert `v` matches pattern `p`                |
 
 `assert_eq` and `assert_ne` borrow their operands (`&T` internally) so

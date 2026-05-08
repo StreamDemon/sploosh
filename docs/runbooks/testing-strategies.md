@@ -138,10 +138,16 @@ async fn worker_processes_job() -> Result<(), TestFailure> {
 
     send worker.handle_job(Job::new("alpha"));
 
-    // give the worker time to process
-    timeout(100).await?;
+    // Drain via request/reply on `&self` — `worker.status()` blocks
+    // until the worker has handled `handle_job` (including its
+    // outbound `send recorder.record(...)`). Per-sender FIFO (§8)
+    // then guarantees the recorder has received the record by the
+    // time we ask it for its events. No `timeout(ms)` — that
+    // intrinsic is select-only per §8.6 / §13.0.
+    let _ = worker.status();
+    let events = recorder.events();
 
-    assert_eq(recorder.events(), vec!["alpha".into()]);
+    assert_eq(events, vec!["alpha".into()]);
 
     let _ = worker.stop();
     let _ = recorder.stop();

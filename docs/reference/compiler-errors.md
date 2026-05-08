@@ -70,7 +70,7 @@ land.
 | Code | Kind | Cluster | Status | Message / meaning | Spec ref |
 |------|------|---------|--------|-------------------|----------|
 | `E1410` | compile error | F | reserved | Test-only intrinsic (`assert_eq`, `assert_ne`, `assert_matches`) used outside a `@test`-annotated function or `#[cfg(test)]` module. These intrinsics are removed by dead-code elimination in non-test builds and have no meaning in production code. | §13.0, §13.3.3 |
-| `E1411` | compile error | F | reserved | Test-only prelude item (`TestFailure`, `Gen`, `Rng`, or one of the test assertion intrinsics) referenced outside a test build. The test-only prelude additions auto-import only under `#[cfg(test)]`; outside-test references prevent the test framework from leaking into release binaries. | §13.1, §13.3.8 |
+| `E1411` | compile error | F | reserved | Test-only prelude item (`TestFailure`, `Gen`, `Rng`, or one of the test assertion intrinsics) referenced outside a `@test`-annotated function or `#[cfg(test)]` module. The test-only prelude additions auto-import only under `#[cfg(test)]`; outside-test references prevent the test framework from leaking into release binaries. | §13.1, §13.3.8 |
 
 <!-- TODO: Promote E1410 / E1411 from `reserved` to `stable` when the
 compiler emits the exact wording specified above. -->

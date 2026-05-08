@@ -125,7 +125,7 @@ Each test runs inside its own runtime-spawned isolation actor. The runner observ
 
 Per-test isolation means a failed test never aborts the runner. The supervisor strategy for the test cohort is conceptually `one_for_one` with `max_restarts: 0` — a failed test is recorded, not restarted.
 
-**User-spawned actors inside tests** must be cleaned up via `handle.stop()` / `handle.kill()` (§8.2a) or rely on the runtime-shutdown sweep when the per-test isolation actor reaches `DEAD`. Tests sharing a runtime via `--test-threads=1` must clean up explicitly — a leaked spawn is observable by the next test.
+**User-spawned actors inside tests** must be cleaned up via `handle.stop()` / `handle.kill()` (§8.2a) or rely on the runtime-shutdown sweep when the per-test isolation actor reaches `DEAD`. Under default parallel scheduling each test gets its own fresh runtime, so a leaked spawn dies with that runtime. Under `--test-threads=1` the runner reuses a single runtime across tests, so user-spawned actors that aren't explicitly stopped can leak from one test into the next — explicit cleanup is required.
 
 ---
 
