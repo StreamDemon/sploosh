@@ -1,4 +1,4 @@
-# SPLOOSH Language Specification v0.5.2-draft
+# SPLOOSH Language Specification v0.5.3-draft
 
 > **AI-Native · Systems-Grade · Web2/Web3 Dual-Target**
 >
@@ -3181,13 +3181,21 @@ project/
     └── evm.toml        # Chain deployment config
 ```
 
-### 14.1 Project Manifest
+### 14.1 Project Manifest (`sploosh.toml`)
+
+The project manifest is the single source of truth for package identity,
+dependency graph, build configuration, and target selection. Every Sploosh
+package is rooted at a `sploosh.toml`. The toolchain mirror of this section
+lives in `docs/tooling/sploosh-toml.md` — the spec is authoritative; the
+tooling page restates it.
+
+A minimal single-package manifest:
 
 ```toml
 [project]
 name = "my-app"
 version = "0.1.0"
-edition = "2026"
+edition = "0.5"
 
 [dependencies]
 sploosh_web = "0.3"
@@ -3202,6 +3210,324 @@ postgres = ["sploosh_db"]
 default = "native"
 contracts = ["evm", "svm"]
 ```
+
+#### 14.1.1 `[project]` table
+
+| Field | Type | Required | Meaning |
+|---|---|---|---|
+| `name` | string | yes | Package name. ASCII identifier characters plus `-` and `_`; must not start with a digit. |
+| `version` | string | yes | Semantic version (`MAJOR.MINOR.PATCH`, optionally with pre-release / build metadata per SemVer 2.0). |
+| `edition` | string | yes | Sploosh language edition (the language version, not a year). Allowed values track the spec's released minor versions: `"0.5"` is the v0.5.x edition. Edition strings are stable identifiers; renaming is a breaking change. |
+| `description` | string | no | One-line summary for registries. |
+| `license` | string | no | SPDX license expression (e.g., `"Apache-2.0 OR MIT"`). |
+| `authors` | list of strings | no | Contributor identities (e.g., `"Name <email>"`). |
+| `repository` | string | no | URL of the source repository. |
+
+Unknown fields in `[project]` are a hard error — the manifest is a contract,
+not a hint surface.
+
+#### 14.1.2 Dependency tables
+
+Three tables share the same shape:
+
+- `[dependencies]` — required to build the package's library / binary.
+- `[dev-dependencies]` — required only for `cfg(test)` builds and for
+  `tests/` integration crates. Not visible from non-test code; not
+  forwarded to dependents.
+- `[build-dependencies]` — reserved for future build-script support; in
+  v0.5.3 the section is parsed and validated but no build-script
+  invocation is specified yet.
+
+Each entry is either a version string or an inline table:
+
+```toml
+[dependencies]
+sploosh_web   = "0.3"
+sploosh_chain = { version = "0.2", features = ["evm"] }
+sploosh_proto = { git = "https://github.com/example/sploosh_proto", rev = "a1b2c3d" }
+local_helper  = { path = "../local_helper" }
+```
+
+Inline-table fields:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `version` | string | SemVer requirement. Defaults to `"*"` if absent and another source field is present. |
+| `features` | list of strings | Features to enable on this dependency. |
+| `default-features` | bool | Disable the dependency's `default` feature group when `false`. Defaults to `true`. |
+| `optional` | bool | When `true`, the dependency is only linked if a `[features]` entry activates it via the `"dep:foo"` or `"foo/feat"` syntax. |
+| `git` | string | Git source URL. Mutually exclusive with `path`. |
+| `rev` | string | Required when `git` is set. **Branches and tags are not allowed** as floating refs; pin to a commit SHA for reproducibility. |
+| `path` | string | Workspace-internal filesystem source. Mutually exclusive with `git`. Path must resolve inside the same workspace as the consuming package. |
+
+Dependency source precedence: `path` > `git` > registry. Setting more than
+one source on a single entry is a manifest error.
+
+#### 14.1.3 `[features]` table
+
+Features are additive sets of conditional-compilation flags. The grammar:
+
+```toml
+[features]
+default = ["json"]                   # implicitly enabled feature group
+json = []                            # leaf feature, no transitive activation
+postgres = ["sploosh_db"]            # activates an optional dependency
+analytics = ["sploosh_db/metrics"]   # activates a feature on a dependency
+audit = ["dep:sploosh_audit"]        # explicit optional-dep activation form
+```
+
+- `"name"` activates the local feature `name`.
+- `"crate/feature"` activates `feature` on dependency `crate`.
+- `"dep:crate"` activates the optional dependency `crate` without enabling
+  any same-named local feature (resolves the Cargo-2018 ambiguity by being
+  explicit).
+
+A feature listed in `default = [...]` is enabled unless the consumer sets
+`default-features = false`. `cfg(feature = "name")` (§12) is the only
+in-source way to test feature state.
+
+#### 14.1.4 `[target.<target>.dependencies]` tables
+
+Per-target dependency overrides use one section per target. Recognized
+target names are the four build targets: `native`, `wasm`, `evm`, `svm`.
+
+```toml
+[target.wasm.dependencies]
+sploosh_web = { version = "0.3", default-features = false, features = ["client"] }
+
+[target.evm.dependencies]
+sploosh_chain = { version = "0.2", features = ["evm"] }
+```
+
+The target-conditional sections are merged additively with the base
+`[dependencies]` table at resolution time. A dep declared in both base and
+a target section must agree on `version`/`source`; only `features` and
+`default-features` may differ. The corresponding `[target.<target>.dev-dependencies]`
+and `[target.<target>.build-dependencies]` sections are accepted with the
+same merge rule.
+
+Compile-time on-chain prohibitions (§11.1, §12.3) still apply: a dependency
+made available under `[target.evm.dependencies]` does not bypass the
+on-chain stdlib restrictions.
+
+#### 14.1.5 `[targets]` table
+
+The `[targets]` table is the *project-level* default target configuration.
+It is distinct from `[target.<target>.dependencies]` (§14.1.4): one declares
+which targets a project supports and which is the default; the other
+declares per-target dependency variations.
+
+| Field | Type | Default | Meaning |
+|---|---|---|---|
+| `default` | string | `"native"` | Target used when `sploosh build` runs without `--target`. Must be one of `native`, `wasm`, `evm`, `svm`. |
+| `contracts` | list of strings | `[]` | The on-chain target set the project deploys to. Subset of `["evm", "svm"]`. |
+
+#### 14.1.6 `[profile.<name>]` tables
+
+Profiles select compiler and linker behaviour for a build. Four built-in
+profiles are predefined and may be customized; additional profiles can be
+declared via `inherits`.
+
+| Profile | Used by | Default `inherits` |
+|---|---|---|
+| `dev` | `sploosh build` (no `--release`) | — (built-in defaults) |
+| `release` | `sploosh build --release` | — (built-in defaults) |
+| `test` | `sploosh test` (also `cfg(test)` paths in `dev`) | `dev` |
+| `bench` | `sploosh test --bench` | `release` |
+
+Profile knobs:
+
+| Knob | Type | `dev` default | `release` default | Meaning |
+|---|---|---|---|---|
+| `opt-level` | `0`–`3`, `"s"`, `"z"` | `0` | `3` | Optimization level. `"s"` optimizes for binary size, `"z"` for size more aggressively. |
+| `lto` | `false`, `"thin"`, `"fat"` | `false` | `"thin"` | Link-time optimization. `"thin"` is parallel ThinLTO; `"fat"` is whole-program LTO. |
+| `debug` | `0`, `1`, `2`, `false` | `2` | `0` | Debug info level. `0` / `false` = none, `1` = line tables, `2` = full. |
+| `strip` | `"none"`, `"debuginfo"`, `"symbols"` | `"none"` | `"debuginfo"` | Symbol stripping policy applied at link. |
+| `incremental` | bool | `true` | `false` | Enable incremental compilation cache. |
+| `overflow-checks` | bool | `true` | `true` | Insert checked-arithmetic guards (§4.8). **Frozen `true` for `evm` and `svm` targets — overrides any user setting and emits warning `W0xxx`.** |
+
+Custom profiles inherit from one of the built-ins (or another custom
+profile, transitively):
+
+```toml
+[profile.release-small]
+inherits = "release"
+opt-level = "z"
+lto = "fat"
+strip = "symbols"
+```
+
+The compiler does not expose `codegen-units` (LLVM-specific implementation
+detail) or a `panic = "abort"|"unwind"` choice (Sploosh's failure model is
+fixed by §4.8 / §8 — there is no unwind path to choose).
+
+Per-target profile overrides (e.g., `[profile.release.evm]`) are not
+permitted in v0.5.3. Use `#[cfg(target = "evm")]` (§12.3) and feature flags
+for target-specific code paths instead. The reservation is left open for a
+future amendment if real demand emerges.
+
+#### 14.1.7 `[runtime]` table
+
+Native/wasm runtime tunables. All fields optional.
+
+| Field | Type | Default | Meaning |
+|---|---|---|---|
+| `threads` | integer ≥ 1 | one per CPU core | M:N scheduler thread count (§8.10). |
+| `mailbox_default_capacity` | integer ≥ 1 | `1024` | Default mailbox capacity for actors that do not specify `@mailbox(capacity: N)` (§8.5, §8.10). |
+
+The `[runtime]` table is silently ignored when building `evm` or `svm`
+targets — there is no Sploosh-level runtime on-chain.
+
+#### 14.1.8 Resolution semantics
+
+- **Version requirement syntax** matches Cargo: caret (`"^0.3"` ≡ `"0.3"`),
+  tilde (`"~0.3.4"`), exact (`"=1.0.0"`), comparison (`">=0.3, <0.5"`),
+  wildcard (`"0.3.*"`).
+- **Resolver**: Sploosh uses *resolver v2* unification semantics. Features
+  enabled for a dependency in one target/dev-dep context do not leak into
+  other contexts; specifically, dev-dependency features are not unified
+  with non-test feature graphs.
+- **Conflict detection** is structural: incompatible version requirements
+  on the same dependency in the resolved graph are a manifest-resolution
+  error, never silently coalesced.
+- **`edition` is package-scoped** — the consuming package's edition
+  determines its own compilation rules; dependencies compile under their
+  own edition. There is no cross-edition feature gate in v0.5.3 because
+  v0.5 is the only released edition.
+
+### 14.2 Workspaces
+
+A workspace is a set of packages built from a single dependency graph and
+sharing one `sploosh.lock`. Workspaces let monorepos pin one resolved
+version of every transitive dependency across all members.
+
+The root manifest of a workspace contains a `[workspace]` table and **no
+`[project]` table** — the root is not itself a buildable package:
+
+```toml
+# Root sploosh.toml
+[workspace]
+members = ["crates/*", "contracts/token"]
+exclude = ["crates/scratch"]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "0.5"
+license = "Apache-2.0"
+
+[workspace.dependencies]
+sploosh_web   = "0.3"
+sploosh_chain = "0.2"
+```
+
+| Section | Meaning |
+|---|---|
+| `[workspace]` | Marker that this manifest is a workspace root. |
+| `members` | List of relative paths (globs allowed) identifying member packages. |
+| `exclude` | List of paths under `members` globs that should be skipped. |
+| `resolver` | Always `"2"` in v0.5.3. The field is required so future resolver versions are an explicit opt-in. |
+| `[workspace.package]` | Default values for member `[project]` fields. |
+| `[workspace.dependencies]` | Pre-resolved version requirements that members may inherit by reference. |
+
+Members consume workspace defaults via the `.workspace = true` form:
+
+```toml
+# crates/api/sploosh.toml
+[project]
+name = "api"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+sploosh_web.workspace = true
+
+[target.wasm.dependencies]
+sploosh_chain.workspace = true
+```
+
+Inherited values may be locally overridden field-by-field, but enabling
+extra features on a workspace-inherited dependency is done with the
+inline-table form: `sploosh_chain = { workspace = true, features = ["svm"] }`.
+
+A workspace has exactly one `sploosh.lock` (§14.3) at the workspace root.
+Member-level lockfiles are not permitted.
+
+### 14.3 Lockfile (`sploosh.lock`)
+
+The lockfile records the exact resolved dependency graph for a manifest
+or workspace. It is **checked into version control for binaries and
+workspaces** and is otherwise generated and refreshed as needed for
+libraries.
+
+The lockfile is TOML with one `[[package]]` array entry per resolved
+package:
+
+```toml
+version = 1
+
+[[package]]
+name = "sploosh_web"
+version = "0.3.2"
+source = "registry+https://packages.sploosh.dev"
+checksum = "blake3:K6Y2QF3RZBXWNYV2T3X6UQEI5JJ4J6S7NTWWF7PADGUZB6E5W2KQ"
+dependencies = ["sploosh_proto"]
+
+[[package]]
+name = "sploosh_proto"
+version = "1.0.4"
+source = "git+https://github.com/example/sploosh_proto?rev=a1b2c3d#a1b2c3d4e5f6..."
+checksum = "blake3:H7TXP7DFA6L2B4ZA3V42M77N3MN6S55F6TZTRQAPQYP3XQXHQGUA"
+dependencies = []
+```
+
+Entry fields:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `name` | string | Package name. |
+| `version` | string | Resolved SemVer. |
+| `source` | string | Source URL with discriminator (`registry+...`, `git+...`, `path+...`). |
+| `checksum` | string | `"blake3:<base32>"`. The hash is **Blake3** of the package's source archive (registry packages) or of the resolved git tree (`git` deps). 32 raw bytes encoded as RFC 4648 base32 without padding. |
+| `dependencies` | list of strings | Names of direct dependencies as resolved. |
+
+Determinism requirements:
+
+- Entries are ordered alphabetically by `name`, then by `version`.
+- TOML serialization uses LF line endings and no trailing whitespace.
+- The top-level `version` field is `1` for the v0.5.3 lockfile schema. A
+  schema bump increments this integer; tools must refuse unknown values.
+
+Update semantics:
+
+- `sploosh build`, `sploosh test`, `sploosh check` *verify* the lockfile
+  against the manifest. If the manifest contains a dependency not satisfied
+  by the lockfile, the build fails with diagnostic `E14xx` (reservation
+  only — no registry entry assigned in v0.5.3, per §18.4 / Growth policy);
+  the user must run `sploosh update`. These commands never write to
+  `sploosh.lock`.
+- `sploosh update` is the **only** command that may rewrite `sploosh.lock`.
+  Without arguments it refreshes the entire graph; `sploosh update <name>`
+  refreshes a single package and its transitive dependencies.
+- A workspace lockfile applies to every member; per-member lockfiles are
+  rejected as a workspace error.
+
+### 14.4 Dependency sources
+
+Three source kinds are valid in v0.5.3:
+
+| Source | Form | Reproducibility |
+|---|---|---|
+| Registry | `name = "0.3"` (default) | Resolved version + Blake3 checksum recorded in the lockfile. |
+| Git | `{ git = "...", rev = "<commit-sha>" }` | `rev` is required and must be a commit SHA. Branch and tag refs are rejected as non-reproducible. |
+| Path | `{ path = "../local" }` | Workspace-internal only. Path dependencies that escape the workspace are a manifest error. |
+
+The default registry endpoint (URL, authentication, publishing flow) is
+**deferred to v0.6+** — registries are out of scope for v0.5.3, which
+specifies only the manifest and lockfile contract. Registry sources are
+parsed and resolved against the local filesystem mirror until the
+registry surface lands.
 
 ---
 
@@ -3516,6 +3842,7 @@ in prose.
 | Standard orphan rule | Match Rust's coherence rule. Deeply trained. Prevents conflicting impls. |
 | Diagnostic format + stable error codes | Machine-actionable compiler output is the AI-native lever. Stable `E<NNNN>` codes, rustc-compatible applicability vocabulary, and an NDJSON mode let LLM agents round-trip fix-and-retry loops deterministically. |
 | `Shared<T>` immutable refcount primitive | Chosen over `Arc<T>` to eliminate interior-mutability pairing and cycle risk by construction. Split from `Handle<T>` by intent: reads → `Shared<T>`, writes → actor + `Handle<T>`. Strict `T: Send + Sync` requirement keeps the LLM surface narrow. |
+| Manifest: Cargo-shaped, four built-in profiles, Blake3 lockfile, edition = language version | The compiler trips on the manifest first; cheaper to spec it once, exactly, than to retrofit. Cargo-exact profiles (`dev`/`release`/`test`/`bench`) maximize Rust-trained-model recall. Blake3 is already present in `std::crypto` on every target and is faster than SHA-256 for typical lockfile sizes. `[target.X.dependencies]` sections group target-specific deps spatially rather than scattering `targets = [...]` flags inline. `edition = "0.5"` ties the language edition to the shipped spec version — pre-1.0 cadence is the language, not the calendar. `codegen-units` and `panic` are deliberately omitted: the former leaks LLVM, the latter has no choice to make under §4.8's fixed failure model. |
 
 ---
 
@@ -3721,9 +4048,10 @@ Source (.sp)
 | v0.4.4 | **On-chain semantics — Cluster C** (§11): closes the four design-heavy gaps that prevented EVM/SVM codegen from starting. **Storage layout** (new §11.1a): target-pluggable abstraction with Solidity-compatible EVM reference realization — sequential `u256` slots in declaration order, Solidity-rule packing within slots, `Map<K, V>` entries at `keccak256(abi.encode(key, map_slot))`, nested maps recurse, `Vec<T>` / `String` with length at slot and data at `keccak256(slot)`, `[T; N]` inline. SVM layout deferred to a future Solana amendment; Sploosh surface stays identical across targets. **Reentrancy guard mechanism** (new §11.3a): runtime per-contract boolean flag set on entry to any non-`@reentrant` `pub` on-chain function and cleared on return (success, error, or revert). Cross-contract re-entry into a guarded function reverts with new error `ChainError::Reentrancy`; `@reentrant` disables the check and the set for that function only. Gas cost is qualitative (one TLOAD + one TSTORE per guarded call on EIP-1153 EVM forks (Cancun+), SLOAD/SSTORE fallback on earlier forks). Explicitly distinguished from §8.10.1 actor `SelfCall` — same word, different layers. **Cross-contract ABI and call semantics** (new §11.4a): new surface syntax `extern onchain mod X { pub fn ...; ... }` declares callee signatures at compile time; `chain::call(addr, callee, args) -> Result<T, ChainError>` blocks synchronously on EVM (lowers to `CALL`), Solidity ABI is the reference argument encoding on EVM, `?` propagates `ChainError::Reverted { data: Vec<u8> }` with revert bytes bounded by `RETURNDATACOPY` semantics. New error enum `ChainError { Reverted, OutOfGas, Reentrancy, InvalidTarget, DecodingError }` added to the on-chain error surface. No delegatecall in v0.4.x (deferred to v0.5.0). SVM divergence via Solana CPI with preserved user-level surface; concrete ABI deferred. **Explicit contrast with `extern "C"` (§4.9)**: both nest under `extern`, but calling conventions, safety models, and error surfaces differ — not interchangeable. **Gas model** (new §11.7a): target-pluggable metering abstraction. EVM references Yellow Paper + active-hard-fork EIP cost tables (Sploosh does not redefine opcode costs); `ctx::gas_remaining() -> u256` EVM-only, `#[gas_limit(N)]` EVM-only advisory in deployed ABI metadata. SVM uses compute units; `ctx::compute_units_remaining() -> u64` SVM-only. All three are compile errors on native and wasm. **Out-of-gas semantics**: transaction-wide revert, all storage mutations and emitted events unwound, and revert is **unaffected by per-function attributes including `@reentrant`** (explicit invariant). Transient-state unwind clears the reentrancy flag on revert, so failed calls cannot leave a contract with its guard stuck set. **`#[indexed]` event field marker** (§11.5, §12.3): up to three indexed fields per event variant on EVM (topic slots 1–3; topic 0 is the signature hash); compile error on more. SVM accepts `#[indexed]` for source-compatibility but treats it as a no-op. **§13.0 intrinsics table**: `ctx::gas_remaining` context column tightened to EVM-only, new row for `ctx::compute_units_remaining` (SVM-only), `chain::call` signature updated to `Result<T, ChainError>`, `storage::*` rows reference §11.1a, `chain::call` row references §11.4a. **§16 grammar**: `extern_block` production extended — `extern_target = STRING_LIT | "onchain" "mod" IDENT` — and `extern_fn` allows optional `pub`. No new keywords (still 40). No new item kinds; `extern onchain mod` is an extern-block variant. **Deferred to v0.5.0**: cross-contract ABI emission artifacts (bytecode + ABI JSON + metadata file), WASM target variants (`wasm32-unknown-unknown` vs `wasm32-wasi`), delegatecall support, SVM storage layout details, SVM CPI concrete ABI, per-call gas forwarding annotation. |
 | v0.5.0 | **Removed the `none` keyword** (§2.3, §16). Per the independent PR #9 review, `none` was reserved in the §2.3 keyword list and appeared as a literal in the §16 grammar `literal` production, but every example, every guide, and the `docs/` tree generally used `None` (the `Option::None` constructor exported from the §13.1 prelude). Lowercase `none` was reserved in two definitional sites and used in zero practical sites — the keyword reservation served no purpose while creating a contradiction with the prelude. Removed from `docs/spec-plans/LANGUAGE_SPEC.md` §2.3 and §16, and from the `docs/reference/keywords.md` and `docs/reference/grammar.md` mirrors. Keyword count: 40→39 (losing `none`). The capitalized `None` — an identifier resolving to `Option::None` via the prelude — is unchanged and remains the sole form for an absent `Option` value. No grammar reshape beyond the deleted alternative; no other sections touched. This amendment opens the v0.5.x cycle with a mechanical correctness fix identified by the PR #9 review (severity Blocker, action L1). |
 | v0.5.1 | **Compiler Diagnostics specification** (new §18). Formalizes the compiler's diagnostic contract as a first-class spec artifact — the highest-leverage missing piece for the AI-native positioning. New §18.1 Diagnostic record defines the canonical field layout (`code`, `severity`, `message`, `primary_span`, `labels`, `children`, `suggested_fixes`, `explanation_url`) that all renderings must preserve. §18.2 Error-code clusters reserves ranges: `E0001–E0999` lexical (A), `E1000–E1099` type/trait/ownership (B), `E1100–E1199` on-chain (C, already in use), `E1200–E1299` actors/concurrency (D), `E1300–E1399` FFI (E), `E1400–E1499` attributes (F), `W0001–W0999` warnings, `L0001–L0999` lints, `E9000+` ICE. §18.3 Suggested-fix applicability adopts rustc's vocabulary verbatim (`MachineApplicable`, `MaybeIncorrect`, `HasPlaceholders`, `Unspecified`) so Rust-trained models recognize the levels. §18.4 Stability contract: code→meaning is frozen on release; retired codes are marked `status: deprecated` with a `superseded_by` pointer and are never reassigned. §18.5 Output formats: `human` (default, rustc-style), `json` (newline-delimited JSON, one record per line, stable field layout with optional `$schema`), `short` (single line per diagnostic, grep-friendly). §18.6 LLM-integration contract: four invariants that hold for every diagnostic in `json` mode — every diagnostic carries a code; `MachineApplicable` fixes are complete (applying them preserves compilability); `primary_span` is always populated (file-less diagnostics use a synthetic `"<cli>"` file); `children` severities are limited to `note` / `help`. Explicit non-commitments: the spec does **not** mandate a hosted URL for `explanation_url` (implementations may leave it `None`) and does **not** commit to a specific JSON Schema artifact for `$schema` (draft-7 emission is a future follow-up). New §17 Design Decisions row documents the format-as-AI-native-lever rationale. **Registry expansion**: `docs/reference/compiler-errors.md` rewritten to distinguish "format" (§18) from "registry" (this file), adds `Cluster` and `Status` columns to the existing E1101–E1109 on-chain rows, and reserves cluster-header placeholders for the A/B/D/E/F/W/L/ICE ranges with TODO entries. Adds a "Growth policy" block (4 rules: registry-first workflow, spec-section anchoring, frozen-on-publish, deprecate-don't-reassign). **Tooling**: `docs/tooling/build-system.md` gains a Compiler Flags subsection documenting `--error-format=<human\|json\|short>` (default `human`) and `--explain <code>` (prints long-form explanation sourced from the local registry, not a network call). No new keywords (39 unchanged). No grammar changes. Closes PR #9 review Blocker U1. **Principle #7 softened** (§1): the 4,000-token claim is now framed as a soft target rather than a hard budget, acknowledging that the PROMPT edition was already 4,077 tokens (cl100k_base) before v0.5.1 and the Diagnostics bullet added ~133 more. This partially addresses review action L8 by tightening the claim to match reality; the stricter CI-enforcement path remains a strategy decision for a future amendment. |
+| v0.5.3 | **Manifest specification fleshed out** (§14.1–§14.4 expanded; existing §14.1 stub replaced). Closes issue #14 (slice 1 of 7 in the v0.5.3–v0.5.9 sequence) and review action U2. Spec previously had 19 lines on `sploosh.toml`; the manifest is the first artifact a future compiler will load, so locking the contract before codegen makes assumptions is the cheapest form of debt prevention. **§14.1.1 `[project]`** formalizes `name` / `version` / `edition` (required) and `description` / `license` / `authors` / `repository` (optional); unknown fields are a hard error. **`edition` is the Sploosh language version** (`"0.5"`) — pre-1.0 cadence makes year strings (`"2026"`) misleading, and tying the edition to the shipped spec version aligns release artifacts. All existing `edition = "2026"` examples updated to `"0.5"` across `docs/spec-plans/`, `docs/tooling/`, `docs/guide/`, runbooks, and examples. **§14.1.2 dependency tables** introduce `[dev-dependencies]` (test-only, not forwarded to dependents) and `[build-dependencies]` (parsed and reserved for future build-script support; no invocation specified yet) alongside `[dependencies]`. Inline-table dep form documents `version`, `features`, `default-features`, `optional`, `git` + required `rev` (branches and tags rejected as non-reproducible floats), `path` (workspace-internal only). Source precedence `path > git > registry`; multiple sources on a single entry is a manifest error. **§14.1.3 `[features]`** adopts Cargo's modern syntax: `"name"` for local feature, `"crate/feature"` for transitive feature, `"dep:crate"` for explicit optional-dep activation (resolves the Cargo-2018 ambiguity). **§14.1.4 `[target.<target>.dependencies]`** — Cargo-style per-target dep sections (one per `native`/`wasm`/`evm`/`svm`); merged additively with `[dependencies]`; on-chain prohibitions (§11.1, §12.3) still apply. **§14.1.5 `[targets]`** clarifies the existing project-level `default` / `contracts` table is distinct from §14.1.4 — different role, different shape. **§14.1.6 `[profile.<name>]`** specifies four built-in profiles (`dev`, `release`, `test` inheriting from `dev`, `bench` inheriting from `release`) and custom profiles via `inherits`. Profile knobs: `opt-level` (`0`–`3`, `"s"`, `"z"`), `lto` (`false`/`"thin"`/`"fat"`), `debug` (`0`/`1`/`2`/`false`), `strip` (`"none"`/`"debuginfo"`/`"symbols"`), `incremental` (bool), `overflow-checks` (bool). **`overflow-checks` is frozen `true` for `evm` and `svm` targets**, overriding any user setting and emitting warning `W0xxx` (registry slot reserved, no entry assigned per §18.4 Growth policy). **`codegen-units` and `panic = "abort"|"unwind"` are deliberately not exposed** — the former leaks an LLVM-specific implementation detail; the latter has no choice to make under §4.8's fixed failure model (no unwind path). Per-target profile overrides (e.g., `[profile.release.evm]`) are deferred to a future amendment. **§14.1.7 `[runtime]`** consolidates the previously inline-mentioned `threads = N` knob with a new `mailbox_default_capacity` knob; both silently ignored on `evm` / `svm` (no Sploosh-level on-chain runtime). **§14.1.8 resolution semantics** — Cargo version requirement syntax (caret/tilde/exact/comparison/wildcard), resolver v2 unification (dev-dep features kept separate from non-test feature graphs), structural conflict detection, package-scoped editions. **§14.2 Workspaces** — root `[workspace]` manifest with no `[project]` (root is not buildable); `members` (globs allowed), `exclude`, `resolver = "2"` (required, future-proofing), `[workspace.package]` and `[workspace.dependencies]` for member inheritance via `field.workspace = true`; one `sploosh.lock` at workspace root, member lockfiles rejected. **§14.3 Lockfile (`sploosh.lock`)** — TOML, `[[package]]` array entries with `name` / `version` / `source` / `checksum` / `dependencies`. **Hash algorithm: Blake3** (already present in `std::crypto` on all four backends; faster than SHA-256 for typical 2KB–100KB lockfile sizes); 32-byte digest in RFC 4648 base32 without padding, prefixed `"blake3:"`. Deterministic ordering (alphabetical by name, then version), LF line endings, schema `version = 1`. Update semantics: `sploosh build`/`test`/`check` *verify only*, never write — manifest-incompatible lockfile fails the build with reserved diagnostic slot `E14xx` (no entry assigned per §18.4 Growth policy); `sploosh update` is the only command that may rewrite the lockfile. **§14.4 dependency sources** — registry (default; URL/auth/publishing flow deferred to v0.6+), git (with required `rev` SHA), path (workspace-internal only). **Tooling mirrors**: `docs/tooling/sploosh-toml.md` rewritten as the canonical schema mirror with TODO removed; `docs/tooling/build-system.md` adds `--profile <name>` and `--target <t>` flag rows, `sploosh update` and `sploosh tree` commands; `docs/tooling/package-management.md` rewritten with sources / version syntax / lockfile model and TODO removed (registry / publishing remain marked deferred). **Runbooks**: `new-project-setup.md` updated to the v0.5.3 schema with a workspace-bootstrap variant; `cross-target-builds.md` adds a `[target.wasm.dependencies]` worked example; `adding-onchain-module.md` updates the `[targets]` snippet and cross-links to the §14.1.6 `overflow-checks` on-chain freeze. **Guide**: `getting-started.md` updates `edition` to `"0.5"`. **PROMPT edition**: a one-line manifest summary added before the existing `## File ext` footer (Cargo-shape; `[dev-dependencies]`; `[target.X.dependencies]`; four built-in profiles; Blake3 lockfile). **§17 Design Decisions Log** adds a new v0.5.3 row capturing the four user-locked choices (Blake3, Cargo-exact profiles, `[target.X.dependencies]` sections, edition = language version) and the principled omissions (`codegen-units`, `panic`). No grammar changes. No new keywords (39 unchanged). No new diagnostic registry entries — overflow-check freeze warning and lockfile-mismatch error are *reserved-slot* references only, earned when the compiler lands per §18.4. **Deferred**: registry endpoint and publishing workflow (v0.6+), build-script invocation (only `[build-dependencies]` reserved), per-target profile overrides, lockfile-less library default. |
 | v0.5.2 | **`Shared<T>` immutable-refcounted primitive** (new §4.4a). Closes PR #9 review Blocker P1 — the shared-immutable-data gap that previously forced clone-everything, actor-wrap, or local-`&T`-only patterns for read-heavy data. New §4.4a "Shared Immutable Data with `Shared<T>`" defines an atomically refcounted pointer to an immutable `T`: `Shared::new(value) -> Shared<T>`; `Clone` bumps the atomic refcount O(1) with no allocation and no `T::clone` call; deterministic drop of the inner `T` when the last clone goes out of scope (preserves the "no GC" guarantee of §3.10). **Strictly less than Rust's `Arc<T>`**: immutable only (no `&mut *shared`, no `get_mut`, no `make_mut`, no `try_unwrap`); no `Weak<T>` (cycles impossible by construction because Sploosh has no `Cell` / `RefCell` / `UnsafeCell` / user-visible atomics); not `Copy` (explicit `.clone()` preserves the cost-signal of each refcount bump). **Strict `T: Send + Sync` requirement**: `Shared<T>` is `Clone + Send + Sync` iff `T: Send + Sync`, otherwise `Shared::new` is a compile error — the type exists to cross thread and actor boundaries so requiring thread-safe inner values is an enforced invariant, not a convention. **Deref semantics**: `*shared` produces `&T` only; unlike `Box<T>`'s `*boxed`, it can never move the inner value out. **Actor interop** (§8.2 addition): `Shared<T>` satisfies the §8.2 owned-parameter rule for `&mut self` methods (the wrapper moves; the inner data is shared via refcount bump), making it the idiomatic way to pass read-heavy data to actor handlers and the idiomatic reply type for `&self` request/reply methods returning cached data. **Not available on-chain** — a compile error inside `onchain` modules per both §11.1 and §12.3; reference counting has no gas or storage meaning, and every on-chain value is scoped to the transaction frame. **Drop-order clarification** (§3.10): the `Shared<T>` wrapper drops in scope-reverse order as usual; the inner `T` drops only when the last live clone goes out of scope, which may be earlier or later than any individual wrapper's lifetime — still deterministic given the set of holders. **Compound Types list** (§3.2) adds `Shared<T>`. **Prelude** (§13.1) adds `Shared` after `Box`. **§4.4** rewritten to cross-reference §4.4a and §8.2 instead of saying only "Use `Handle<T>` for sharing state". **§17 Design Decisions Log** adds a new v0.5.2 row (the v0.4 "No `Rc<T>`/`Arc<T>`" row is kept for chronological accuracy). **Guide updates**: `docs/guide/ownership-and-borrowing.md` rewrites the "No Rc/Arc" section with the two-primitive narrative (`Shared<T>` for immutable, `Handle<T>` for mutable, pick by intent); `docs/guide/actors-and-concurrency.md` updates its `Rc`/`Arc` mention to cross-reference `Shared<T>` and adds a worked example of `Shared<LookupTable>` crossing actor boundaries instead of actor-wrapping a read-heavy cache. **Migration update**: `docs/migration/from-rust.md` rewrites three rows (`Arc<Mutex<T>>`, `Rc<T>`/`Arc<T>`, `Arc::strong_count`) to contrast `Shared<T>` (immutable reads) and actor + `Handle<T>` (mutable writes). **PROMPT edition**: `Shared<T>` added to the Compounds line and the Ownership `Box<T>` bullet is rewritten to include the `Shared<T>` summary. No grammar changes. No new keywords (39 unchanged). No new `docs/reference/compiler-errors.md` entries — per §18.4 and the v0.5.1 Growth policy, Shared-specific diagnostic codes are earned when the compiler lands, not pre-assigned. |
 
 ---
 
 *Working title: Sploosh. Name subject to change.*
-*This spec is a living document. v0.5.2-draft — April 2026.*
+*This spec is a living document. v0.5.3-draft — May 2026.*

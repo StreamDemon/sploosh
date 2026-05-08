@@ -49,7 +49,7 @@ sploosh build --target wasm      # Build for WebAssembly
 [project]
 name = "my-project"
 version = "0.1.0"
-edition = "2026"
+edition = "0.5"
 
 [dependencies]
 
