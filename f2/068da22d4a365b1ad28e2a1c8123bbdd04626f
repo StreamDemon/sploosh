@@ -1,0 +1,24 @@
+docs/stdlib/actor.md
+  s_61ab39c355aee6::t_42cbd55156e3ac 108-109
+docs/reference/compiler-errors.md
+  s_61ab39c355aee6::t_af5db9cdb45bc4 11-20
+  s_61ab39c355aee6::t_dd9030070a96a8 21-22
+docs/spec-plans/LANGUAGE_SPEC.md
+  s_61ab39c355aee6::t_a99cfd2ab5ac5d 2433-2434
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "f2068da22d4a365b1ad28e2a1c8123bbdd04626f",
+  "prompts": {},
+  "sessions": {
+    "s_61ab39c355aee6": {
+      "agent_id": {
+        "tool": "droid",
+        "id": "9b7004d4-2180-4f46-a8fc-944c2f4fb4fb",
+        "model": "custom:claude-opus-4-7-0"
+      },
+      "human_author": "StreamDemon <revenantpulse@gmail.com>"
+    }
+  }
+}
