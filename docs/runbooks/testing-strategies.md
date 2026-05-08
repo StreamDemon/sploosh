@@ -128,9 +128,19 @@ fn counter_accumulates() {
 }
 ```
 
-**Pattern: actor under test with mocks.** Build the actor's dependencies as fakes, inject them via `init`, drive the actor through its public methods, then assert on observable state.
+**Pattern: actor under test with mocks.** Build the actor's dependencies as fakes, inject them via `init`, drive the actor through its public methods, then assert on observable state. Expose a request/reply accessor on the actor under test that itself queries the mock — that way the test never has to synchronize across two senders.
 
 ```sploosh
+// Worker exposes a `recorded_events()` accessor for testability:
+//
+//     actor Worker {
+//         recorder: Handle<Recorder>,
+//         fn init(recorder: Handle<Recorder>) -> Self { Worker { recorder } }
+//         pub fn handle_job(&mut self, job: Job) { send self.recorder.record(job.name()); }
+//         pub fn recorded_events(&self) -> Vec<String> { self.recorder.events() }
+//         pub fn status(&self) -> Status { Status::Ready }
+//     }
+
 @test
 async fn worker_processes_job() -> Result<(), TestFailure> {
     let recorder = spawn Recorder::init();
@@ -138,14 +148,15 @@ async fn worker_processes_job() -> Result<(), TestFailure> {
 
     send worker.handle_job(Job::new("alpha"));
 
-    // Drain via request/reply on `&self` — `worker.status()` blocks
-    // until the worker has handled `handle_job` (including its
-    // outbound `send recorder.record(...)`). Per-sender FIFO (§8)
-    // then guarantees the recorder has received the record by the
-    // time we ask it for its events. No `timeout(ms)` — that
-    // intrinsic is select-only per §8.6 / §13.0.
-    let _ = worker.status();
-    let events = recorder.events();
+    // `worker.recorded_events()` is request/reply: it blocks the test
+    // until the worker handler returns, and *inside* that handler the
+    // call to `recorder.events()` is request/reply from a single
+    // sender (the worker). Per-sender FIFO (§8.11) then guarantees
+    // the recorder has processed the worker's earlier
+    // `send recorder.record(...)` before answering its own
+    // `events()` query. No cross-sender race, no `timeout(ms)`
+    // (that intrinsic is select-only per §8.6 / §13.0).
+    let events = worker.recorded_events();
 
     assert_eq(events, vec!["alpha".into()]);
 
