@@ -1,0 +1,40 @@
+docs/guide/getting-started.md
+  s_1c0103bc3e1dca::t_63d09535613bb6 52
+docs/runbooks/adding-onchain-module.md
+  s_1c0103bc3e1dca::t_cb4d8c404be899 44-47,50-51
+docs/spec-plans/LANGUAGE_SPEC.md
+  s_1c0103bc3e1dca::t_d742c6cfb57f81 3184-3192,3198,3214-3531
+  s_1c0103bc3e1dca::t_33ae08589a1b9a 4057
+  s_1c0103bc3e1dca::t_4477b6d7cc188f 1
+  s_1c0103bc3e1dca::t_9eedb46d2ac994 3845
+  s_1c0103bc3e1dca::t_071f7896a4ca05 4051
+docs/tooling/build-system.md
+  s_1c0103bc3e1dca::t_2da56e56286e9e 9,14-15,17,19-20,26-28,30-34
+  s_1c0103bc3e1dca::t_3e871c16cfe3e1 72-90
+docs/spec-plans/LANGUAGE_SPEC_PROMPT.md
+  s_1c0103bc3e1dca::t_a6b5572089b6a8 229-231
+docs/tooling/sploosh-toml.md
+  s_1c0103bc3e1dca::t_562bdf32e34b59 3-4,6,12-14,17-21,26-30,35-77,82-242,244-252,254,256-260,262-263
+docs/tooling/package-management.md
+  s_1c0103bc3e1dca::t_c28a92ed8ad714 3-5,13-23,26-30,37-121
+docs/runbooks/new-project-setup.md
+  s_1c0103bc3e1dca::t_188f0688d05ba4 43-108
+docs/runbooks/cross-target-builds.md
+  s_1c0103bc3e1dca::t_e541b95aa58332 39,47-72,79,82-84
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "9e5da45fed709632c9d38dfcf9a8cd54006579aa",
+  "prompts": {},
+  "sessions": {
+    "s_1c0103bc3e1dca": {
+      "agent_id": {
+        "tool": "droid",
+        "id": "bc57b4ca-f550-42aa-a9d0-fb5eda263018",
+        "model": "custom:claude-opus-4-7-0"
+      },
+      "human_author": "StreamDemon <revenantpulse@gmail.com>"
+    }
+  }
+}
