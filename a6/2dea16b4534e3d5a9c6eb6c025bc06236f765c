@@ -1,0 +1,20 @@
+docs/reference/compiler-errors.md
+  s_79b73cea7b00e6::t_1bf053003b103a 58
+  s_79b73cea7b00e6::t_1a475d7b83f812 69-74
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "a62dea16b4534e3d5a9c6eb6c025bc06236f765c",
+  "prompts": {},
+  "sessions": {
+    "s_79b73cea7b00e6": {
+      "agent_id": {
+        "tool": "droid",
+        "id": "1a74c5d3-ba14-40d8-a109-b696437769d8",
+        "model": "custom:claude-opus-4-7-0"
+      },
+      "human_author": "StreamDemon <revenantpulse@gmail.com>"
+    }
+  }
+}
