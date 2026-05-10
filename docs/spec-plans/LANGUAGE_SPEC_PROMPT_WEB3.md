@@ -1,4 +1,4 @@
-# SPLOOSH Quick Reference — Web3 (v0.5.8) — LLM System Prompt Edition
+# SPLOOSH Quick Reference — Web3 (v0.5.10) — LLM System Prompt Edition
 
 Sploosh on-chain surface (§11). Native EVM and SVM (Solana SBF) targets.
 
