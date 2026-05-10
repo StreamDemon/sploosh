@@ -15,7 +15,7 @@ Primitives: `i8 i16 i32 i64 u8 u16 u32 u64 f32 f64 u256 bool char str String Add
 Custom: `struct Name { field: Type }` / `enum Name { A, B(T), C { x: T } }`. Generics: `fn name<T: Bound>(x: T) -> T { }`. Traits: `trait Name { type Item; fn method(&self) -> T; }` / `impl Trait for Type { }`. Supertraits: `trait Loggable: Printable { }` (implementors must impl both). Dynamic dispatch: `&dyn Trait`, `Box<dyn Trait>` for heterogeneous collections.
 
 ## Standard Traits
-Marker: `Copy`, `Send`, `Sync`. Derivable: `Clone`, `Debug`, `Eq`, `Ord`, `Hash`, `Serialize`, `Deserialize`. Conversion: `From<T>`, `Into<T>`, `TryFrom<T>`, `TryInto<T>`, `Display`. Error/cleanup: `Error: Display`, `Drop` (mutually exclusive with `Copy`). Closures: `Fn`, `FnMut`, `FnOnce`. Iterators: `Iter { type Item; }`, `FromIter`.
+Marker: `Copy`, `Send`, `Sync`. Derivable: `Clone`, `Debug`, `Display`, `Eq`, `Ord`, `Hash`, `Serialize`, `Deserialize` (Display derive mirrors Debug shape). Conversion: `From<T>`, `Into<T>`, `TryFrom<T>`, `TryInto<T>`. Error/cleanup: `Error: Display`, `Drop` (mutually exclusive with `Copy`). Closures: `Fn`, `FnMut`, `FnOnce`. Iterators: `Iter { type Item; }`, `FromIter`.
 
 ## Type Rules
 - All match/if arms must return the same type.
@@ -130,7 +130,7 @@ File resolution: `mod foo;` → `foo.sp` or `foo/mod.sp`. Orphan rule: impl trai
 `@supervisor(strategy: "one_for_one")` `@mailbox(capacity: 2048)` `@overflow(wrapping)`
 `@fast_math(contract, afn)` (compile error on-chain)
 `#[target(evm)]` `#[cfg(test)]`
-Derives: `Debug`, `Clone`, `Copy`, `Eq`, `Hash`, `Serialize`, `Deserialize`, `Ord`.
+Derives: `Debug`, `Display`, `Clone`, `Copy`, `Eq`, `Hash`, `Serialize`, `Deserialize`, `Ord`.
 
 ## Testing
 `@test fn name() { assert_eq(a, b); }` — zero params, returns `()` or `Result<(), TestFailure>`; may be `async`. Honored only under `#[cfg(test)]`. Each test runs in its own isolation actor; failure paths: `Err(TestFailure)` or actor death (panic). `assert_eq(a, b)` / `assert_ne(a, b)` are test-only intrinsics (`E1410` outside tests, `T: Eq + Debug`, operands borrowed as `&T`); `assert_matches(value, pattern)` only requires `Debug`. `?` propagates via `TestFailure: From<E>` for every `E: Error`. Layout: unit tests in `#[cfg(test)] mod tests`, integration tests in `tests/*.sp` (separate crate, `pub`-only). `@property fn name(x: T) { ... }` runs 256 cases with deterministic shrinking; `T: Gen` (primitives, `bool`, `String`, `Vec<T: Gen>`, `Option`, `Result`, tuples ≤12). CLI: `sploosh test [--filter pat] [--exact] [--test-threads N] [--nocapture] [--seed hex] [--cases N] [--format human|json]`. `--test-threads=1 --seed=<fixed>` is byte-deterministic. Exit codes: `0`/`1`/`2` (pass/fail/runner-error). **Compile error inside `onchain`.**

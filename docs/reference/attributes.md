@@ -23,6 +23,7 @@
 | Derive | Generates |
 |--------|-----------|
 | `Debug` | `Debug` trait (for `{:?}`) |
+| `Display` | `Display` trait (for `{}`); field-by-field shape mirroring `Debug`, each field rendered via its own `Display` impl. Every field type must impl `Display` or the derive is a compile error. Conflict rule: derive XOR manual impl. See §9.3 / §12.2 of the spec. |
 | `Clone` | `Clone` trait (deep copy) |
 | `Copy` | `Copy` trait (bitwise copy, requires `Clone`) |
 | `Eq` | `Eq` trait (structural equality) |

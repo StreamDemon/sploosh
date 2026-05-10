@@ -38,7 +38,7 @@ let s = format("Pi is {:.4}", 3.14159);
 | `{:<N}` | Left-align, width N | `"hi        "` |
 | `{:0N}` | Zero-pad, width N | `"000042"` |
 
-Types used with `{}` must implement `Display`. Types used with `{:?}` must implement `Debug`.
+Types used with `{}` must implement `Display`. Types used with `{:?}` must implement `Debug`. Both are derivable via `@derive(Display)` and `@derive(Debug)`; the derived shapes mirror each other (struct/variant name plus field-by-field rendering), so reach for the derive when you want the default and a manual `impl` when you don't.
 
 ## String Methods
 

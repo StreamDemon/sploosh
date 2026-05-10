@@ -91,7 +91,7 @@ Prefer generics (`T: Trait`) for zero-cost monomorphization. Use `dyn Trait` for
 struct Point { x: f64, y: f64 }
 ```
 
-Available: `Debug`, `Clone`, `Copy`, `Eq`, `Hash`, `Serialize`, `Deserialize`, `Ord`.
+Available: `Debug`, `Display`, `Clone`, `Copy`, `Eq`, `Hash`, `Serialize`, `Deserialize`, `Ord`. The `Display` derive uses the same field-by-field shape as `Debug` but renders each field via its own `Display` impl; reach for a manual `impl Display` when the canonical rendering is not field-by-field.
 
 ## Next Steps
 
