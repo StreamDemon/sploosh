@@ -1,0 +1,22 @@
+VISION.md
+  s_c5767c31f999e7::t_d5d3d8320a911a 46
+  s_c5767c31f999e7::t_f68a4e8b850e08 119
+AGENTS.md
+  s_c5767c31f999e7::t_925a31137112d8 9
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "f19a877f4273b702782046b6f95e237ede60553f",
+  "prompts": {},
+  "sessions": {
+    "s_c5767c31f999e7": {
+      "agent_id": {
+        "tool": "droid",
+        "id": "c8364e4b-55b0-4e20-8c4a-247ed658145b",
+        "model": "custom:claude-opus-4-7-0"
+      },
+      "human_author": "StreamDemon <revenantpulse@gmail.com>"
+    }
+  }
+}
