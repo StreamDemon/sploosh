@@ -10,8 +10,10 @@ This folder holds the language specification, its prompt-sized mirror, and the l
 
 | File | Purpose |
 |---|---|
-| `LANGUAGE_SPEC.md` | **Authoritative v0.5.2-draft spec.** Sole source of truth. |
-| `LANGUAGE_SPEC_PROMPT.md` | Condensed LLM-facing reference. Mirrors `LANGUAGE_SPEC.md` semantics, prompt-sized. |
+| `LANGUAGE_SPEC.md` | **Authoritative spec.** Sole source of truth. |
+| `LANGUAGE_SPEC_PROMPT_CORE.md` | Condensed LLM-facing reference for the language core (excluding §11). Soft target ~4,000 cl100k_base tokens. |
+| `LANGUAGE_SPEC_PROMPT_WEB3.md` | Condensed LLM-facing reference for §11 on-chain surface. Soft target ~1,500 cl100k_base tokens. |
+| `LANGUAGE_SPEC_PROMPT.md` | Retired combined prompt-mirror; redirects to the `_CORE` + `_WEB3` files. |
 | `LANGUAGE_SPEC_REVIEW.md` | Review notes / open issues / proposed amendments. |
 
 ## Patterns & Conventions
@@ -19,7 +21,7 @@ This folder holds the language specification, its prompt-sized mirror, and the l
 - **Section numbering matters.** Sections are referenced from many other docs as `§3`, `§4.4a`, `§11.4a`, `§16`, etc. Renumbering is a cross-tree change — search before you renumber.
 - **Appendix D is the changelog.** Every material spec change adds an Appendix D entry with the version bump (e.g., `v0.5.2`).
 - **Design Decisions Log (§17)** captures rationales for non-obvious choices. Add an entry when you make a controversial call.
-- **`LANGUAGE_SPEC_PROMPT.md` is prompt-sized**, tracking ~4K `cl100k_base` tokens as a soft target (per §1 principle 7). Adding to one section means pruning another, or splitting the artifact.
+- **The prompt-mirror is split** as of v0.5.8 — `LANGUAGE_SPEC_PROMPT_CORE.md` (~4K `cl100k_base` tokens soft target) and `LANGUAGE_SPEC_PROMPT_WEB3.md` (~1.5K soft target), per §1 principle 7. Adding to one section means pruning another. The combined `LANGUAGE_SPEC_PROMPT.md` is a redirect-only stub.
 - **Code fences in spec use `sploosh`** as the language tag. Keep examples short and self-contained.
 
 ## Touch Points
@@ -43,13 +45,14 @@ rg -n "TODO|TBD|FIXME" docs/spec-plans
 rg -n "Shared<T>" docs/spec-plans
 
 # Token-size sanity (rough — words × 1.3 ≈ tokens)
-(Get-Content LANGUAGE_SPEC_PROMPT.md -Raw).Split().Count
+(Get-Content LANGUAGE_SPEC_PROMPT_CORE.md -Raw).Split().Count
+(Get-Content LANGUAGE_SPEC_PROMPT_WEB3.md -Raw).Split().Count
 ```
 
 ## Common Gotchas
 
 - **Renaming a section changes anchor links** in the rendered docs. If a section is referenced externally (other `docs/` files, GitHub issues), use a redirect note rather than a silent rename.
-- **`LANGUAGE_SPEC_PROMPT.md` drift is the #1 risk.** Every spec PR must touch the prompt mirror or explicitly justify why no update is needed.
+- **Prompt-mirror drift is the #1 risk.** Every spec PR must touch the relevant prompt-mirror file (`LANGUAGE_SPEC_PROMPT_CORE.md` and/or `LANGUAGE_SPEC_PROMPT_WEB3.md`) or explicitly justify why no update is needed.
 - **`@fast_math`, all `f32`/`f64` math methods, actor primitives, and FFI are compile errors on-chain.** When changing on-chain semantics, sweep for these prohibitions in `docs/web3/` and `docs/stdlib/math.md`.
 - **`Shared<T>` (§4.4a)** is new in v0.5.2 — when adding new types, check whether `Shared<T>` semantics need a paragraph too.
 

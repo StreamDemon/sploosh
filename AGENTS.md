@@ -54,7 +54,8 @@ When you change `LANGUAGE_SPEC.md`, also check (and update if affected):
 
 | Mirror | Path |
 |---|---|
-| Prompt-sized reference | `docs/spec-plans/LANGUAGE_SPEC_PROMPT.md` |
+| Prompt-sized reference (core) | `docs/spec-plans/LANGUAGE_SPEC_PROMPT_CORE.md` |
+| Prompt-sized reference (web3) | `docs/spec-plans/LANGUAGE_SPEC_PROMPT_WEB3.md` |
 | Project context (local) | `CLAUDE.md` (gitignored) |
 | Reference docs | `docs/reference/{grammar,keywords,attributes,operator-precedence,type-conversion-rules,compiler-errors}.md` |
 | Stdlib | `docs/stdlib/*.md` |
@@ -106,7 +107,7 @@ rg -n "^## " docs/spec-plans/LANGUAGE_SPEC.md
 ## Definition of Done (any PR)
 
 - [ ] `LANGUAGE_SPEC.md` updated if behaviour changed.
-- [ ] All mirror docs synced (`LANGUAGE_SPEC_PROMPT.md`, `docs/reference/`, `docs/stdlib/`, etc.).
+- [ ] All mirror docs synced (`LANGUAGE_SPEC_PROMPT_CORE.md`, `LANGUAGE_SPEC_PROMPT_WEB3.md`, `docs/reference/`, `docs/stdlib/`, etc.).
 - [ ] Examples still type-check by inspection (no compiler yet — read carefully).
 - [ ] Appendix D changelog entry added for material spec changes.
 - [ ] PR template sections all filled.
