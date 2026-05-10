@@ -1,0 +1,30 @@
+.github/ISSUE_TEMPLATE/spec_change.md
+  s_29dfd0ef518a2f::t_446ecdcf8e43df 44
+.factory/droids/sploosh-spec-steward.md
+  s_29dfd0ef518a2f::t_34341c422e057c 66
+  s_29dfd0ef518a2f::t_7b0efdf10c2712 14
+docs/spec-plans/LANGUAGE_SPEC.md
+  s_29dfd0ef518a2f::t_9b916c45efe65d 19
+  s_29dfd0ef518a2f::t_e8c87f5bbcd714 4869
+VISION.md
+  s_29dfd0ef518a2f::t_a8759878eb0bdb 46
+docs/spec-plans/AGENTS.md
+  s_29dfd0ef518a2f::t_53977dc5238745 24
+  s_29dfd0ef518a2f::t_fb6354c81180cb 14
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "bd26e8f3544d340a5c60b8b83c506c48bc40d24e",
+  "prompts": {},
+  "sessions": {
+    "s_29dfd0ef518a2f": {
+      "agent_id": {
+        "tool": "droid",
+        "id": "d5e98bd4-1c3b-4065-b68c-dfd63098f5a4",
+        "model": "custom:claude-opus-4-7-0"
+      },
+      "human_author": "StreamDemon <revenantpulse@gmail.com>"
+    }
+  }
+}
