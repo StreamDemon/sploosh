@@ -1,4 +1,4 @@
-# SPLOOSH Language Specification v0.5.7-draft
+# SPLOOSH Language Specification v0.5.8-draft
 
 > **AI-Native · Systems-Grade · Web2/Web3 Dual-Target**
 >
@@ -4877,4 +4877,4 @@ Source (.sp)
 ---
 
 *Working title: Sploosh. Name subject to change.*
-*This spec is a living document. v0.5.7-draft — May 2026.*
+*This spec is a living document. v0.5.8-draft — May 2026.*
