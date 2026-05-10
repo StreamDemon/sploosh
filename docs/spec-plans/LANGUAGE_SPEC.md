@@ -251,14 +251,19 @@ hex: `0xFF00u256`. Always uses checked arithmetic regardless of build mode.
 **Off-chain cost (`W0010`).** `u256` is a primitive on every target, but native and wasm
 have no hardware support — arithmetic compiles to multi-instruction software emulation
 (~10–50x slower than `u64`). The compiler emits warning `W0010` at any `u256` **arithmetic**
-site outside `onchain` modules; this includes the operators `+`, `-`, `*`, `/`, `%`, `<<`,
-`>>`, comparisons, and the `wrapping_*` / `saturating_*` / `checked_*` arithmetic methods
-of §4.8. Type declarations, struct fields, function parameters, return types, `as` casts,
-and literal construction do **not** fire the warning — passing `u256` through off-chain
-code (e.g., chain-bridge value plumbing) is free. `W0010` is warn-by-default; suppress at
-the call site or module level with `#[allow(W0010)]` if the off-chain arithmetic is
-intentional. Not emitted inside `onchain` modules. See §18.2 and the registry entry in
-`docs/reference/compiler-errors.md`.
+site outside `onchain` modules. Triggers: the operators `+`, `-`, `*`, `/`, `%`, `<<`,
+`>>`, comparisons (`<`, `>`, `<=`, `>=`, `==`, `!=`), the explicit-overflow methods
+`wrapping_*` / `saturating_*` / `checked_*` (§4.8), and the §4.10 integer methods that
+perform multi-instruction work: `pow`, `isqrt`, `ilog2`, `ilog10`, `count_ones`,
+`count_zeros`, `leading_zeros`, `trailing_zeros`, `rotate_left`, `rotate_right`,
+`swap_bytes`, `to_be`, `to_le`, `from_be`, `from_le`. Type declarations, struct fields,
+function parameters, return types, `as` casts, and literal construction do **not** fire
+the warning — passing `u256` through off-chain code (e.g., chain-bridge value plumbing)
+is free. The methods `abs` (no-op on unsigned), `min`, `max`, and `clamp` also do not
+fire — they are comparison-based and incur no emulation cost. `W0010` is warn-by-default;
+suppress at the call site or module level with `#[allow(W0010)]` if the off-chain
+arithmetic is intentional. Not emitted inside `onchain` modules. See §18.2 and the
+registry entry in `docs/reference/compiler-errors.md` for the canonical trigger list.
 
 **`Address`**: 32-byte blockchain address. No arithmetic operations. Supports `==`, `!=`,
 `Display`, `Debug`, `Clone`, `Copy`, `Hash`, `Eq`, `Ord`. Construct via `Address::from_hex("0x...")`.
