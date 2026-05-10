@@ -160,3 +160,4 @@ Compile errors inside `onchain`: `actor`, `spawn`, `send`, `send_timeout`, `sele
 - **Pipe + `?` precedence:** `expr |> f?` parses as `(expr |> f)?` — apply `?` per fallible stage.
 - **Test assertions borrow:** `assert_eq(a, b)` / `assert_ne(a, b)` take `&T` (test-only, `T: Eq + Debug`). Outside tests → `E1410`.
 - **`chain::call` ergonomics:** `chain::call(addr, mod::fn, args)` returns `Result<T, ChainError>`; `?` unwraps `T`. Don't double-unwrap.
+- **`u256` off-chain cost (`W0010`):** `u256` arithmetic is software-emulated on native/wasm (~10–50x slower than `u64`). Warn-by-default lint fires on operators + `wrapping_*` / `saturating_*` / `checked_*` methods only (not on declarations / params / casts). Suppress with `#[allow(W0010)]`. Not emitted on-chain.

@@ -97,7 +97,15 @@ diagnostics are implemented. -->
 Reserved range for non-error diagnostics. Warnings are emitted by the
 compiler but do not fail the build.
 
-<!-- TODO: Populate once the warning surface stabilizes. -->
+| Code | Kind | Cluster | Status | Message / meaning | Spec ref |
+|------|------|---------|--------|-------------------|----------|
+| `W0010` | compile warning | — | reserved | `u256` arithmetic is software-emulated on this target (~10–50x slower than `u64`); consider `u64` if values fit. Fires only on **arithmetic operators** (`+`, `-`, `*`, `/`, `%`, `<<`, `>>`, `<`, `>`, `<=`, `>=`, `==`, `!=`) and arithmetic methods (`wrapping_*`, `saturating_*`, `checked_*`, `pow`, `isqrt`, `ilog2`, `ilog10`, `count_ones`, `rotate_left`, etc.) on `u256` operands in **non-`onchain`** code (native, wasm). Does **not** fire on type declarations (`let x: u256`), struct fields, function parameters, return types, `as` casts, or literal construction (`0u256`). Warn-by-default — suppress at the call site or module level with `#[allow(W0010)]`. Not emitted inside `onchain` modules, where `u256` arithmetic is the native fixture. | §3.1, §4.8, §4.10, §18.2 |
+
+<!-- TODO: Promote W0010 from `reserved` to `stable` when the compiler
+emits the exact wording specified above. -->
+
+<!-- TODO: Populate the rest of the warnings cluster once the warning
+surface stabilizes. -->
 
 ## Lints · `L0001–L0999`
 
