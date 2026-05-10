@@ -49,6 +49,11 @@ surrounding `Result`. The callee's own domain error (e.g., `TokenError`) is
 carried inside `ChainError::Reverted { data }` and can be decoded via the
 `@error`-generated decoder on the callee's enum.
 
+`ChainError` is re-exported from the §13.1 prelude, so `Result<T, ChainError>`
+signatures work without an explicit `use std::chain::ChainError;`. The
+canonical definition lives in §11.4a; this page mirrors it for module
+locality.
+
 ## Target Semantics
 
 - **EVM.** `chain::call` lowers to `CALL`. Synchronous. Solidity ABI

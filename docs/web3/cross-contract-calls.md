@@ -75,6 +75,10 @@ pub enum ChainError {
 - `DecodingError` — the callee returned bytes that do not decode as the
   declared `T` (callee and caller disagree on the ABI).
 
+`ChainError` lives at `std::chain::ChainError` and is re-exported from the
+prelude, so `Result<T, ChainError>` signatures need no explicit `use`. The
+canonical definition is §11.4a.
+
 ## EVM Call Model
 
 On the EVM target, `chain::call` lowers to an EVM `CALL` opcode:
