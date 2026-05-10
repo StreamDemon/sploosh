@@ -1,0 +1,24 @@
+docs/reference/compiler-errors.md
+  s_978b183c96ff25::t_2fd8d7c2d21b29 100-108
+docs/spec-plans/LANGUAGE_SPEC.md
+  s_978b183c96ff25::t_1346414da072ac 4657
+  s_978b183c96ff25::t_00459dac374cd3 251-262
+docs/spec-plans/LANGUAGE_SPEC_PROMPT_CORE.md
+  s_978b183c96ff25::t_19d90a7ed96a4e 163
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "6b997bbbe02b868943abe4c1a3f7ef94d0829802",
+  "prompts": {},
+  "sessions": {
+    "s_978b183c96ff25": {
+      "agent_id": {
+        "tool": "droid",
+        "id": "30236d7f-dde7-46a2-9290-6691b417211a",
+        "model": "custom:claude-opus-4-7-0"
+      },
+      "human_author": "StreamDemon <revenantpulse@gmail.com>"
+    }
+  }
+}
