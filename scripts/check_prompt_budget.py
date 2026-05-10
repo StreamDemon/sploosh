@@ -50,6 +50,11 @@ def main(argv: list[str] | None = None) -> int:
                         help="Warn threshold as a fraction of the ceiling (default: 0.9)")
     args = parser.parse_args(argv)
 
+    if args.core_ceiling <= 0 or args.web3_ceiling <= 0:
+        parser.error("--core-ceiling and --web3-ceiling must be > 0")
+    if not (0.0 < args.warn_at < 1.0):
+        parser.error("--warn-at must be strictly between 0.0 and 1.0 (exclusive)")
+
     enc = tiktoken.get_encoding("cl100k_base")
 
     targets = [
