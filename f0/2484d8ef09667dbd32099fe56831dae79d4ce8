@@ -1,0 +1,21 @@
+docs/guide/strings-and-formatting.md
+  s_fceb40746fb993::t_c548d483144d72 41
+docs/guide/structs-enums-and-traits.md
+  s_fceb40746fb993::t_bc488ba42f828b 94
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "f02484d8ef09667dbd32099fe56831dae79d4ce8",
+  "prompts": {},
+  "sessions": {
+    "s_fceb40746fb993": {
+      "agent_id": {
+        "tool": "droid",
+        "id": "ebadd70f-b558-48b7-919f-d8f784e20dc0",
+        "model": "custom:claude-opus-4-7-0"
+      },
+      "human_author": "StreamDemon <revenantpulse@gmail.com>"
+    }
+  }
+}
