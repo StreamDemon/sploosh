@@ -1,0 +1,44 @@
+scripts/check_prompt_budget.py
+  s_c5767c31f999e7::t_6d24624167ec89 68-69
+scripts/requirements.txt
+  s_63d3f247a99dcc::t_50266896c5e7cc 1
+docs/spec-plans/AGENTS.md
+  s_63d3f247a99dcc::t_941af5f518276b 14-15
+  s_63d3f247a99dcc::t_97d8ea74b30585 24
+.github/workflows/prompt-budget.yml
+  s_63d3f247a99dcc::t_4bbd956c643ac6 1-32
+.factory/droids/sploosh-spec-steward.md
+  s_c5767c31f999e7::t_02aa8a0548547f 9
+  s_c5767c31f999e7::t_301936133e3c2e 14-15
+  s_c5767c31f999e7::t_02b6d8c1ca6b38 66
+docs/spec-plans/LANGUAGE_SPEC.md
+  s_63d3f247a99dcc::t_cb65186ecb7642 4870
+  s_63d3f247a99dcc::t_0b2d6d7190bc4a 1
+  s_63d3f247a99dcc::t_10a8a8e40ce21e 4882
+  s_63d3f247a99dcc::t_5d13e68b9fd69e 19
+  s_63d3f247a99dcc::t_58ff7f3435d17f 4644
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "b46ebe8c5804885b4fce5f984fa0ba24df656800",
+  "prompts": {},
+  "sessions": {
+    "s_63d3f247a99dcc": {
+      "agent_id": {
+        "tool": "droid",
+        "id": "f279c50e-ae21-4f7e-9fa4-c78a8aa38962",
+        "model": "custom:claude-opus-4-7-0"
+      },
+      "human_author": "StreamDemon <revenantpulse@gmail.com>"
+    },
+    "s_c5767c31f999e7": {
+      "agent_id": {
+        "tool": "droid",
+        "id": "c8364e4b-55b0-4e20-8c4a-247ed658145b",
+        "model": "custom:claude-opus-4-7-0"
+      },
+      "human_author": "StreamDemon <revenantpulse@gmail.com>"
+    }
+  }
+}
