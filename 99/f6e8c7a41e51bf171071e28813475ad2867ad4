@@ -1,0 +1,19 @@
+docs/spec-plans/LANGUAGE_SPEC_PROMPT_CORE.md
+  s_cd6984e99d88c1::t_b3e30eed591435 163
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "99f6e8c7a41e51bf171071e28813475ad2867ad4",
+  "prompts": {},
+  "sessions": {
+    "s_cd6984e99d88c1": {
+      "agent_id": {
+        "tool": "droid",
+        "id": "f3541d23-bfc6-4fa9-8461-704ffd1c1c7a",
+        "model": "custom:claude-opus-4-7-0"
+      },
+      "human_author": "StreamDemon <revenantpulse@gmail.com>"
+    }
+  }
+}
