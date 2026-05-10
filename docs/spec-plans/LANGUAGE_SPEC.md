@@ -248,6 +248,23 @@ Address                     // Blockchain address (32 bytes, not an integer)
 **`u256`**: 256-bit unsigned integer. Available on all targets. Literal suffix: `0u256`,
 hex: `0xFF00u256`. Always uses checked arithmetic regardless of build mode.
 
+**Off-chain cost (`W0010`).** `u256` is a primitive on every target, but native and wasm
+have no hardware support — arithmetic compiles to multi-instruction software emulation
+(~10–50x slower than `u64`). The compiler emits warning `W0010` at any `u256` **arithmetic**
+site outside `onchain` modules. Triggers: the operators `+`, `-`, `*`, `/`, `%`, `<<`,
+`>>`, comparisons (`<`, `>`, `<=`, `>=`, `==`, `!=`), the explicit-overflow methods
+`wrapping_*` / `saturating_*` / `checked_*` (§4.8), and the §4.10 integer methods that
+perform multi-instruction work: `pow`, `isqrt`, `ilog2`, `ilog10`, `count_ones`,
+`count_zeros`, `leading_zeros`, `trailing_zeros`, `rotate_left`, `rotate_right`,
+`swap_bytes`, `to_be`, `to_le`, `from_be`, `from_le`. Type declarations, struct fields,
+function parameters, return types, `as` casts, and literal construction do **not** fire
+the warning — passing `u256` through off-chain code (e.g., chain-bridge value plumbing)
+is free. The methods `abs` (no-op on unsigned), `min`, `max`, and `clamp` also do not
+fire — they are comparison-based and incur no emulation cost. `W0010` is warn-by-default;
+suppress at the call site or module level with `#[allow(W0010)]` if the off-chain
+arithmetic is intentional. Not emitted inside `onchain` modules. See §18.2 and the
+registry entry in `docs/reference/compiler-errors.md` for the canonical trigger list.
+
 **`Address`**: 32-byte blockchain address. No arithmetic operations. Supports `==`, `!=`,
 `Display`, `Debug`, `Clone`, `Copy`, `Hash`, `Eq`, `Ord`. Construct via `Address::from_hex("0x...")`.
 
@@ -527,6 +544,7 @@ Sploosh defines the following standard traits. All are in the prelude.
 |---|---|---|
 | `Clone` | `fn clone(&self) -> Self` | Deep copy |
 | `Debug` | `fn fmt_debug(&self) -> String` | Debug representation for `{:?}` |
+| `Display` | `fn to_string(&self) -> String` | Human-readable format for `{}` (also derivable; see §12.2) |
 | `Eq` | `fn eq(&self, other: &Self) -> bool` | Structural equality (also generates `!=`) |
 | `Ord` | `fn cmp(&self, other: &Self) -> Ordering` | Total ordering. Requires `Eq`. Enables `<` `>` `<=` `>=` |
 | `Hash` | `fn hash(&self) -> u64` | Hash value. Required for `Map` keys and `Set` elements |
@@ -541,7 +559,6 @@ Sploosh defines the following standard traits. All are in the prelude.
 | `Into<T>` | (auto from `From`) | `val.into()` calls `T::from(val)` |
 | `TryFrom<T>` | `fn try_from(value: T) -> Result<Self, Self::Error>` | Fallible conversion |
 | `TryInto<T>` | (auto from `TryFrom`) | Fallible `.try_into()` |
-| `Display` | `fn to_string(&self) -> String` | Human-readable format for `{}` |
 
 **Error and cleanup traits:**
 
@@ -2611,13 +2628,24 @@ let s = format("Debug: {:?}", some_value);
 ### 9.3 Display and Debug Traits
 
 Types used with `{}` must implement `Display`. Types used with `{:?}` must implement `Debug`.
-`@derive(Debug)` auto-generates `Debug`. `Display` must be implemented manually.
+Both are derivable via `@derive(Debug)` and `@derive(Display)`; the derived
+shapes mirror each other (variant/struct name plus field-by-field rendering),
+differing only in whether each field is rendered via its own `Debug` or
+`Display` impl. Manual `impl Display for T` is still allowed when the
+derived shape is wrong, but a type may not have both `@derive(Display)` and
+a manual `impl Display` (same conflict rule as `Debug`). See §12.2 for the
+full derive specification.
 
 ```sploosh
-@derive(Debug)
+@derive(Debug, Display)
 struct Point { x: f64, y: f64 }
+// Display:  "Point { x: 1.0, y: 2.0 }"
+// Debug:    "Point { x: 1.0, y: 2.0 }"
 
-impl Display for Point {
+@derive(Debug)
+struct Vector { x: f64, y: f64 }
+
+impl Display for Vector {
     fn to_string(&self) -> String {
         format("({}, {})", self.x, self.y)
     }
@@ -3162,6 +3190,12 @@ pub enum ChainError {
 - `DecodingError` — the callee returned bytes that do not decode as the
   declared `T` (callee and caller disagree on the ABI).
 
+`ChainError` lives at `std::chain::ChainError` and is re-exported from the
+prelude (§13.1) so that `Result<T, ChainError>` signatures need no explicit
+`use`. The canonical definition is here in §11.4a; the stdlib module page
+(`docs/stdlib/chain.md`) and the prelude entry both point back at this
+section.
+
 **No delegatecall in v0.4.x.** Sploosh does not yet expose the EVM
 `DELEGATECALL` opcode. `chain::call` always uses `CALL` semantics (callee
 executes in its own storage context). A delegate-call intrinsic and its
@@ -3389,6 +3423,7 @@ would allow bit-level drift across LLVM versions and break consensus. See §12.3
 | Derive | Generates |
 |---|---|
 | `Debug` | `Debug` trait (for `{:?}`) |
+| `Display` | `Display` trait (for `{}`) — see derive shape below |
 | `Clone` | `Clone` trait (deep copy) |
 | `Copy` | `Copy` trait (bitwise copy, requires `Clone`) |
 | `Eq` | `Eq` trait (structural equality) |
@@ -3398,6 +3433,33 @@ would allow bit-level drift across LLVM versions and break consensus. See §12.3
 | `Ord` | `Ord` trait (total ordering) |
 
 All derive macros work on structs and enums with mixed variant types.
+
+**`@derive(Display)` shape.** The derived `Display` impl mirrors the derived
+`Debug` impl: structs render as `StructName { field1: <field1 as Display>, field2: <field2 as Display> }`,
+tuple structs as `StructName(<f0 as Display>, <f1 as Display>)`, unit structs
+as `StructName`, and enums by variant — `VariantName` for unit variants,
+`VariantName(<f0 as Display>, ...)` for tuple variants, and
+`VariantName { field: <field as Display>, ... }` for struct variants. The
+only difference from the derived `Debug` shape is that each field is
+rendered via its own `Display` impl rather than its `Debug` impl.
+
+**Field requirement.** Every field type must itself implement `Display` for
+the derive to apply. A field whose type lacks `Display` produces a
+compile-time error at the derive site (the same shape as the existing
+`Debug`-without-`Debug`-on-a-field error).
+
+**Conflict rule.** A type may have either `@derive(Display)` or a manual
+`impl Display for T`, but not both — duplicate impls are a compile error.
+Same rule as `Debug`. Drop the derive when the field-by-field shape is
+wrong for the type (e.g., when an `Address` should print as `0x…` rather
+than `Address(<bytes as Display>)`).
+
+```sploosh
+@derive(Display)
+enum Token { Lit(i32), Op { sym: char } }
+// "Lit(42)"   for Token::Lit(42)
+// "Op { sym: + }"   for Token::Op { sym: '+' }
+```
 
 ### 12.3 Compiler Directives and Conditional Compilation
 
@@ -3648,6 +3710,7 @@ Send, Sync
 Handle, JoinHandle, ActorId
 Channel, Sender, Receiver
 Address, u256
+ChainError
 FpCategory
 ```
 
@@ -3680,7 +3743,7 @@ Referencing any of these outside a `@test`-annotated function or
 | `std::actor`   | Actor observability and introspection (§8.12) | native, wasm |
 | `std::web`     | HTTP server, routing, middleware         | native, wasm |
 | `std::db`      | Database connection, query builder       | native |
-| `std::chain`   | Web3 utilities, ABI encoding, addresses  | all |
+| `std::chain`   | `chain::call`, `ChainError`, `extern onchain mod` (§11.4a) | all |
 
 ### 13.3 Testing
 
@@ -4646,7 +4709,10 @@ in prose.
 | Cooperative termination via `handle.stop()` / `handle.kill()` | Method-form (§8.2a) rather than the `stop c` keyword form considered in v0.4.3 — keeps the keyword count at 39 and avoids any grammar change. Handle-drop continues to *not* kill the actor: non-refcounted handles are an intentional design choice (no atomic refcount on every clone), and explicit termination provides the path the original model was missing. Two methods rather than one (`stop()` graceful drain + `kill()` immediate) because the use cases are genuinely different — graceful is the OTP default, but immediate is needed for shedding a buggy or runaway actor without waiting for its mailbox to drain. Supervisor sees `stop`/`kill` as **intentional termination, not failure**: folding it into `max_restarts` would conflate user intent with bugs. The `Result<(), StopError>` return type follows the §6.1 "no exceptions, every fallible operation is `Result`" rule even though the only failure modes are already-dead and already-stopping. Both methods are `&self` because the handle is never mutated; multiple clones racing to stop the actor serialize on the per-actor termination flag, which is set out-of-band and never blocks on mailbox backpressure. |
 | Actor observability (`std::actor::observe` + handle introspection + supervisor restart history) is a first-class spec artifact, always-on in every build mode | The runtime needs an answer to *what is this actor doing right now* before the compiler exists; deferring observability would force every implementer to invent the same surface differently and would let users discover their program is unobservable in production. **Hybrid placement** (cheap reads on `Handle<T>`, richer queries in `std::actor::observe`) keeps `mailbox_len` / `mailbox_capacity` / `alive` / `actor_id` constant-time and discoverable on the type users already hold, while reserving the registry-walking surface for an explicit module so users opt in by importing it. **Restart history rooted on the supervisor's handle** rather than the child's because only `@supervisor`-decorated actors run a restart loop — non-supervised actors have no restart path (§8.7) and therefore no history to expose. **Global runtime registry** (BEAM `:observer` shape) for `observe::actors()` because answering "which actors are pinning memory right now" is the operational question users ask first; the per-actor registry entry is paid anyway for the existing supervisor and mailbox machinery. **Last-known dead-actor snapshot retained until last handle drops** — this is the only refcount in the actor model, and it lives on a side-table next to the snapshot rather than on the actor itself, leaving §8.2 handle-drop semantics unchanged. The contrast was called out explicitly in §8.12.4 to prevent future readers from concluding `Handle<T>` is now refcounted. **Always-available, all-build-modes** rather than a `@observable` attribute or a debug-only feature flag because conditional observability fails the moment it is most needed (production triage), and the bookkeeping cost (~24 bytes registry + atomic mailbox counter + ~384 bytes per supervised child) is dwarfed by an actor's own footprint. **`@supervisor(restart_history: N)` extends an existing attribute** rather than introducing a new one — the keyword count stays at 39 and the grammar is unchanged. **Two new diagnostic registry slots reserved** (`E1210` non-supervised-child, `E1211` ActorId-cross-runtime) — concrete messages earned when the compiler lands per §18.4 Growth policy. **Multi-runtime deferred** — v0.5.6 has one runtime per process, and `ActorId` cross-runtime comparison is reserved-only with an explicit "deferred to a future amendment" note. |
 | Test framework (`@test` + `std::test` + `sploosh test`) is a first-class spec artifact, not a library add-on | The compiler needs a test harness to test itself; deferring testing to a third-party crate would force every implementer to invent the same surface differently. **Rust-shape assertions** (`assert_eq` / `assert_ne` / `assert_matches`) maximize Rust-trained-model recall and inherit the `Debug`-on-failure formatting users expect. **Per-test isolation actor** (§13.3.4) reuses §8 actor failure semantics — a panic in one test never aborts the runner, and there is no separate "test panic" mechanism to reason about. **`@test async fn`** runs on a fresh per-test runtime so async / actor / channel / select code is testable with no special syntax. **Property tests with `Gen<T>` + deterministic shrinking** (§13.3.6) ship in v0.5.5 rather than waiting for a later slice: shrinking is what makes property tests usable in CI, and locking the contract before the compiler emits its first `@property` keeps the trait shape stable. **Test-only prelude additions** (`assert_eq`, `assert_ne`, `assert_matches`, `TestFailure`, `Gen`, `Rng`) auto-import under `#[cfg(test)]` only — production code that references them is a compile error (`E1410` / `E1411`, reserved), preventing test code from leaking into release binaries. **`sploosh test` is deterministic with `--test-threads=1 --seed=<fixed>`** — byte-identical output across runs is the contract LLM agents and CI snapshot tests rely on. **No `@bench` in v0.5.5** — benchmarking has its own design space (warm-up, timer choice, statistical reporting) and is deferred. Doc tests are also deferred — they require a documentation-extraction pass the compiler does not have. |
+| `ChainError` lives at `std::chain::ChainError` and is re-exported from the §13.1 prelude | Stdlib convention places an error type alongside the module that produces it — `chain::call` is the only intrinsic that returns `Result<T, ChainError>`, so `std::chain` is the natural home. The prelude re-export is an ergonomic exception, not a default: cross-contract calls are common enough on the on-chain target that requiring `use std::chain::ChainError;` for every fallible call signature would add friction without information value. The §11.4a definition stays canonical — the prelude entry and the `docs/stdlib/chain.md` page both reference §11.4a rather than duplicating the variant list, so a single edit point covers the type's shape. **Counterfactual considered and rejected**: leave `ChainError` un-prelude'd and require explicit `use std::chain::ChainError;`. Rejected because every on-chain function that calls another contract returns `Result<T, ChainError>` (or a wrapping error that contains it), and the import boilerplate would be unavoidable rather than opt-in. The prelude's existing on-chain-friendly types (`Address`, `u256`) set the precedent — `ChainError` slots in next to them. |
+| `Display` derivable, mirroring the `Debug`-derive shape | Manual `impl Display` is the most common boilerplate after `Debug` for any struct or enum that ends up in a log line, error message, or CLI output. Making it derivable removes that boilerplate for the common case while preserving manual override for types whose canonical rendering is not field-by-field (`Address`, `u256` units, anything with a domain-specific format). The shape mirrors `Debug` (`StructName { field: <field as Display>, ... }`) rather than introducing a new format-string DSL because (a) the format-string-on-the-derive path (e.g., `@derive(Display(format = "..."))`) is its own design space — string-template syntax, escape rules, runtime vs. compile-time validation — and locking it into v0.5.10 would foreclose that decision; (b) the field-by-field default is predictable, and predictability is the whole point of a derive (the LLM that writes `@derive(Display)` should be able to predict what comes out). The conflict rule (derive XOR manual impl) matches `Debug`'s. The recursive-Display field requirement matches Rust's behavior and surfaces missing impls at the derive site rather than at the call site. Cross-references: §3.10 standard traits table, §9.3 Display and Debug, §12.2 derive macros. |
 | PROMPT-edition token budgets (`_CORE` ≤ 4,800 / `_WEB3` ≤ 1,500 cl100k_base) are CI-enforced ceilings calibrated to attention quality, portability, and per-token economics — not to frontier context-window capacity | Frontier context windows hit 1M+ tokens in 2026 and the combined PROMPT footprint sits at ~6,300 tokens (well under 1% of frontier capacity), so the budgets are deliberately **not** auto-scaled with context-window inflation. The constraint is three-fold: **(a) attention quality** — empirically, LLMs retrieve and reason worse from sprawling prompts even when they fit, so a tight reference is a more useful reference; **(b) prompt portability** across the long tail of smaller / on-device / 8K-context-window models that practitioners ship to edge environments and on-chain dev tooling, where any inflation here closes off real deployment surface; **(c) per-token economics** at ecosystem scale, where each PROMPT load is paid per developer session and per CI run across an entire community, so unbookkept growth has compounding cost. The `>` 100% / 90–100% / `<` 90% three-tier semantics (fail / warn / pass) catch genuine drift without flagging routine amendments, and the documented amendment path (raise the principle-7 number with explicit rationale) preserves the cost-signal of each ceiling bump — the v0.5.8 commit `bd26e8f` raising `_CORE` from `~4,000` to `~4,800` after the prompt split is the precedent. **Counterfactual considered and rejected**: auto-scale the ceiling with frontier context windows. Rejected because it sets a precedent of passive drift, makes growth unconscious rather than deliberate, and abandons every consumer that is not running on a frontier model — exactly the practitioners Sploosh targets at the edge of web3 deployment. Cross-references: §1 principle 7 (the budget numbers themselves), Appendix D v0.5.9 row, `scripts/check_prompt_budget.py` (the enforcer). |
+| `W0010` — `u256` off-chain arithmetic warning is **arithmetic-only** and **warn-by-default** | `u256` is a load-bearing on-chain primitive (Solidity-compatible storage slots, EVM word size, ABI-stable across the chain ecosystem) but a perf footgun off-chain: native and wasm have no 256-bit ALU, so every operator lowers to multi-instruction emulation (~10–50x slower than `u64`). The lint exists to surface this without forbidding the type, because legitimate off-chain uses exist — chain-bridge value plumbing, indexers replaying on-chain math, simulators of contract logic. **Arithmetic-only trigger** (not declarations / parameters / casts / literals) is the locked design: passing `u256` through off-chain code is free at runtime — only the *math* is expensive — and a declaration-firing lint would drown legitimate plumbing in noise that devs would learn to ignore wholesale. **Warn-by-default** (not allow-by-default) because the casual user — exactly the LLM-trained practitioner Sploosh targets — would never think to enable an off-by-default lint, and silent emulation is precisely the kind of correctness-preserving-but-perf-eroding trap that a deeply-trained `u256` muscle from Solidity carries into every off-chain context. The cost-signal needs to be loud at first sight and quiet on consenting demand (`#[allow(W0010)]` at site or module). Counterfactual considered and rejected: fire on declarations. Rejected because chain-bridge code mixing on/off-chain types is exactly the maintainer-aware case the lint should *not* punish; only *doing math* on the off-chain side is the footgun. Cross-references: §3.1 (`u256` type), §4.8 (integer overflow / arithmetic methods), §18.2 (warnings cluster), `docs/reference/compiler-errors.md` (registry row). |
 | Pipe and method-chain forms for iterators are equivalent first-class syntaxes; no style is preferred | Both `vec.iter().map(f).collect()` and `vec.iter() \|> map(f) \|> collect()` lower to the same call sequence under §5.6's pipe rule (`expr \|> method(args)` ≡ `.method(args)`). The equivalence is not iterator-specific — it is the general pipe lowering applied to method calls — so collapsing to a single form would require either removing pipe-on-methods (loses `\|>` consistency with the rest of the language) or removing method-chain-on-`Iter` (loses Rust-trained-model recall and the established `.iter()` idiom). **Counterfactual considered and rejected**: pick one canonical form and lint the other. Rejected because the lowering is genuinely the same expression at the AST level after desugaring, so a stylistic prescription would be enforcing surface syntax for its own sake; LLMs and humans pick the form that reads better in context, and the spec's job is to document the equivalence rather than legislate aesthetics. The community is free to converge on conventions in code style guides over time. |
 
 ---
