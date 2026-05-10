@@ -1,0 +1,20 @@
+docs/spec-plans/LANGUAGE_SPEC.md
+  s_bd9cc0e060d58d::t_652fe91490469d 4880
+  s_bd9cc0e060d58d::t_0f7ae71835954d 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "36d894e6ebc09f09b30ded897e2c5843d894f97e",
+  "prompts": {},
+  "sessions": {
+    "s_bd9cc0e060d58d": {
+      "agent_id": {
+        "tool": "droid",
+        "id": "97146ca4-3387-4957-8d29-23fa16dedf6b",
+        "model": "custom:claude-opus-4-7-0"
+      },
+      "human_author": "StreamDemon <revenantpulse@gmail.com>"
+    }
+  }
+}
