@@ -1,0 +1,26 @@
+docs/spec-plans/LANGUAGE_SPEC_PROMPT.md
+  s_d806bb05b1d314::t_90f8c5cdd4f029 234
+docs/spec-plans/LANGUAGE_SPEC.md
+  s_d806bb05b1d314::t_1c74be1ba225aa 4879
+  s_d806bb05b1d314::t_ad6e89ec88613f 4673-4680
+  s_d806bb05b1d314::t_35d4b1fbf9e9c3 1
+  s_d806bb05b1d314::t_25ea435a0bf4b4 4789-4795
+  s_d806bb05b1d314::t_08af1e51a8ab88 4869
+  s_d806bb05b1d314::t_c098b61bb80743 4740-4751
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "97088df8469a754e36f84028a4aa63f6a96cd3b0",
+  "prompts": {},
+  "sessions": {
+    "s_d806bb05b1d314": {
+      "agent_id": {
+        "tool": "droid",
+        "id": "b26c8f67-f41d-4d9b-a8cf-06cd36f8e9f1",
+        "model": "custom:claude-opus-4-7-0"
+      },
+      "human_author": "StreamDemon <revenantpulse@gmail.com>"
+    }
+  }
+}
