@@ -1419,7 +1419,11 @@ they produce a new iterator without consuming elements until a terminal operatio
 
 ### 7.3 Using Iterators with Pipes
 
-The pipe operator and method chains are interchangeable for iterator operations:
+The pipe operator and method-chain forms are **semantically equivalent** for
+iterator expressions. This is not a special-case rule for iterators — it
+follows directly from §5.6: `expr |> f(a)` lowers to `f(expr, a)`, and for
+iterator adaptors `|> method(args)` lowers to `.method(args)`. Both forms
+produce the same call sequence and the same value.
 
 ```sploosh
 // Method chain style
@@ -1428,14 +1432,15 @@ let names: Vec<String> = users.iter()
     .map(|u| u.name.clone())
     .collect();
 
-// Pipe style (equivalent)
+// Pipe style — same call sequence, same result
 let names: Vec<String> = users.iter()
     |> filter(|u| u.active)
     |> map(|u| u.name.clone())
     |> collect();
 ```
 
-In pipe style, `|> method(args)` desugars to `.method(args)`.
+Both forms are first-class. The spec does not prefer one over the other;
+choose whichever reads better in context.
 
 **Consuming vs borrowing iteration:**
 
@@ -4708,6 +4713,7 @@ in prose.
 | `Display` derivable, mirroring the `Debug`-derive shape | Manual `impl Display` is the most common boilerplate after `Debug` for any struct or enum that ends up in a log line, error message, or CLI output. Making it derivable removes that boilerplate for the common case while preserving manual override for types whose canonical rendering is not field-by-field (`Address`, `u256` units, anything with a domain-specific format). The shape mirrors `Debug` (`StructName { field: <field as Display>, ... }`) rather than introducing a new format-string DSL because (a) the format-string-on-the-derive path (e.g., `@derive(Display(format = "..."))`) is its own design space — string-template syntax, escape rules, runtime vs. compile-time validation — and locking it into v0.5.10 would foreclose that decision; (b) the field-by-field default is predictable, and predictability is the whole point of a derive (the LLM that writes `@derive(Display)` should be able to predict what comes out). The conflict rule (derive XOR manual impl) matches `Debug`'s. The recursive-Display field requirement matches Rust's behavior and surfaces missing impls at the derive site rather than at the call site. Cross-references: §3.10 standard traits table, §9.3 Display and Debug, §12.2 derive macros. |
 | PROMPT-edition token budgets (`_CORE` ≤ 4,800 / `_WEB3` ≤ 1,500 cl100k_base) are CI-enforced ceilings calibrated to attention quality, portability, and per-token economics — not to frontier context-window capacity | Frontier context windows hit 1M+ tokens in 2026 and the combined PROMPT footprint sits at ~6,300 tokens (well under 1% of frontier capacity), so the budgets are deliberately **not** auto-scaled with context-window inflation. The constraint is three-fold: **(a) attention quality** — empirically, LLMs retrieve and reason worse from sprawling prompts even when they fit, so a tight reference is a more useful reference; **(b) prompt portability** across the long tail of smaller / on-device / 8K-context-window models that practitioners ship to edge environments and on-chain dev tooling, where any inflation here closes off real deployment surface; **(c) per-token economics** at ecosystem scale, where each PROMPT load is paid per developer session and per CI run across an entire community, so unbookkept growth has compounding cost. The `>` 100% / 90–100% / `<` 90% three-tier semantics (fail / warn / pass) catch genuine drift without flagging routine amendments, and the documented amendment path (raise the principle-7 number with explicit rationale) preserves the cost-signal of each ceiling bump — the v0.5.8 commit `bd26e8f` raising `_CORE` from `~4,000` to `~4,800` after the prompt split is the precedent. **Counterfactual considered and rejected**: auto-scale the ceiling with frontier context windows. Rejected because it sets a precedent of passive drift, makes growth unconscious rather than deliberate, and abandons every consumer that is not running on a frontier model — exactly the practitioners Sploosh targets at the edge of web3 deployment. Cross-references: §1 principle 7 (the budget numbers themselves), Appendix D v0.5.9 row, `scripts/check_prompt_budget.py` (the enforcer). |
 | `W0010` — `u256` off-chain arithmetic warning is **arithmetic-only** and **warn-by-default** | `u256` is a load-bearing on-chain primitive (Solidity-compatible storage slots, EVM word size, ABI-stable across the chain ecosystem) but a perf footgun off-chain: native and wasm have no 256-bit ALU, so every operator lowers to multi-instruction emulation (~10–50x slower than `u64`). The lint exists to surface this without forbidding the type, because legitimate off-chain uses exist — chain-bridge value plumbing, indexers replaying on-chain math, simulators of contract logic. **Arithmetic-only trigger** (not declarations / parameters / casts / literals) is the locked design: passing `u256` through off-chain code is free at runtime — only the *math* is expensive — and a declaration-firing lint would drown legitimate plumbing in noise that devs would learn to ignore wholesale. **Warn-by-default** (not allow-by-default) because the casual user — exactly the LLM-trained practitioner Sploosh targets — would never think to enable an off-by-default lint, and silent emulation is precisely the kind of correctness-preserving-but-perf-eroding trap that a deeply-trained `u256` muscle from Solidity carries into every off-chain context. The cost-signal needs to be loud at first sight and quiet on consenting demand (`#[allow(W0010)]` at site or module). Counterfactual considered and rejected: fire on declarations. Rejected because chain-bridge code mixing on/off-chain types is exactly the maintainer-aware case the lint should *not* punish; only *doing math* on the off-chain side is the footgun. Cross-references: §3.1 (`u256` type), §4.8 (integer overflow / arithmetic methods), §18.2 (warnings cluster), `docs/reference/compiler-errors.md` (registry row). |
+| Pipe and method-chain forms for iterators are equivalent first-class syntaxes; no style is preferred | Both `vec.iter().map(f).collect()` and `vec.iter() \|> map(f) \|> collect()` lower to the same call sequence under §5.6's pipe rule (`expr \|> method(args)` ≡ `.method(args)`). The equivalence is not iterator-specific — it is the general pipe lowering applied to method calls — so collapsing to a single form would require either removing pipe-on-methods (loses `\|>` consistency with the rest of the language) or removing method-chain-on-`Iter` (loses Rust-trained-model recall and the established `.iter()` idiom). **Counterfactual considered and rejected**: pick one canonical form and lint the other. Rejected because the lowering is genuinely the same expression at the AST level after desugaring, so a stylistic prescription would be enforcing surface syntax for its own sake; LLMs and humans pick the form that reads better in context, and the spec's job is to document the equivalence rather than legislate aesthetics. The community is free to converge on conventions in code style guides over time. |
 
 ---
 
