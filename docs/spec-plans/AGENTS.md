@@ -11,7 +11,7 @@ This folder holds the language specification, its prompt-sized mirror, and the l
 | File | Purpose |
 |---|---|
 | `LANGUAGE_SPEC.md` | **Authoritative spec.** Sole source of truth. |
-| `LANGUAGE_SPEC_PROMPT_CORE.md` | Condensed LLM-facing reference for the language core (excluding §11). Soft target ~4,000 cl100k_base tokens. |
+| `LANGUAGE_SPEC_PROMPT_CORE.md` | Condensed LLM-facing reference for the language core (excluding §11). Soft target ~4,800 cl100k_base tokens. |
 | `LANGUAGE_SPEC_PROMPT_WEB3.md` | Condensed LLM-facing reference for §11 on-chain surface. Soft target ~1,500 cl100k_base tokens. |
 | `LANGUAGE_SPEC_PROMPT.md` | Retired combined prompt-mirror; redirects to the `_CORE` + `_WEB3` files. |
 | `LANGUAGE_SPEC_REVIEW.md` | Review notes / open issues / proposed amendments. |
@@ -21,7 +21,7 @@ This folder holds the language specification, its prompt-sized mirror, and the l
 - **Section numbering matters.** Sections are referenced from many other docs as `§3`, `§4.4a`, `§11.4a`, `§16`, etc. Renumbering is a cross-tree change — search before you renumber.
 - **Appendix D is the changelog.** Every material spec change adds an Appendix D entry with the version bump (e.g., `v0.5.2`).
 - **Design Decisions Log (§17)** captures rationales for non-obvious choices. Add an entry when you make a controversial call.
-- **The prompt-mirror is split** as of v0.5.8 — `LANGUAGE_SPEC_PROMPT_CORE.md` (~4K `cl100k_base` tokens soft target) and `LANGUAGE_SPEC_PROMPT_WEB3.md` (~1.5K soft target), per §1 principle 7. Adding to one section means pruning another. The combined `LANGUAGE_SPEC_PROMPT.md` is a redirect-only stub.
+- **The prompt-mirror is split** as of v0.5.8 — `LANGUAGE_SPEC_PROMPT_CORE.md` (~4.8K `cl100k_base` tokens soft target) and `LANGUAGE_SPEC_PROMPT_WEB3.md` (~1.5K soft target), per §1 principle 7. Adding to one section means pruning another. The combined `LANGUAGE_SPEC_PROMPT.md` is a redirect-only stub.
 - **Code fences in spec use `sploosh`** as the language tag. Keep examples short and self-contained.
 
 ## Touch Points
