@@ -1,0 +1,56 @@
+docs/spec-plans/LANGUAGE_SPEC_PROMPT_CORE.md
+  s_ec543362f47f84::t_08983663f413c3 145
+  s_ec543362f47f84::t_703072fdfc8ca5 148
+  s_ec543362f47f84::t_b034518ab31de2 136
+  s_ec543362f47f84::t_131756aa57a8cc 153-162
+  s_ec543362f47f84::t_330a888563464b 38,40,44,46
+  s_ec543362f47f84::t_b9f5470f86c9e6 90
+  s_ec543362f47f84::t_a69bed7d6eaf53 142
+  s_ec543362f47f84::t_de11313c455014 101,126
+  s_ec543362f47f84::t_e0b52419cb12c6 1-13,16-17,19-27,33-34,36-37,41,43,47-48,50-58,60-65,67-68,70-82,87-89,91-100,102-125,127-135,137-141,143-144,146-147,149-152
+  s_ec543362f47f84::t_3a2879df4ac147 45
+  s_ec543362f47f84::t_e2a44faa91d2f3 85-86
+  s_ec543362f47f84::t_598b6fcf81adc4 14-15
+  s_ec543362f47f84::t_3024f24f71b3e0 18,28-32,35
+  s_ec543362f47f84::t_ccc96b12d982cb 83-84
+  s_ec543362f47f84::t_46c36776d3c439 49,59,66,69
+  s_ec543362f47f84::t_669be2fff2d661 39,42
+docs/spec-plans/LANGUAGE_SPEC_PROMPT.md
+  s_ec543362f47f84::t_980a111ac1ab66 1,3,5-6,8,10
+AGENTS.md
+  s_ec543362f47f84::t_5ddac0c661936b 57-58
+  s_ec543362f47f84::t_75e8602c927ec6 110
+VISION.md
+  s_ec543362f47f84::t_0070db39ca1535 120-121
+docs/spec-plans/LANGUAGE_SPEC.md
+  s_ec543362f47f84::t_195f7a941e5f62 19
+  s_ec543362f47f84::t_bddafdd2022065 4869
+docs/spec-plans/LANGUAGE_SPEC_PROMPT_WEB3.md
+  s_ec543362f47f84::t_cba6216e11ae95 55
+  s_ec543362f47f84::t_7986ea9204d8f3 1-54
+.factory/droids/sploosh-spec-steward.md
+  s_ec543362f47f84::t_939c43a1b6cef7 25
+  s_ec543362f47f84::t_4bc8b8d3cab88e 66
+  s_ec543362f47f84::t_5bc13dcb7d2857 14-15
+docs/spec-plans/AGENTS.md
+  s_ec543362f47f84::t_e3c3ca445b2d1e 55
+  s_ec543362f47f84::t_946762352a5e03 48-49
+  s_ec543362f47f84::t_52b9205762f791 13-16
+  s_ec543362f47f84::t_252518af217468 24
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "3f38631e8ef8035b97157ddd675be2c76cfc8585",
+  "prompts": {},
+  "sessions": {
+    "s_ec543362f47f84": {
+      "agent_id": {
+        "tool": "droid",
+        "id": "9eda189e-f952-468a-9ebf-6b5210a8ba2c",
+        "model": "custom:claude-opus-4-7-0"
+      },
+      "human_author": "StreamDemon <revenantpulse@gmail.com>"
+    }
+  }
+}
