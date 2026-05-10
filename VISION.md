@@ -43,7 +43,7 @@ The thesis: today's programming languages were designed for humans, and LLMs hav
 4. **Errors are values.** All fallible operations return `Result<T, E>`. No exceptions, no panics in safe code.
 5. **Concurrency is structural.** Actor-based isolation with message passing. No shared mutable state.
 6. **Dual-target by design.** Single source compiles to native (LLVM), WASM (web2), and on-chain bytecode (web3).
-7. **Spec fits in a prompt.** The language core stays prompt-loadable alongside real task context (~4.8K `cl100k_base` tokens for `_CORE`, ~1.5K for `_WEB3`, as soft targets).
+7. **Spec fits in a prompt.** The language core stays prompt-loadable alongside real task context (`_CORE` ≤ 4,800 `cl100k_base` tokens, `_WEB3` ≤ 1,500 — CI-enforced ceilings as of v0.5.9, calibrated to attention quality, prompt portability, and per-token economics rather than to frontier context-window capacity).
 
 ### Authorship Philosophy
 
@@ -116,7 +116,7 @@ Things we might add later (not now):
 
 - `AGENTS.md` — root agent guide; nearest-wins hierarchy across `docs/`.
 - `CLAUDE.md` — local-only project notes (gitignored).
-- `docs/spec-plans/LANGUAGE_SPEC.md` — authoritative spec (v0.5.2-draft).
+- `docs/spec-plans/LANGUAGE_SPEC.md` — authoritative spec (v0.5.9-draft).
 - `docs/spec-plans/LANGUAGE_SPEC_PROMPT_CORE.md` — prompt-sized mirror (language core).
 - `docs/spec-plans/LANGUAGE_SPEC_PROMPT_WEB3.md` — prompt-sized mirror (§11 on-chain surface).
 - `.github/pull_request_template.md` — PR scaffold.
