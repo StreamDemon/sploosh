@@ -55,7 +55,7 @@ codes in this range as they land.
 | `E1111` | compile error | C | reserved | Concurrency type used inside an `onchain` module. `Handle<T>`, `Channel<T>`, `Sender<T>`, `Receiver<T>`, and `JoinHandle<T>` are compile errors in `onchain` scope, whether in `storage` fields, event fields, function signatures, or local bindings. The forbid is on *spawning inside `onchain`*, not on depending on actor-using code through pure-function boundaries. | §8.1, §11.1, §12.3 |
 | `E1112` | compile error | C | reserved | `@supervisor` or `@mailbox` attribute applied to an item declared inside an `onchain` module. Both attributes describe actor-runtime behavior and have no on-chain analog. | §11.1, §12.1, §12.3 |
 | `E1113` | compile error | C | reserved | `async fn` declaration or `.await` operator used inside an `onchain` module. On-chain functions must be synchronous end-to-end within a transaction; there is no runtime scheduler for `.await` to suspend onto. | §11.1, §12.3 |
-| `E1114` | compile error | C | reserved | `extern "C"` block declared inside an `onchain` module (including `extern "C" async`). The C ABI has no on-chain meaning; cross-contract calls use `extern onchain mod` (§11.4a) instead, which is a different calling convention with a different error surface. Distinct from `E1107` (which covers the inverse direction — `extern onchain mod` declared inside `extern "C"`). | §4.9, §11.1, §12.3 |
+| `E1114` | — | C | vacant | Intentionally unassigned. Both directions of the `extern "C"` ↔ `extern onchain mod` symmetry violation are covered by `E1107`; per §18.4 frozen-on-publish, the slot stays vacant rather than being reassigned. | — |
 | `E1115` | compile error | C | reserved | `Shared<T>` used inside an `onchain` module. Reference counting has no gas or storage meaning, and every on-chain value is scoped to the transaction frame, so no refcounted-sharing primitive is needed or well-defined on-chain. | §4.4a, §11.1, §12.3 |
 | `E1116` | compile error | C | reserved | Floating-point math method called inside an `onchain` module. Every `f32`/`f64` method listed in §4.10 — classification, sign, rounding, min/max/clamp, power/root, exp/log, trig, hyperbolic, `mul_add`, angle conversion — is rejected. Transcendentals are not bit-reproducible across LLVM versions, platforms, and fast-math settings, and any drift would break consensus. `f32`/`f64` *values* may still be stored in fields, compared with `==`/`<`/`>`, and passed as arguments — only the §4.10 method calls are rejected. Use the integer math methods from §4.10 for all on-chain numeric work. | §4.10, §12.3 |
 | `E1117` | compile error | C | reserved | `@fast_math` attribute applied to a function inside an `onchain` module. On-chain float determinism requires strict IEEE 754 semantics on every target; fast-math flags would allow bit-level drift across LLVM versions and break consensus. | §4.10, §12.1, §12.3 |
@@ -66,11 +66,12 @@ codes in this range as they land.
 | `E1122` | compile error | C | reserved | Actor observability item used inside an `onchain` module. The `Handle<T>` introspection methods (`mailbox_len`, `mailbox_capacity`, `alive`, `actor_id`), the `std::actor::observe` module surface (`actor_info`, `actors`, `.by_supervisor`, `.by_name`), and the supervisor-rooted methods (`restart_count`, `restart_history`, `children`) are all rejected. Restated for completeness — `Handle<T>` itself is already an on-chain compile error per `E1111`, so all its methods are too; this code surfaces specifically when an observability call is the offending construct. | §8.12.7, §11.1, §12.3 |
 | `E1123` | compile error | C | reserved | `ActorId` type used inside an `onchain` module. `ActorId` is an actor-runtime identifier with no on-chain analog. The spawn/death lifecycle that gives `ActorId` its monotonic-and-never-reused contract does not exist on-chain. | §8.12.5, §8.12.7 |
 
-<!-- TODO: Promote E1110–E1123 from `reserved` to `stable` when the
-compiler emits the exact wording specified above. The on-chain
-prohibition list is anchored in §11.1, §12.3, §8.1, §4.10, §4.4a, §8.12.7,
-and §13.3; new prohibitions land here as the spec adds them. The next
-unfilled slot is `E1124`. -->
+<!-- TODO: Promote E1110–E1113 and E1115–E1123 from `reserved` to `stable`
+when the compiler emits the exact wording specified above. (E1114 is
+intentionally vacant — see the row.) The on-chain prohibition list is
+anchored in §11.1, §12.3, §8.1, §4.10, §4.4a, §8.12.7, and §13.3; new
+prohibitions land here as the spec adds them. The next unfilled slot
+is `E1124`. -->
 
 ## Cluster D — Actors / concurrency · `E1200–E1299`
 
