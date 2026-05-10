@@ -118,7 +118,15 @@ diagnostics are implemented. -->
 Reserved range for non-error diagnostics. Warnings are emitted by the
 compiler but do not fail the build.
 
-<!-- TODO: Populate once the warning surface stabilizes. -->
+| Code | Kind | Cluster | Status | Message / meaning | Spec ref |
+|------|------|---------|--------|-------------------|----------|
+| `W0010` | compile warning | — | reserved | `u256` arithmetic is software-emulated on this target (~10–50x slower than `u64`); consider `u64` if values fit. Fires only on **arithmetic operators** (`+`, `-`, `*`, `/`, `%`, `<<`, `>>`, `<`, `>`, `<=`, `>=`, `==`, `!=`) and arithmetic methods on `u256` operands in **non-`onchain`** code (native, wasm). The full method trigger list: `wrapping_add` / `wrapping_sub` / `wrapping_mul` (every `wrapping_*`), `saturating_add` / `saturating_sub` / `saturating_mul` (every `saturating_*`), `checked_add` / `checked_sub` / `checked_mul` (every `checked_*`), `pow`, `isqrt`, `ilog2`, `ilog10`, `count_ones`, `count_zeros`, `leading_zeros`, `trailing_zeros`, `rotate_left`, `rotate_right`, `swap_bytes`, `to_be`, `to_le`, `from_be`, `from_le`. Does **not** fire on type declarations (`let x: u256`), struct fields, function parameters, return types, `as` casts, literal construction (`0u256`), or methods that incur no multi-instruction emulation cost: `abs` (no-op on unsigned), `min`, `max`, `clamp` (comparison-based, not arithmetic). Warn-by-default — suppress at the call site or module level with `#[allow(W0010)]`. Not emitted inside `onchain` modules, where `u256` arithmetic is the native fixture. | §3.1, §4.8, §4.10, §18.2 |
+
+<!-- TODO: Promote W0010 from `reserved` to `stable` when the compiler
+emits the exact wording specified above. -->
+
+<!-- TODO: Populate the rest of the warnings cluster once the warning
+surface stabilizes. -->
 
 ## Lints · `L0001–L0999`
 
