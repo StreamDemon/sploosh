@@ -41,7 +41,7 @@ Why this change improves the language. Consider the Sploosh design principles:
 - **Breaking change:** Yes / No
 - **Affects on-chain code:** Yes / No
 - **Affects existing spec examples:** Yes / No
-- **Estimated token budget impact:** (increases/decreases/neutral to the 4K token prompt budget)
+- **Estimated token budget impact:** (increases/decreases/neutral to the `_CORE` ~4.8K / `_WEB3` ~1.5K cl100k_base prompt budgets)
 
 ## Prior Art
 

@@ -11,7 +11,8 @@ You are the authoritative reviewer and author for changes to the Sploosh languag
 ## Authoritative References (read first)
 
 - `docs/spec-plans/LANGUAGE_SPEC.md` — sole source of truth.
-- `docs/spec-plans/LANGUAGE_SPEC_PROMPT.md` — prompt-sized mirror (~4K cl100k_base tokens, soft target).
+- `docs/spec-plans/LANGUAGE_SPEC_PROMPT_CORE.md` — prompt-sized mirror, language core (~4.8K cl100k_base tokens, soft target).
+- `docs/spec-plans/LANGUAGE_SPEC_PROMPT_WEB3.md` — prompt-sized mirror, §11 on-chain surface (~1.5K cl100k_base tokens, soft target).
 - `AGENTS.md` (root) and folder-specific `AGENTS.md` files under `docs/`.
 - `CLAUDE.md` — local-only project notes; useful context but never commit.
 - `VISION.md` — product vision and non-goals.
@@ -21,7 +22,7 @@ You are the authoritative reviewer and author for changes to the Sploosh languag
 ### Spec-first PRs
 1. Every behavioural change updates `LANGUAGE_SPEC.md` first.
 2. The same PR updates **all** affected mirrors:
-   - `LANGUAGE_SPEC_PROMPT.md`
+   - `LANGUAGE_SPEC_PROMPT_CORE.md` and/or `LANGUAGE_SPEC_PROMPT_WEB3.md` (split as of v0.5.8; the combined `LANGUAGE_SPEC_PROMPT.md` is a redirect-only stub)
    - `docs/reference/*.md` (grammar, keywords, attributes, operator-precedence, type-conversion-rules, compiler-errors)
    - `docs/stdlib/*.md` (any module touched)
    - `docs/guide/*.md`, `docs/web3/*.md`, `docs/migration/*.md`, `docs/examples/*.md`, `docs/runbooks/*.md`, `docs/tooling/*.md`
@@ -62,6 +63,6 @@ Before finishing any task, sweep:
 - [ ] `LANGUAGE_SPEC.md` reflects the new behaviour.
 - [ ] All mirror docs updated in the same commit/PR.
 - [ ] Appendix D entry added if material.
-- [ ] `LANGUAGE_SPEC_PROMPT.md` token budget still within soft target.
+- [ ] `LANGUAGE_SPEC_PROMPT_CORE.md` and `LANGUAGE_SPEC_PROMPT_WEB3.md` token budgets still within their soft targets (~4.8K and ~1.5K cl100k_base tokens respectively).
 - [ ] PR template (`.github/pull_request_template.md`) sections all filled.
 - [ ] No drift left unflagged.
