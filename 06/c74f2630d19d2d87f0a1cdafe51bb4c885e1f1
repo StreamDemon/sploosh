@@ -1,0 +1,28 @@
+docs/web3/cross-contract-calls.md
+  s_19fff6f9be03f4::t_c555ecf896b07b 78-81
+docs/spec-plans/LANGUAGE_SPEC.md
+  s_19fff6f9be03f4::t_6f939dddc8355b 3652
+  s_19fff6f9be03f4::t_b73d8fca5612ad 3685
+  s_19fff6f9be03f4::t_80df46e3942c1a 3160-3165
+  s_19fff6f9be03f4::t_1aef9f3b36fdb1 4651
+docs/stdlib/chain.md
+  s_19fff6f9be03f4::t_94418ac10244e1 52-56
+docs/spec-plans/LANGUAGE_SPEC_PROMPT_WEB3.md
+  s_19fff6f9be03f4::t_e34ee64497b57f 46
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "06c74f2630d19d2d87f0a1cdafe51bb4c885e1f1",
+  "prompts": {},
+  "sessions": {
+    "s_19fff6f9be03f4": {
+      "agent_id": {
+        "tool": "droid",
+        "id": "9ffc71d2-f425-4a9c-9f08-f87e6abdbe33",
+        "model": "custom:claude-opus-4-7-0"
+      },
+      "human_author": "StreamDemon <revenantpulse@gmail.com>"
+    }
+  }
+}
