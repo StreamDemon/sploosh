@@ -20,6 +20,7 @@ None / Section X — ...
 - [ ] Documentation updated in relevant `docs/` pages
 - [ ] Tests added or updated
 - [ ] All build targets still compile (if applicable)
+- [ ] Spec-only PR (skip Build Targets section if checked)
 
 ## Build Targets Tested
 

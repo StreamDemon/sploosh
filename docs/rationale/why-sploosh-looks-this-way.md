@@ -51,7 +51,7 @@ Layer-duplication and looping say the same thing from different directions: reas
 
 This rationalizes:
 
-- **§1.7 Spec fits in a prompt** — compactness is not only an ergonomic goal. The less budget a model spends encoding Sploosh's quirks (early layers) and decoding them back (late layers), the more of its middle-layer passes remain for the actual problem. A prompt-sized spec is, mechanistically, a reasoning-budget argument.
+- **§1.7 Spec density** — compactness is not only an ergonomic goal. The less budget a model spends encoding Sploosh's quirks (early layers) and decoding them back (late layers), the more of its middle-layer passes remain for the actual problem. The post-v0.5.9 framing of principle 7 — attention quality, prompt portability across smaller and on-device models, and per-token economics at ecosystem scale — is, mechanistically, a reasoning-budget argument: tighter reference text translates to more middle-layer passes spent on the user's task rather than on absorbing the language definition. Frontier 1M+ context windows do not relax this; they make the gap between "fits in context" and "occupies attention well" the binding constraint.
 - **Zero tokenizer ambiguity (§2, §3)** — the same argument at the token level. The fewer middle passes it takes to even *identify* the token stream's structure, the more are left for semantics.
 
 ### Structure over narration
@@ -64,7 +64,7 @@ A candidate principle worth discussing — not proposed here as a change to §1,
 
 ## What this does *not* argue
 
-- **Not a claim of optimality.** Three research threads pointing the same direction as Sploosh's defaults is evidence of good taste, not proof of correctness. Specific thresholds — how compact is "prompt-sized", which exact tokens count as "familiar" — remain empirical calibration.
+- **Not a claim of optimality.** Three research threads pointing the same direction as Sploosh's defaults is evidence of good taste, not proof of correctness. Specific thresholds — how tight the per-file token budgets in §1 principle 7 should be, which exact tokens count as "familiar" — remain empirical calibration.
 - **Not a claim that surface form is irrelevant.** The opposite. Early and late layers do meaningful work; "format-agnostic middle" means only that the *middle* ignores surface form. Because reasoning lives in the middle, surface form matters most at the edges — which is precisely where Sploosh intervenes.
 - **Not a commitment to any specific architecture.** Sploosh does not depend on loop-LLMs, on any particular model family, or on the Platonic hypothesis being strongly true. It only requires that some version of these findings holds. The convergence of three independent threads suggests it does.
 - **Not tool guidance.** These findings say nothing about editor integrations, build systems, or package management. Those stand on their own rationale.

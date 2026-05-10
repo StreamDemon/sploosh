@@ -5,8 +5,16 @@ updates:
     schedule:
       interval: "weekly"
     commit-message:
-      prefix: "ci"
-      include: "scope"
+      prefix: ""
+    labels:
+      - "ci"
+      - "dependencies"
+  - package-ecosystem: "pip"
+    directory: "/scripts"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: ""
     labels:
       - "ci"
       - "dependencies"
