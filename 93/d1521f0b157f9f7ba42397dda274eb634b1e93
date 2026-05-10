@@ -1,0 +1,21 @@
+scripts/check_prompt_budget.py
+  s_96b9422c55950b::t_472362f456b2e5 53-57
+.github/dependabot.yml
+  s_96b9422c55950b::t_48da324b0065c8 1-12
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "93d1521f0b157f9f7ba42397dda274eb634b1e93",
+  "prompts": {},
+  "sessions": {
+    "s_96b9422c55950b": {
+      "agent_id": {
+        "tool": "droid",
+        "id": "ee2c4ffa-9bb3-4a21-b051-3d850638183a",
+        "model": "custom:claude-opus-4-7-0"
+      },
+      "human_author": "StreamDemon <revenantpulse@gmail.com>"
+    }
+  }
+}
