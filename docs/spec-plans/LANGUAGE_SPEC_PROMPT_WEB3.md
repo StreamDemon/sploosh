@@ -1,4 +1,4 @@
-# SPLOOSH Quick Reference — Web3 (v0.5.8) — LLM System Prompt Edition
+# SPLOOSH Quick Reference — Web3 (v0.5.10) — LLM System Prompt Edition
 
 Sploosh on-chain surface (§11). Native EVM and SVM (Solana SBF) targets.
 
@@ -43,7 +43,7 @@ extern onchain mod token {
 }
 let bal = chain::call(addr, token::balance_of, user)?;  // bal: u256; chain::call returns Result<T, ChainError> and `?` unwraps T
 ```
-Sync on EVM (lowers to `CALL`). Solidity ABI for argument/return encoding. `?` propagates `ChainError::Reverted { data: Vec<u8> }` (revert data bounded by `RETURNDATACOPY`, allocated in caller's frame — same as Solidity). `ChainError = { Reverted, OutOfGas, Reentrancy, InvalidTarget, DecodingError }`. No delegatecall in v0.4.x. SVM: CPI lowering, concrete ABI deferred. **Distinct from `extern "C"` (§4.9)** — different calling convention, safety model, and error surface; not interchangeable.
+Sync on EVM (lowers to `CALL`). Solidity ABI for argument/return encoding. `?` propagates `ChainError::Reverted { data: Vec<u8> }` (revert data bounded by `RETURNDATACOPY`, allocated in caller's frame — same as Solidity). `ChainError = { Reverted, OutOfGas, Reentrancy, InvalidTarget, DecodingError }`, lives at `std::chain::ChainError`, prelude-imported. No delegatecall in v0.4.x. SVM: CPI lowering, concrete ABI deferred. **Distinct from `extern "C"` (§4.9)** — different calling convention, safety model, and error surface; not interchangeable.
 
 ## Gas / Compute Units (§11.7a)
 Target-pluggable. **EVM**: gas; `ctx::gas_remaining() -> u256` EVM-only; `#[gas_limit(N)]` EVM-only advisory in ABI metadata (runtime OOG from VM, not annotation); costs per active hard fork's EIPs. **SVM**: compute units; `ctx::compute_units_remaining() -> u64` SVM-only; `#[gas_limit]` compile error on SVM. **Native/wasm**: all three are compile errors. **OOG → transaction revert**: all storage mutations and emitted events unwound; revert is transaction-wide and **unaffected by per-function attributes including `@reentrant`** — guard flag is unwound on revert, so failed calls cannot leave it stuck.
