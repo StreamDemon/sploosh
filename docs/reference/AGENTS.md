@@ -46,7 +46,7 @@ rg -n -A 3 "send" docs/reference/keywords.md docs/spec-plans/LANGUAGE_SPEC.md
 
 - `as` is **numeric-only** (§3). Reference must not imply otherwise.
 - Lifetimes use single-source elision; multi-source ones must be explicit. Reference must mirror §4 wording.
-- The keyword list is **exactly 39** (§2.3). Adding a keyword is a spec-level decision and ripples into `keywords.md`, the EBNF, and the lexer chapter.
+- The keyword list is **exactly 44: 36 reserved + 8 contextual** (§2.3). Adding a keyword — reserved or contextual — is a spec-level decision and ripples into `keywords.md`, the EBNF, and the lexer chapter.
 
 ## Pre-PR Checks
 
@@ -54,6 +54,6 @@ rg -n -A 3 "send" docs/reference/keywords.md docs/spec-plans/LANGUAGE_SPEC.md
 # Confirm spec mirror was also touched
 git diff --name-only main...HEAD | findstr "spec-plans"
 
-# Spot-check the count of keywords (must equal 39 — §2.3)
+# Spot-check the count of keywords (must equal 44 — §2.3: 36 reserved + 8 contextual)
 rg -c '^\| `' docs/reference/keywords.md
 ```
