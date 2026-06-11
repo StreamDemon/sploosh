@@ -1,0 +1,22 @@
+docs/spec-plans/LANGUAGE_SPEC_PROMPT_WEB3.md
+  s_c088730cf554db::t_4d8256cd6ca738 24-25
+docs/spec-plans/LANGUAGE_SPEC_PROMPT_CORE.md
+  s_c088730cf554db::t_5b8fc475718eae 163
+  s_c088730cf554db::t_7bbafd497876ca 14
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "dcce07968c39ad04f7e7a10fbd7e42d874acd147",
+  "prompts": {},
+  "sessions": {
+    "s_c088730cf554db": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "518ec5d7-53a7-40b7-a819-9225dc80f0e3",
+        "model": "claude-fable-5"
+      },
+      "human_author": "StreamDemon <revenantpulse@gmail.com>"
+    }
+  }
+}
