@@ -1,0 +1,20 @@
+docs/reference/AGENTS.md
+  s_c088730cf554db::t_7d99b24cfdbc37 57
+  s_c088730cf554db::t_a56aa6f800689c 49
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "35e274ed9c33efd8c49661cb391805eed93c4d90",
+  "prompts": {},
+  "sessions": {
+    "s_c088730cf554db": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "518ec5d7-53a7-40b7-a819-9225dc80f0e3",
+        "model": "claude-fable-5"
+      },
+      "human_author": "StreamDemon <revenantpulse@gmail.com>"
+    }
+  }
+}
