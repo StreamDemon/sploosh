@@ -11,20 +11,21 @@ program        = { item } ;
 item           = [ directives ] item_kind ;
 item_kind      = fn_def | struct_def | enum_def | trait_def
                | impl_block | mod_def | use_stmt | actor_def
-               | onchain_mod | const_def | type_alias | extern_block ;
+               | onchain_mod | event_def | const_def | type_alias | extern_block ;
 
-fn_def         = [ attrs ] [ "pub" ] [ "async" ] "fn" IDENT [ generics ] "(" params ")"
-                 [ "->" type ] block ;
-params         = [ param { "," param } ] ;
+fn_def         = [ attrs ] [ "pub" ] [ "offchain" ] [ "async" ] "fn" IDENT [ generics ]
+                 "(" params ")" [ "->" type ] block ;
+params         = [ ( receiver | param ) { "," param } ] ;
+receiver       = [ "&" [ "mut" ] ] "self" ;
 param          = IDENT ":" type ;
 
 struct_def     = [ attrs ] [ "pub" ] "struct" IDENT [ generics ] "{" fields "}" ;
 fields         = field { "," field } [ "," ] ;
-field          = [ "pub" ] IDENT ":" type ;
+field          = [ directives ] [ "pub" ] IDENT ":" type ;
 
 enum_def       = [ attrs ] [ "pub" ] "enum" IDENT [ generics ] "{" variants "}" ;
 variants       = variant { "," variant } [ "," ] ;
-variant        = IDENT [ "(" types ")" | "{" fields "}" ] ;
+variant        = [ directives ] IDENT [ "(" types ")" | "{" fields "}" ] ;
 
 trait_def      = [ "pub" ] "trait" IDENT [ generics ] [ ":" bounds ] "{" { trait_item } "}" ;
 trait_item     = fn_sig ( block | ";" ) | "type" IDENT [ ":" bounds ] ";" ;
@@ -32,20 +33,22 @@ trait_item     = fn_sig ( block | ";" ) | "type" IDENT [ ":" bounds ] ";" ;
 impl_block     = "impl" [ generics ] [ trait_ref "for" ] type "{" { impl_item } "}" ;
 impl_item      = fn_def | "type" IDENT "=" type ";" ;
 
-actor_def      = [ attrs ] "actor" IDENT [ generics ] "{" { actor_item } "}" ;
-actor_item     = field_def | fn_def ;
+actor_def      = [ attrs ] "actor" IDENT [ generics ] "{" [ fields ] { fn_def } "}" ;
+                 (* state fields first, comma-separated with optional trailing
+                    comma exactly as struct fields; handler fns follow *)
 
 mod_def        = [ "pub" ] "mod" IDENT ( ";" | "{" { item } "}" ) ;
-use_stmt       = "use" path [ "::" "{" idents "}" ] ";" ;
+use_stmt       = [ "pub" ] "use" path [ "::" "{" idents "}" ] ";" ;
 
 onchain_mod    = "onchain" "mod" IDENT "{" { onchain_item } "}" ;
-onchain_item   = storage_block | fn_def | event_def ;
+onchain_item   = [ directives ] ( storage_block | fn_def | event_def ) ;
 storage_block  = "storage" "{" fields "}" ;
 
-extern_block   = "extern" STRING_LIT "{" { extern_fn } "}" ;
-extern_fn      = "fn" IDENT "(" params ")" [ "->" type ] ";" ;
+extern_block   = "extern" extern_target "{" { extern_fn } "}" ;
+extern_target  = STRING_LIT | "onchain" "mod" IDENT ;
+extern_fn      = [ "pub" ] "fn" IDENT "(" params ")" [ "->" type ] ";" ;
 
-type           = prim_type | IDENT [ generics ] | "&" [ lifetime ] [ "mut" ] type
+type           = prim_type | "Self" | IDENT [ generics ] | "&" [ lifetime ] [ "mut" ] type
                | "[" type ";" expr "]" | "[" type "]"
                | "(" [ type { "," type } ] ")" | "fn" "(" types ")" "->" type
                | "dyn" IDENT [ generics ] ;
@@ -63,24 +66,36 @@ bounds         = bound { "+" bound } ;
 bound          = IDENT [ generics ] | lifetime ;
 
 block          = "{" { statement } [ expr ] "}" ;
-statement      = let_stmt | expr_stmt | return_stmt | emit_stmt ;
+statement      = let_stmt | expr_stmt | return_stmt | emit_stmt
+               | send_stmt | break_stmt | continue_stmt ;
 let_stmt       = "let" [ "mut" ] pattern [ ":" type ] "=" expr ";" ;
 const_def      = [ "pub" ] "const" IDENT ":" type "=" expr ";" ;
 return_stmt    = "return" [ expr ] ";" ;
 emit_stmt      = "emit" IDENT "{" field_inits "}" ";" ;
+send_stmt      = "send" expr ";" ;
+                 (* "send" is contextual (§2.3.2, §2.7); expr must be a
+                    method call on a handle — §8.2 *)
+break_stmt     = "break" ";" ;
+continue_stmt  = "continue" ";" ;
 expr_stmt      = expr ";" ;
 
-expr           = literal | IDENT | path_expr
+expr           = literal | "self" | IDENT | path_expr
                | expr "." IDENT | expr "(" args ")"  | expr "[" expr "]"
-               | expr BINOP expr | UNOP expr | expr "?" | expr "as" type
+               | expr BINOP expr | UNOP expr | "&" [ "mut" ] expr
+               | expr "?" | expr "as" type
                | if_expr | if_let_expr | match_expr | block | closure
-               | expr "|>" expr
+               | pipe_expr
                | "spawn" expr | "spawn" "async" block
-               | "send" expr | "recv" expr
                | expr ".await"
                | select_expr
                | "for" pattern "in" expr block
                | "while" expr block | while_let_expr | "loop" block ;
+
+pipe_expr      = expr "|>" pipe_stage { "|>" pipe_stage } ;
+pipe_stage     = stage_callee [ "(" args ")" ] [ "?" ] ;
+                 (* a stage's trailing "?" applies to the accumulated pipe
+                    application result — see §5.7 and the §2.4 footnote *)
+stage_callee   = path_expr { "." IDENT } | "(" closure ")" ;
 
 if_expr        = "if" expr block [ "else" ( if_expr | if_let_expr | block ) ] ;
 if_let_expr    = "if" "let" pattern "=" expr block [ "else" block ] ;
@@ -92,7 +107,7 @@ select_arm     = pattern "=" expr "=>" ( expr "," | block ) ;
 closure        = [ "move" ] "|" params "|" ( expr | block ) ;
 
 path_expr      = IDENT { "::" IDENT } ;
-path           = [ "crate" | "super" | "self" ] { "::" IDENT } ;
+path           = ( "crate" | "super" | "self" | IDENT ) { "::" IDENT } ;
 args           = [ expr { "," expr } [ "," ] ] ;
 
 BINOP          = "+" | "-" | "*" | "/" | "%"
@@ -101,8 +116,8 @@ BINOP          = "+" | "-" | "*" | "/" | "%"
                | ".." | "..=" ;
 UNOP           = "!" | "-" ;
 
-pattern        = "_" | literal | IDENT | [ "ref" ] IDENT
-               | IDENT "(" patterns ")" | IDENT "{" field_pats [ ".." ] "}"
+pattern        = "_" | literal | [ "ref" ] IDENT | path_expr
+               | path_expr "(" patterns ")" | path_expr "{" field_pats [ ".." ] "}"
                | "(" patterns ")" | pattern "|" pattern ;
 patterns       = [ pattern { "," pattern } [ "," ] ] ;
 field_pats     = [ field_pat { "," field_pat } [ "," ] ] ;
@@ -112,8 +127,10 @@ field_init     = IDENT [ ":" expr ] ;
 idents         = IDENT { "," IDENT } ;
 
 fn_sig         = [ "pub" ] [ "async" ] "fn" IDENT [ generics ] "(" params ")" [ "->" type ] ;
-field_def      = [ "pub" ] IDENT ":" type ;
-event_def      = [ attrs ] "enum" IDENT "{" variants "}" ;
+event_def      = [ attrs ] [ "onchain" ] "enum" IDENT "{" variants "}" ;
+                 (* the "onchain" prefix is required when the event enum
+                    appears as a top-level item (§11.5) and optional inside
+                    an "onchain mod", where the context already marks it *)
 
 literal        = INT_LIT [ type_suffix ] | FLOAT_LIT [ type_suffix ]
                | STRING_LIT | CHAR_LIT
@@ -137,7 +154,9 @@ IDENT          = ASCII_ALPHA_US { ASCII_ALNUM_US } ;
 ASCII_ALPHA_US = "A" ... "Z" | "a" ... "z" | "_" ;
 ASCII_ALNUM_US = ASCII_ALPHA_US | DIGIT ;
 
-(* Keywords take precedence over IDENT — see LANGUAGE_SPEC.md §2.3 and §2.7. *)
+(* Reserved keywords (§2.3.1) take precedence over IDENT. Contextual
+   keywords (§2.3.2) match IDENT everywhere outside their defined keyword
+   positions — see §2.7 for the disambiguation mechanism. *)
 
 (* Lifetime annotations *)
 lifetime       = "'" IDENT ;

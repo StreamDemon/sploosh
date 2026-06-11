@@ -11,7 +11,7 @@ Per-topic quick-references derived from the spec. Used by IDE-style lookups and 
 | File | Mirrors |
 |---|---|
 | `grammar.md` | `LANGUAGE_SPEC.md` §16 (EBNF) |
-| `keywords.md` | §2.3 (39 keywords) |
+| `keywords.md` | §2.3 (44 keywords: 36 reserved + 8 contextual) |
 | `attributes.md` | §12 (`@test`, `@derive`, `@inline`, `@error`, `@payable`, `@reentrant`, `@supervisor`, `@mailbox`, `@overflow`, `@fast_math`) |
 | `operator-precedence.md` | §2.4 |
 | `type-conversion-rules.md` | §3 / §4 (`as` rules) |

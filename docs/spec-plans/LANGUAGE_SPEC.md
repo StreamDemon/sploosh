@@ -1,4 +1,4 @@
-# SPLOOSH Language Specification v0.5.10-draft
+# SPLOOSH Language Specification v0.5.11-draft
 
 > **AI-Native · Systems-Grade · Web2/Web3 Dual-Target**
 >
@@ -35,7 +35,12 @@ Source files are UTF-8. All keywords, operators, and identifiers use ASCII only.
 
 Block comments are intentionally omitted. One way to comment.
 
-### 2.3 Keywords (39 total)
+### 2.3 Keywords (44 total: 36 reserved + 8 contextual)
+
+#### 2.3.1 Reserved keywords (36)
+
+A reserved keyword is always tokenized as a keyword and can never be used as an
+identifier, in any position.
 
 **Declarations:**
 `fn` `let` `const` `type` `struct` `enum` `trait` `impl` `mod` `use` `pub` `extern`
@@ -47,13 +52,34 @@ Block comments are intentionally omitted. One way to comment.
 `self` `Self` `true` `false` `as`
 
 **Concurrency:**
-`actor` `send` `recv` `spawn` `async` `await` `select`
+`actor` `spawn` `async` `await` `select`
 
 **Closures:**
 `move`
 
 **Web3:**
-`onchain` `offchain` `storage` `emit`
+`onchain` `offchain` `emit`
+
+#### 2.3.2 Contextual keywords (8)
+
+`send` `recv` `storage` `mut` `dyn` `ref` `crate` `super`
+
+A **contextual keyword** lexes as a keyword only in its defined syntactic
+position(s); everywhere else the same spelling is an ordinary identifier. This
+is what lets the spec's own APIs use these spellings as method and module names
+(`tx.send(...)`, `rx.recv()`, `storage::get(...)`) without renames. The
+disambiguation mechanism is defined in §2.7.
+
+| Keyword | Keyword position(s) | Identifier everywhere else — e.g. |
+|---|---|---|
+| `send` | First token of a **send-statement**: `send handle.method(args);` (§8.2, §16 `send_stmt`) | `tx.send(...)` (§8.5), `contract.send(...)` (§15), `f(send)` |
+| `recv` | None in the current spec. Reserved contextually for a possible future receive construct. | `rx.recv()` (§8.5, §8.6 select arms) |
+| `storage` | Block head of a storage block inside an `onchain mod`: `storage { ... }` (§11.1, §16 `storage_block`) | `storage::get(...)` / `storage::set(...)` paths (§11.1, §13.0) |
+| `mut` | After `&` in a reference type or borrow (`&mut T`, `&mut self`), and immediately after `let` (`let mut x = ...`) | any other position |
+| `dyn` | Type position, before a trait reference: `dyn Trait`, `Box<dyn Trait>` (§3.9) | any other position |
+| `ref` | Pattern-binding position: `ref name` inside a pattern (§3.7) | any other position |
+| `crate` | Path head: `crate::models::User` (§10) | any non-path-head position |
+| `super` | Path head: `super::sibling` (§10) | any non-path-head position |
 
 ### 2.4 Operators (precedence high → low)
 
@@ -75,6 +101,12 @@ Block comments are intentionally omitted. One way to comment.
 | 2    | `=`          | Assignment                 | Right |
 | 1    | `=>`         | Match arm / Lambda         | Right |
 | 0    | `->`         | Return type annotation     | Right |
+
+> **Pipe-stage `?` footnote.** The postfix `?` row above governs `?` in ordinary
+> (non-pipe) expression position — `expr?` outside a pipe chain is unchanged at
+> precedence 12. Inside a pipe chain, a trailing `?` on a stage is consumed by
+> the pipe-stage grammar production (§16 `pipe_stage`) rather than resolved by
+> this table: `expr |> f?` parses as `(expr |> f)?`, i.e. `f(expr)?`. See §5.7.
 
 ### 2.5 Sigils
 
@@ -205,9 +237,31 @@ IDENT = [A-Za-z_] [A-Za-z0-9_]*
 Identifiers are ASCII-only (per §2.1). Unicode identifiers are not supported — the
 design goal is zero tokenizer ambiguity and maximum LLM accuracy.
 
-**Keyword priority.** If an identifier matches any keyword in §2.3, it is tokenized
-as that keyword, not as an identifier. Raw identifiers (`r#keyword`) are deferred to
-a future version.
+**Keyword priority.** If an identifier matches a **reserved** keyword (§2.3.1), it
+is always tokenized as that keyword, never as an identifier. A **contextual**
+keyword (§2.3.2) is a keyword only when it appears in one of its defined syntactic
+positions; in every other position the same spelling is an ordinary identifier.
+Concretely: the lexer emits one token kind for each contextual-keyword spelling,
+and the **parser** decides keyword-vs-identifier purely from syntactic position —
+no lexer feedback, no semantic lookahead. Wherever the §16 grammar uses the
+terminal `IDENT`, a contextual-keyword spelling outside its keyword position(s)
+matches `IDENT`. Raw identifiers (`r#keyword`) are deferred to a future version.
+
+**Statement-head `send` disambiguation.** An expression statement may also begin
+with an identifier, so `send` at the head of a statement needs one deterministic
+rule: **`send` as the first token of a statement, followed by any token that can
+begin an expression, always opens a send-statement** (§16 `send_stmt`); the parser
+then requires the operand to be a method-call expression (`handle.method(args)`,
+§8.2) and anything else is a parse error inside the send-statement production. A
+binding named `send` therefore cannot appear bare at statement head — write
+`(send).method();` (the statement now begins with `(`) or, better, pick another
+name. In every non-statement-head position (`tx.send(...)`, `x = send;`,
+`f(send)`, `.send` after a dot), `send` is an ordinary identifier and no
+disambiguation arises. The other contextual keywords need no parser rule of this
+shape: their keyword positions (`storage` block head inside `onchain mod`, `mut`
+after `&`/`let`, `dyn` in type position, `ref` in pattern-binding position,
+`crate`/`super` at path head) never overlap with an identifier position, and
+`recv` has no keyword position at all in the current spec.
 
 **The wildcard binding.** A single underscore `_` is not a regular identifier — it is
 a wildcard binding that discards its value and does not introduce a name. Each `_` in
@@ -1224,9 +1278,14 @@ When used with `.iter()`, `|> method(args)` desugars to `.method(args)`.
 
 ### 5.7 Pipe + Error Propagation Rules
 
-The `?` operator (precedence 12) binds tighter than `|>` (precedence 8). When pipe
-chains involve `Result<T, E>` returns, use `?` on each fallible stage to unwrap
-before piping to the next:
+Inside a pipe chain, `?` is **not** resolved by operator precedence — it is part
+of the pipe-stage grammar itself. A pipe expression is `expr { "|>" pipe_stage }`
+where each stage is a path or call optionally followed by `?` (§16 `pipe_stage`),
+and a stage's trailing `?` applies to the **accumulated pipe application result**
+— everything piped so far, including the current stage's call. Outside pipe
+chains, `?` remains the ordinary postfix operator at precedence 12 (§2.4); only
+the stage-trailing position is special. When pipe chains involve `Result<T, E>`
+returns, use `?` on each fallible stage to unwrap before piping to the next:
 
 ```sploosh
 // CORRECT: ? unwraps each Result, then pipes the Ok value forward
@@ -1245,7 +1304,9 @@ let report = raw_input
 ```
 
 **Rules:**
-- `expr |> f?` is parsed as `(expr |> f)?`, which means `f(expr)?`.
+- `expr |> f?` is parsed as `(expr |> f)?`, which means `f(expr)?` — the `?`
+  belongs to the pipe stage `f` (§16 `pipe_stage`), not to `f` alone, and fires
+  after the pipe application.
 - When all functions return `Result`, use `?` on every stage.
 - When functions return plain values (non-Result), omit `?`.
 - Mixed chains:
@@ -1872,7 +1933,7 @@ actor Cache<K: Hash + Eq + Send, V: Clone + Send> {
 }
 ```
 
-**EBNF:** `actor_def = [ attrs ] "actor" IDENT [ generics ] "{" { actor_item } "}" ;`
+**EBNF:** `actor_def = [ attrs ] "actor" IDENT [ generics ] "{" [ fields ] { fn_def } "}" ;`
 
 ### 8.4 Spawning and Messaging
 
@@ -4472,20 +4533,21 @@ program        = { item } ;
 item           = [ directives ] item_kind ;
 item_kind      = fn_def | struct_def | enum_def | trait_def
                | impl_block | mod_def | use_stmt | actor_def
-               | onchain_mod | const_def | type_alias | extern_block ;
+               | onchain_mod | event_def | const_def | type_alias | extern_block ;
 
-fn_def         = [ attrs ] [ "pub" ] [ "async" ] "fn" IDENT [ generics ] "(" params ")"
-                 [ "->" type ] block ;
-params         = [ param { "," param } ] ;
+fn_def         = [ attrs ] [ "pub" ] [ "offchain" ] [ "async" ] "fn" IDENT [ generics ]
+                 "(" params ")" [ "->" type ] block ;
+params         = [ ( receiver | param ) { "," param } ] ;
+receiver       = [ "&" [ "mut" ] ] "self" ;
 param          = IDENT ":" type ;
 
 struct_def     = [ attrs ] [ "pub" ] "struct" IDENT [ generics ] "{" fields "}" ;
 fields         = field { "," field } [ "," ] ;
-field          = [ "pub" ] IDENT ":" type ;
+field          = [ directives ] [ "pub" ] IDENT ":" type ;
 
 enum_def       = [ attrs ] [ "pub" ] "enum" IDENT [ generics ] "{" variants "}" ;
 variants       = variant { "," variant } [ "," ] ;
-variant        = IDENT [ "(" types ")" | "{" fields "}" ] ;
+variant        = [ directives ] IDENT [ "(" types ")" | "{" fields "}" ] ;
 
 trait_def      = [ "pub" ] "trait" IDENT [ generics ] [ ":" bounds ] "{" { trait_item } "}" ;
 trait_item     = fn_sig ( block | ";" ) | "type" IDENT [ ":" bounds ] ";" ;
@@ -4493,21 +4555,22 @@ trait_item     = fn_sig ( block | ";" ) | "type" IDENT [ ":" bounds ] ";" ;
 impl_block     = "impl" [ generics ] [ trait_ref "for" ] type "{" { impl_item } "}" ;
 impl_item      = fn_def | "type" IDENT "=" type ";" ;
 
-actor_def      = [ attrs ] "actor" IDENT [ generics ] "{" { actor_item } "}" ;
-actor_item     = field_def | fn_def ;
+actor_def      = [ attrs ] "actor" IDENT [ generics ] "{" [ fields ] { fn_def } "}" ;
+                 (* state fields first, comma-separated with optional trailing
+                    comma exactly as struct fields; handler fns follow *)
 
 mod_def        = [ "pub" ] "mod" IDENT ( ";" | "{" { item } "}" ) ;
-use_stmt       = "use" path [ "::" "{" idents "}" ] ";" ;
+use_stmt       = [ "pub" ] "use" path [ "::" "{" idents "}" ] ";" ;
 
 onchain_mod    = "onchain" "mod" IDENT "{" { onchain_item } "}" ;
-onchain_item   = storage_block | fn_def | event_def ;
+onchain_item   = [ directives ] ( storage_block | fn_def | event_def ) ;
 storage_block  = "storage" "{" fields "}" ;
 
 extern_block   = "extern" extern_target "{" { extern_fn } "}" ;
 extern_target  = STRING_LIT | "onchain" "mod" IDENT ;
 extern_fn      = [ "pub" ] "fn" IDENT "(" params ")" [ "->" type ] ";" ;
 
-type           = prim_type | IDENT [ generics ] | "&" [ lifetime ] [ "mut" ] type
+type           = prim_type | "Self" | IDENT [ generics ] | "&" [ lifetime ] [ "mut" ] type
                | "[" type ";" expr "]" | "[" type "]"
                | "(" [ type { "," type } ] ")" | "fn" "(" types ")" "->" type
                | "dyn" IDENT [ generics ] ;
@@ -4525,24 +4588,36 @@ bounds         = bound { "+" bound } ;
 bound          = IDENT [ generics ] | lifetime ;
 
 block          = "{" { statement } [ expr ] "}" ;
-statement      = let_stmt | expr_stmt | return_stmt | emit_stmt ;
+statement      = let_stmt | expr_stmt | return_stmt | emit_stmt
+               | send_stmt | break_stmt | continue_stmt ;
 let_stmt       = "let" [ "mut" ] pattern [ ":" type ] "=" expr ";" ;
 const_def      = [ "pub" ] "const" IDENT ":" type "=" expr ";" ;
 return_stmt    = "return" [ expr ] ";" ;
 emit_stmt      = "emit" IDENT "{" field_inits "}" ";" ;
+send_stmt      = "send" expr ";" ;
+                 (* "send" is contextual (§2.3.2, §2.7); expr must be a
+                    method call on a handle — §8.2 *)
+break_stmt     = "break" ";" ;
+continue_stmt  = "continue" ";" ;
 expr_stmt      = expr ";" ;
 
-expr           = literal | IDENT | path_expr
+expr           = literal | "self" | IDENT | path_expr
                | expr "." IDENT | expr "(" args ")"  | expr "[" expr "]"
-               | expr BINOP expr | UNOP expr | expr "?" | expr "as" type
+               | expr BINOP expr | UNOP expr | "&" [ "mut" ] expr
+               | expr "?" | expr "as" type
                | if_expr | if_let_expr | match_expr | block | closure
-               | expr "|>" expr
+               | pipe_expr
                | "spawn" expr | "spawn" "async" block
-               | "send" expr | "recv" expr
                | expr ".await"
                | select_expr
                | "for" pattern "in" expr block
                | "while" expr block | while_let_expr | "loop" block ;
+
+pipe_expr      = expr "|>" pipe_stage { "|>" pipe_stage } ;
+pipe_stage     = stage_callee [ "(" args ")" ] [ "?" ] ;
+                 (* a stage's trailing "?" applies to the accumulated pipe
+                    application result — see §5.7 and the §2.4 footnote *)
+stage_callee   = path_expr { "." IDENT } | "(" closure ")" ;
 
 if_expr        = "if" expr block [ "else" ( if_expr | if_let_expr | block ) ] ;
 if_let_expr    = "if" "let" pattern "=" expr block [ "else" block ] ;
@@ -4554,7 +4629,7 @@ select_arm     = pattern "=" expr "=>" ( expr "," | block ) ;
 closure        = [ "move" ] "|" params "|" ( expr | block ) ;
 
 path_expr      = IDENT { "::" IDENT } ;
-path           = [ "crate" | "super" | "self" ] { "::" IDENT } ;
+path           = ( "crate" | "super" | "self" | IDENT ) { "::" IDENT } ;
 args           = [ expr { "," expr } [ "," ] ] ;
 
 BINOP          = "+" | "-" | "*" | "/" | "%"
@@ -4563,8 +4638,8 @@ BINOP          = "+" | "-" | "*" | "/" | "%"
                | ".." | "..=" ;
 UNOP           = "!" | "-" ;
 
-pattern        = "_" | literal | IDENT | [ "ref" ] IDENT
-               | IDENT "(" patterns ")" | IDENT "{" field_pats [ ".." ] "}"
+pattern        = "_" | literal | [ "ref" ] IDENT | path_expr
+               | path_expr "(" patterns ")" | path_expr "{" field_pats [ ".." ] "}"
                | "(" patterns ")" | pattern "|" pattern ;
 patterns       = [ pattern { "," pattern } [ "," ] ] ;
 field_pats     = [ field_pat { "," field_pat } [ "," ] ] ;
@@ -4574,8 +4649,10 @@ field_init     = IDENT [ ":" expr ] ;
 idents         = IDENT { "," IDENT } ;
 
 fn_sig         = [ "pub" ] [ "async" ] "fn" IDENT [ generics ] "(" params ")" [ "->" type ] ;
-field_def      = [ "pub" ] IDENT ":" type ;
-event_def      = [ attrs ] "enum" IDENT "{" variants "}" ;
+event_def      = [ attrs ] [ "onchain" ] "enum" IDENT "{" variants "}" ;
+                 (* the "onchain" prefix is required when the event enum
+                    appears as a top-level item (§11.5) and optional inside
+                    an "onchain mod", where the context already marks it *)
 
 literal        = INT_LIT [ type_suffix ] | FLOAT_LIT [ type_suffix ]
                | STRING_LIT | CHAR_LIT
@@ -4604,7 +4681,9 @@ IDENT          = ASCII_ALPHA_US { ASCII_ALNUM_US } ;
 ASCII_ALPHA_US = "A" ... "Z" | "a" ... "z" | "_" ;
 ASCII_ALNUM_US = ASCII_ALPHA_US | DIGIT ;
 
-(* Keywords take precedence over IDENT — see §2.3 and §2.7. *)
+(* Reserved keywords (§2.3.1) take precedence over IDENT. Contextual
+   keywords (§2.3.2) match IDENT everywhere outside their defined keyword
+   positions — see §2.7 for the disambiguation mechanism. *)
 
 (* Lifetime annotations *)
 lifetime       = "'" IDENT ;
@@ -4667,7 +4746,7 @@ in prose.
 | `match` with `=>` arms | Rust pattern. Exhaustive by default. Deeply trained. |
 | `\|>` pipe operator | Elixir/F# pattern. Eliminates deep nesting. |
 | `?` error propagation | Rust pattern. Single token. Explicit. Universally understood. |
-| `expr \|> f?` = `f(expr)?` | Clear precedence rule. ? always applies to the pipe result. |
+| `expr \|> f?` = `f(expr)?` | Stage-level `?` in the pipe grammar (§5.7, §16 `pipe_stage`). ? always applies to the accumulated pipe result. |
 | Pipe fills first argument | `x \|> f(a)` = `f(x, a)`. No placeholder syntax. Use closures for other positions. |
 | `actor` keyword | Self-documenting English word. Clear semantic meaning. |
 | `Handle<T>` for actor refs | Familiar generic syntax. Clear it's a reference, not the actor. |
@@ -4714,6 +4793,8 @@ in prose.
 | `ChainError` lives at `std::chain::ChainError` and is re-exported from the §13.1 prelude | Stdlib convention places an error type alongside the module that produces it — `chain::call` is the only intrinsic that returns `Result<T, ChainError>`, so `std::chain` is the natural home. The prelude re-export is an ergonomic exception, not a default: cross-contract calls are common enough on the on-chain target that requiring `use std::chain::ChainError;` for every fallible call signature would add friction without information value. The §11.4a definition stays canonical — the prelude entry and the `docs/stdlib/chain.md` page both reference §11.4a rather than duplicating the variant list, so a single edit point covers the type's shape. **Counterfactual considered and rejected**: leave `ChainError` un-prelude'd and require explicit `use std::chain::ChainError;`. Rejected because every on-chain function that calls another contract returns `Result<T, ChainError>` (or a wrapping error that contains it), and the import boilerplate would be unavoidable rather than opt-in. The prelude's existing on-chain-friendly types (`Address`, `u256`) set the precedent — `ChainError` slots in next to them. |
 | `W0010` — `u256` off-chain arithmetic warning is **arithmetic-only** and **warn-by-default** | `u256` is a load-bearing on-chain primitive (Solidity-compatible storage slots, EVM word size, ABI-stable across the chain ecosystem) but a perf footgun off-chain: native and wasm have no 256-bit ALU, so every operator lowers to multi-instruction emulation (~10–50x slower than `u64`). The lint exists to surface this without forbidding the type, because legitimate off-chain uses exist — chain-bridge value plumbing, indexers replaying on-chain math, simulators of contract logic. **Arithmetic-only trigger** (not declarations / parameters / casts / literals) is the locked design: passing `u256` through off-chain code is free at runtime — only the *math* is expensive — and a declaration-firing lint would drown legitimate plumbing in noise that devs would learn to ignore wholesale. **Warn-by-default** (not allow-by-default) because the casual user — exactly the LLM-trained practitioner Sploosh targets — would never think to enable an off-by-default lint, and silent emulation is precisely the kind of correctness-preserving-but-perf-eroding trap that a deeply-trained `u256` muscle from Solidity carries into every off-chain context. The cost-signal needs to be loud at first sight and quiet on consenting demand (`#[allow(W0010)]` at site or module). Counterfactual considered and rejected: fire on declarations. Rejected because chain-bridge code mixing on/off-chain types is exactly the maintainer-aware case the lint should *not* punish; only *doing math* on the off-chain side is the footgun. Cross-references: §3.1 (`u256` type), §4.8 (integer overflow / arithmetic methods), §18.2 (warnings cluster), `docs/reference/compiler-errors.md` (registry row). |
 | Pipe and method-chain forms for iterators are equivalent first-class syntaxes; no style is preferred | Both `vec.iter().map(f).collect()` and `vec.iter() \|> map(f) \|> collect()` lower to the same call sequence under §5.6's pipe rule (`expr \|> method(args)` ≡ `.method(args)`). The equivalence is not iterator-specific — it is the general pipe lowering applied to method calls — so collapsing to a single form would require either removing pipe-on-methods (loses `\|>` consistency with the rest of the language) or removing method-chain-on-`Iter` (loses Rust-trained-model recall and the established `.iter()` idiom). **Counterfactual considered and rejected**: pick one canonical form and lint the other. Rejected because the lowering is genuinely the same expression at the AST level after desugaring, so a stylistic prescription would be enforcing surface syntax for its own sake; LLMs and humans pick the form that reads better in context, and the spec's job is to document the equivalence rather than legislate aesthetics. The community is free to converge on conventions in code style guides over time. |
+| Contextual keywords (8): `send` `recv` `storage` `mut` `dyn` `ref` `crate` `super` — keyword only in defined syntactic position(s), `IDENT` everywhere else | The v0.5.11 grammar audit found the spec's own canonical APIs collide with its reserved-keyword list: `tx.send(...)` / `rx.recv()` (§8.5), `storage::get` / `storage::set` (§11.1, §13.0), and `contract.send(...)` (§15) are all unlexable when `send` / `recv` / `storage` are unconditionally reserved, and `mut` / `dyn` / `ref` / `crate` / `super` were grammar terminals that no keyword list claimed at all. **Contextual machinery chosen over renaming the APIs** because the colliding names are exactly the deeply-trained spellings the language exists to preserve — `tx.send` and `rx.recv` are the universal channel vocabulary across Rust/Go-trained models, and renaming them to dodge the lexer would trade LLM recall (the project's core design currency) for lexer simplicity. The mechanism is parser-side only: the lexer emits one token kind per contextual spelling and the parser decides from syntactic position, with **no lexer feedback** — implementable with one token of lookahead everywhere (statement-head `send` is the only position that needed an explicit disambiguation rule, §2.7). `recv` keeps zero keyword positions today and is held contextual rather than released as a plain identifier so a future receive construct does not need a breaking re-reservation. Keyword accounting becomes 44 = 36 reserved + 8 contextual; the reserved set shrinks (send/recv/storage leave) so the count change is a clarification of what was always true in the examples, not new surface. **Counterfactual considered and rejected**: rename the colliding APIs (channel methods, storage module path). Rejected per above — recall over machinery. |
+| Pipe-stage `?` is a grammar production, not a precedence consequence | The mandated parse `expr \|> f?` ≡ `(expr \|> f)?` was justified in §5.7 by "`?` (12) binds tighter than `\|>` (8)" — which derives exactly the opposite grouping (`expr \|> (f?)`). The parse rule is correct and deeply load-bearing (three spec sites state it; every fallible pipe chain in the docs relies on it), so the **mechanism** was repaired rather than the rule: §16 now derives pipe chains as `expr { "\|>" pipe_stage }` with `pipe_stage = stage_callee [ "(" args ")" ] [ "?" ]`, making the stage-trailing `?` part of the pipe production itself and applying it to the accumulated pipe application result. Outside pipe chains `?` stays an ordinary postfix operator at precedence 12 (§2.4 footnote), so `expr?` semantics are untouched. **Counterfactual considered and rejected**: reorder the §2.4 table so `\|>` binds tighter than `?`. Rejected because postfix-`?`-tighter-than-everything matches Rust's deeply-trained model and the table's relative order is correct for every non-pipe expression; the special case is genuinely the pipe stage, so the grammar — not the global precedence table — is the honest place to encode it. |
 
 ---
 
@@ -4939,6 +5020,7 @@ Source (.sp)
 | v0.4.4 | **On-chain semantics — Cluster C** (§11): closes the four design-heavy gaps that prevented EVM/SVM codegen from starting. **Storage layout** (new §11.1a): target-pluggable abstraction with Solidity-compatible EVM reference realization — sequential `u256` slots in declaration order, Solidity-rule packing within slots, `Map<K, V>` entries at `keccak256(abi.encode(key, map_slot))`, nested maps recurse, `Vec<T>` / `String` with length at slot and data at `keccak256(slot)`, `[T; N]` inline. SVM layout deferred to a future Solana amendment; Sploosh surface stays identical across targets. **Reentrancy guard mechanism** (new §11.3a): runtime per-contract boolean flag set on entry to any non-`@reentrant` `pub` on-chain function and cleared on return (success, error, or revert). Cross-contract re-entry into a guarded function reverts with new error `ChainError::Reentrancy`; `@reentrant` disables the check and the set for that function only. Gas cost is qualitative (one TLOAD + one TSTORE per guarded call on EIP-1153 EVM forks (Cancun+), SLOAD/SSTORE fallback on earlier forks). Explicitly distinguished from §8.10.1 actor `SelfCall` — same word, different layers. **Cross-contract ABI and call semantics** (new §11.4a): new surface syntax `extern onchain mod X { pub fn ...; ... }` declares callee signatures at compile time; `chain::call(addr, callee, args) -> Result<T, ChainError>` blocks synchronously on EVM (lowers to `CALL`), Solidity ABI is the reference argument encoding on EVM, `?` propagates `ChainError::Reverted { data: Vec<u8> }` with revert bytes bounded by `RETURNDATACOPY` semantics. New error enum `ChainError { Reverted, OutOfGas, Reentrancy, InvalidTarget, DecodingError }` added to the on-chain error surface. No delegatecall in v0.4.x (deferred to v0.5.0). SVM divergence via Solana CPI with preserved user-level surface; concrete ABI deferred. **Explicit contrast with `extern "C"` (§4.9)**: both nest under `extern`, but calling conventions, safety models, and error surfaces differ — not interchangeable. **Gas model** (new §11.7a): target-pluggable metering abstraction. EVM references Yellow Paper + active-hard-fork EIP cost tables (Sploosh does not redefine opcode costs); `ctx::gas_remaining() -> u256` EVM-only, `#[gas_limit(N)]` EVM-only advisory in deployed ABI metadata. SVM uses compute units; `ctx::compute_units_remaining() -> u64` SVM-only. All three are compile errors on native and wasm. **Out-of-gas semantics**: transaction-wide revert, all storage mutations and emitted events unwound, and revert is **unaffected by per-function attributes including `@reentrant`** (explicit invariant). Transient-state unwind clears the reentrancy flag on revert, so failed calls cannot leave a contract with its guard stuck set. **`#[indexed]` event field marker** (§11.5, §12.3): up to three indexed fields per event variant on EVM (topic slots 1–3; topic 0 is the signature hash); compile error on more. SVM accepts `#[indexed]` for source-compatibility but treats it as a no-op. **§13.0 intrinsics table**: `ctx::gas_remaining` context column tightened to EVM-only, new row for `ctx::compute_units_remaining` (SVM-only), `chain::call` signature updated to `Result<T, ChainError>`, `storage::*` rows reference §11.1a, `chain::call` row references §11.4a. **§16 grammar**: `extern_block` production extended — `extern_target = STRING_LIT | "onchain" "mod" IDENT` — and `extern_fn` allows optional `pub`. No new keywords (still 40). No new item kinds; `extern onchain mod` is an extern-block variant. **Deferred to v0.5.0**: cross-contract ABI emission artifacts (bytecode + ABI JSON + metadata file), WASM target variants (`wasm32-unknown-unknown` vs `wasm32-wasi`), delegatecall support, SVM storage layout details, SVM CPI concrete ABI, per-call gas forwarding annotation. |
 | v0.5.0 | **Removed the `none` keyword** (§2.3, §16). Per the independent PR #9 review, `none` was reserved in the §2.3 keyword list and appeared as a literal in the §16 grammar `literal` production, but every example, every guide, and the `docs/` tree generally used `None` (the `Option::None` constructor exported from the §13.1 prelude). Lowercase `none` was reserved in two definitional sites and used in zero practical sites — the keyword reservation served no purpose while creating a contradiction with the prelude. Removed from `docs/spec-plans/LANGUAGE_SPEC.md` §2.3 and §16, and from the `docs/reference/keywords.md` and `docs/reference/grammar.md` mirrors. Keyword count: 40→39 (losing `none`). The capitalized `None` — an identifier resolving to `Option::None` via the prelude — is unchanged and remains the sole form for an absent `Option` value. No grammar reshape beyond the deleted alternative; no other sections touched. This amendment opens the v0.5.x cycle with a mechanical correctness fix identified by the PR #9 review (severity Blocker, action L1). |
 | v0.5.1 | **Compiler Diagnostics specification** (new §18). Formalizes the compiler's diagnostic contract as a first-class spec artifact — the highest-leverage missing piece for the AI-native positioning. New §18.1 Diagnostic record defines the canonical field layout (`code`, `severity`, `message`, `primary_span`, `labels`, `children`, `suggested_fixes`, `explanation_url`) that all renderings must preserve. §18.2 Error-code clusters reserves ranges: `E0001–E0999` lexical (A), `E1000–E1099` type/trait/ownership (B), `E1100–E1199` on-chain (C, already in use), `E1200–E1299` actors/concurrency (D), `E1300–E1399` FFI (E), `E1400–E1499` attributes (F), `W0001–W0999` warnings, `L0001–L0999` lints, `E9000+` ICE. §18.3 Suggested-fix applicability adopts rustc's vocabulary verbatim (`MachineApplicable`, `MaybeIncorrect`, `HasPlaceholders`, `Unspecified`) so Rust-trained models recognize the levels. §18.4 Stability contract: code→meaning is frozen on release; retired codes are marked `status: deprecated` with a `superseded_by` pointer and are never reassigned. §18.5 Output formats: `human` (default, rustc-style), `json` (newline-delimited JSON, one record per line, stable field layout with optional `$schema`), `short` (single line per diagnostic, grep-friendly). §18.6 LLM-integration contract: four invariants that hold for every diagnostic in `json` mode — every diagnostic carries a code; `MachineApplicable` fixes are complete (applying them preserves compilability); `primary_span` is always populated (file-less diagnostics use a synthetic `"<cli>"` file); `children` severities are limited to `note` / `help`. Explicit non-commitments: the spec does **not** mandate a hosted URL for `explanation_url` (implementations may leave it `None`) and does **not** commit to a specific JSON Schema artifact for `$schema` (draft-7 emission is a future follow-up). New §17 Design Decisions row documents the format-as-AI-native-lever rationale. **Registry expansion**: `docs/reference/compiler-errors.md` rewritten to distinguish "format" (§18) from "registry" (this file), adds `Cluster` and `Status` columns to the existing E1101–E1109 on-chain rows, and reserves cluster-header placeholders for the A/B/D/E/F/W/L/ICE ranges with TODO entries. Adds a "Growth policy" block (4 rules: registry-first workflow, spec-section anchoring, frozen-on-publish, deprecate-don't-reassign). **Tooling**: `docs/tooling/build-system.md` gains a Compiler Flags subsection documenting `--error-format=<human\|json\|short>` (default `human`) and `--explain <code>` (prints long-form explanation sourced from the local registry, not a network call). No new keywords (39 unchanged). No grammar changes. Closes PR #9 review Blocker U1. **Principle #7 softened** (§1): the 4,000-token claim is now framed as a soft target rather than a hard budget, acknowledging that the PROMPT edition was already 4,077 tokens (cl100k_base) before v0.5.1 and the Diagnostics bullet added ~133 more. This partially addresses review action L8 by tightening the claim to match reality; the stricter CI-enforcement path remains a strategy decision for a future amendment. |
+| v0.5.11 | **Grammar repair — §16 EBNF validated against the spec's own examples** (closes issue #42). A full-docs audit found the §16 grammar had never been derived against the spec's published code; the prose layer was sound but the grammar rejected large portions of canonical Sploosh. **(1) Contextual keywords** (§2.3 restructured, §2.7 mechanism): keyword accounting moves from 39 reserved to **44 total = 36 reserved + 8 contextual** (`send`, `recv`, `storage`, `mut`, `dyn`, `ref`, `crate`, `super`). A contextual keyword lexes as a keyword only in its defined syntactic position(s) and is an ordinary `IDENT` everywhere else — this legalizes `tx.send(...)`, `rx.recv()`, `storage::get`/`storage::set`, and `contract.send(...)` without renaming any API, and finally claims `mut`/`dyn`/`ref`/`crate`/`super`, which were grammar terminals belonging to no keyword category. §2.7 defines the parser-side disambiguation (single token kind per spelling, position decides; statement-head `send` followed by an expression-starting token always opens a send-statement). **(2) Pipe-stage `?` mechanism** (§5.7 rewrite, §2.4 footnote, §16 `pipe_expr`/`pipe_stage`/`stage_callee`): the mandated parse `expr \|> f?` ≡ `(expr \|> f)?` stands, but its old justification ("`?` binds tighter than `\|>`") derived the opposite grouping; the rule is now encoded structurally — each pipe stage optionally carries a trailing `?` that applies to the accumulated pipe application result. Plain `expr?` outside pipes is unchanged at precedence 12. **(3) Receivers, `Self`, `self`** (§16): new `receiver = [ "&" [ "mut" ] ] "self"` as optional first `params` element; `"Self"` added to `type`; `"self"` added to `expr` — impl and actor bodies (`self.state`, `fn init(n: i64) -> Self`, `(&mut self, n: i64)`) now derive. **(4) Statement/grammar gaps closed**: `send_stmt` (send moves from a phantom `"send" expr` expression to a statement production; `"recv" expr` dropped — `recv` has no syntactic use), `break_stmt` / `continue_stmt` (no loop labels — Sploosh has none), `[ "offchain" ]` modifier on `fn_def` (§11.6), `event_def` gains `[ "onchain" ]` prefix (required top-level, optional inside `onchain mod`) and `field`/`variant` gain `[ directives ]` so §11.5's `onchain enum Event { Transfer { #[indexed] from: Address, ... } }` derives verbatim, `use_stmt` gains `[ "pub" ]` (§10.4 re-exports), patterns accept qualified paths (`path_expr` before `(...)`/`{...}` — `Err(AppError::NotFound)`, `Shape::Circle { radius }`), `actor_def` reuses struct `fields` (commas + trailing comma; `actor_item`/`field_def` productions retired), `onchain_item` gains `[ directives ]` (`#[gas_limit(N)]` on on-chain fns), `path` accepts a bare-`IDENT` head (discovered during derivation: `use std::collections::Map;` was previously unparseable because `path` demanded a `crate`/`super`/`self` head or nothing), and `expr` gains the borrow form `"&" [ "mut" ] expr` (also discovered during derivation: `&` existed only in types, so every borrowing call site — `storage::get(&self.balances, sender)`, `json::parse(&content)?` — was unparseable). **Mirror sweep**: `docs/reference/grammar.md` fully resynced (including the previously-drifted pre-§11.4a `extern_block` cluster), `docs/reference/keywords.md` restructured into reserved + contextual tables, `docs/reference/operator-precedence.md` pipe-`?` note rewritten to the stage-production mechanism, `docs/spec-plans/AGENTS.md` + `docs/reference/AGENTS.md` keyword counts updated. PROMPT mirrors untouched (no contradiction: they do not enumerate keywords, and the `(expr \|> f)?` line remains true). Two new §17 rows (contextual keywords; pipe-stage `?` as grammar). Historical "39 keywords" claims in §17/Appendix D rows describe past states and are intentionally preserved. **Known remaining gap (flagged, deferred)**: struct-literal expressions (`Counter { state: n }`) still have no `expr` production — a separate design decision (block-vs-struct-literal ambiguity in `if`/`match` heads) tracked outside this repair. |
 | v0.5.10 | **Cleanup batch — six small-item slice contributions** (closes issue #20, slice 8 of 8 in the v0.5.3–v0.5.10 sequence). Stacked-PR architecture: a `spec/v0.5.10-cleanup-base` integration branch carried six sub-PRs (#34, #35, #36, #37, #38, #39) — all merged via squash — followed by this single integration commit consolidating the line 1 header bump, the footer bump, the Appendix D row, and a §17 thematic reorder of the v0.5.10 rows. Sub-PRs deliberately deferred those cross-cutting edits to avoid merge conflicts at the base-branch level. **(1) `Display` derivable, mirroring `Debug`** (PR #37): manual `impl Display` is the most common boilerplate after `Debug` for any struct or enum that ends up in a log line, error message, or CLI output, and making it derivable removes that boilerplate without foreclosing the format-string-on-the-derive path (a separate design space deferred). The shape mirrors `Debug` — `StructName { field: <field as Display>, ... }` — so the derive output is predictable; the conflict rule (derive XOR manual impl) matches `Debug`'s; the recursive-Display field requirement surfaces missing impls at the derive site. Cross-references: §3.10 standard traits, §9.3 Display and Debug, §12.2 derive macros. **(2) `ChainError` lives at `std::chain::ChainError` and is re-exported from the §13.1 prelude** (PR #38): stdlib convention places an error type alongside the module that produces it — `chain::call` is the only intrinsic that returns `Result<T, ChainError>`, so `std::chain` is the natural home. The §11.4a definition stays canonical; the prelude entry and `docs/stdlib/chain.md` reference §11.4a rather than duplicating the variant list. The prelude re-export is an ergonomic exception, not a default — every on-chain function that calls another contract returns `Result<T, ChainError>`, so requiring an explicit `use std::chain::ChainError;` would add unavoidable boilerplate. **(3) E11xx Cluster C registry audit** (PR #35 + cubic-fix): the §18 cluster C range (`E1100–E1199`) had reserved-only entries; the audit fills concrete rows for `E1110`–`E1123` covering on-chain prohibitions (actor primitives, async, FFI, float math, `@fast_math`, `@overflow(wrapping)`, `Shared<T>`, `std::test`, `std::actor::observe`, `ActorId`, host stdlib modules). Slot `E1114` is intentionally vacant per §18.4 (frozen-on-publish), reserving it for a future on-chain prohibition without disrupting the existing numbering. **(4) `W0010` — `u256` off-chain arithmetic warning** (PR #39 + cubic-fix): `u256` is a load-bearing on-chain primitive but a perf footgun off-chain (no 256-bit ALU on native or wasm; ~10–50x slower emulation). The new lint is **arithmetic-only** (declarations / parameters / casts / literals do not fire — chain-bridge plumbing stays quiet) and **warn-by-default** (silent emulation is exactly the trap that a Solidity-trained `u256` muscle carries off-chain). The cubic-fix iteration canonicalized the trigger list once between the §3.1 prose, §4.8 cross-reference, and the `docs/reference/compiler-errors.md` registry row so the three sites agree by construction. Suppression at site or module via `#[allow(W0010)]`. **(5) Pipe and method-chain iterator forms are equivalent first-class syntaxes** (PR #34): a §7 note clarifying that `vec.iter().map(f).collect()` and `vec.iter() |> map(f) |> collect()` lower to the same call sequence under §5.6's pipe rule. Neither form is preferred — the equivalence is not iterator-specific (it is the general pipe lowering applied to method calls) — and the spec's job is to document it rather than legislate aesthetics. **(6) Infra-batch** (PR #36): Dependabot `pip` ecosystem enabled (`scripts/requirements.txt`, weekly), Dependabot commit-prefix changed to empty string (matches the AGENTS.md no-`feat:`/`fix:` rule for human authors and bot commits alike), `.github/pull_request_template.md` adds a "Spec-only PR" checkbox so spec PRs can mark Build Targets Tested as N/A without leaving the section blank, and `docs/rationale/why-sploosh-looks-this-way.md` audited and updated for the v0.5.9 principle 7 framing (attention quality + portability + per-token economics, not frontier-context capacity). **§17 Design Decisions Log**: the four sub-PRs that added §17 rows (#34, #37, #38, #39) are reordered into a thematic block — Display derivable → `ChainError` module home → `W0010` u256 → iter-pipe equivalence — with the v0.5.9 PROMPT-edition row (which was added before v0.5.10's contributions) anchored at the top of the v0.5.10 thematic block. PR #35 (E11xx audit) and PR #36 (infra-batch) intentionally added no §17 row — the audit fills reserved slots per §18.4 Growth policy without locking new design rationale, and the infra-batch is operational hygiene rather than language design. **PROMPT-edition mirrors**: `_CORE` (Display derive line in `## Standard Traits`) and `_WEB3` (`ChainError` notes in `## Cross-contract Calls (§11.4a)`) bumped to (v0.5.10) headers. CI-enforced PROMPT-budget (per §1 principle 7 / v0.5.9 enforcer) post-integration: `_CORE` 4,717 / 4,800 (98.3%, warn band, headroom 83 tokens); `_WEB3` within budget. **Mirror-doc sweep**: doc-level current-version markers bumped from `v0.5.9-draft` to `v0.5.10-draft` in `VISION.md:119`, root `AGENTS.md:9`, `.factory/droids/sploosh-spec-steward.md:9`, plus the spec line 1 + footer. Historical narrative references to v0.5.9 (e.g., "as of v0.5.9 the ceilings are CI-enforced", `scripts/check_prompt_budget.py:11`, `docs/rationale/why-sploosh-looks-this-way.md:54`) are intentionally preserved — those describe when each contract landed, not the current spec version. **Slice plan complete**: v0.5.10 closes the v0.5.3–v0.5.10 cleanup sequence (8 of 8 done). The next milestone is the **compiler bootstrap** — lexer / parser targeting §16 EBNF. No new keywords (39 unchanged). No grammar changes beyond the Display-derive entry already documented in §12.2. **Operational note**: this slice exercised a true stacked-PR / sub-PR pattern for the first time in the project's history. The git-worktree strategy validated as a true-parallel-worker mechanism; an in-process Python script proved useful as a fallback for atomicizing git operations in shared-workspace scenarios where the worker can't take its own checkout. **Deferred**: hosted explanation page at `https://sploosh.dev/errors/{code}` (still v1.0); `schema: 2` JSON record bump (still reserved for the first breaking §18.1 change); format-string-on-the-`Display`-derive (its own design space). |
 | v0.5.9 | **PROMPT token-budget CI enforcement** (§1 principle 7 rewrite + new §17 row + new `scripts/check_prompt_budget.py` + new `.github/workflows/prompt-budget.yml`). Closes issue #19 (slice 6 of 8 in the v0.5.3–v0.5.10 sequence). The v0.5.1 softening framed the PROMPT budget as a soft target with no enforcement; the v0.5.8 split landed at 4,616 (`_CORE`) / 1,327 (`_WEB3`) `cl100k_base` tokens against ~4,800 / ~1,500 ceilings, and the missing piece was preventing silent drift across future amendments. **CI workflow**: `prompt-budget.yml` runs on every `pull_request` against `main` and on `push` to `main` (no path filter — runs on every PR regardless of which files changed), checks out the repo, sets up Python 3.12 with pip caching keyed on `scripts/requirements.txt`, installs `tiktoken==0.12.0`, and invokes `scripts/check_prompt_budget.py`. Concurrency group `prompt-budget-${{ github.ref }}` cancels in-flight runs on push. **Three-tier semantics**: `< 90%` of ceiling → silent pass (no PR clutter); `90–100%` → warn (printed line `WARN: _CORE at 96.2% of budget (4616/4800)` so the next contributor sees they're close, exit 0); `> 100%` → fail (exit 1, blocks merge until trim or explicit principle-7 budget-bump PR). Measured at PR time: `_CORE` 4,616/4,800 = 96.2% (warn band); `_WEB3` 1,327/1,500 = 88.5% (silent pass). **Script shape** (`scripts/check_prompt_budget.py`): ~75 lines, no dependencies beyond `tiktoken` + stdlib. Parameterizable via `--core-ceiling` / `--web3-ceiling` / `--warn-at` flags so the budgets aren't magic numbers; defaults match the principle-7 numbers (`4800` / `1500` / `0.9`). Runnable standalone from repo root. **§1 principle 7 rewritten**: replaces the v0.5.1-era "fits in a system prompt" / "soft target" framing with an AI-native density rationale that acknowledges the 1M+ context-window era. The budgets are not constrained by frontier capacity (combined ~6,300 tokens is well under 1% of a 1M-context window) — they are constrained by **(a) attention quality** (LLMs retrieve worse from sprawling prompts even when they fit), **(b) prompt portability** across the long tail of smaller / on-device / 8K-context-window models, and **(c) per-token economics** at ecosystem scale where each prompt is loaded N times across a developer ecosystem. The v0.5.1 "soft target, no enforcement" hedge becomes "soft target, CI-enforced ceiling, with documented amendment path" — a strengthening of the contract, not a loosening. The amendment path is documented explicitly: when the soft ceiling is genuinely too tight, the right move is an explicit principle-7 amendment that bumps the number with rationale, and the v0.5.8 commit `bd26e8f` (raising `_CORE` from `~4,000` to `~4,800` after the prompt split) is cited as precedent. **§17 Design Decisions Log row added** — captures the "context-window-aware budget rationale" choice that future readers in 2028+ would otherwise wonder about: why didn't the 2026 spec just track frontier context? Answer rooted in attention quality, portability, and economics, with the auto-scale-with-frontier-context-windows counterfactual considered and explicitly rejected. **Mirror-doc sweep**: `docs/spec-plans/AGENTS.md` Files-table entries for `_CORE` / `_WEB3` updated to note CI-enforced ceilings; root `AGENTS.md` references the principle in "Documentation = Language"; `.factory/droids/sploosh-spec-steward.md` references updated. **Ride-along**: stale `v0.5.2-draft` doc-level version markers in `VISION.md:119` and `AGENTS.md:9` (root) bumped to `v0.5.9-draft` (folded into a separate commit on the same PR; surfaced as out-of-scope drift by the v0.5.8 cubic-fix worker, six versions stale, bumping once to current is correct). No new keywords (39 unchanged). No grammar changes. No new diagnostic registry entries. PROMPT-edition mirrors (`_CORE` / `_WEB3`) unchanged in content — only the enforcer is new. |
 | v0.5.8 | **Prompt-edition split** (§1 principle 7 amendment). Closes issue #18 (PROMPT split / split slot 5 of 8 in the v0.5.3–v0.5.10 sequence). The combined `LANGUAGE_SPEC_PROMPT.md` (~4,277 cl100k_base tokens at v0.5.7) is replaced by two artifacts: `LANGUAGE_SPEC_PROMPT_CORE.md` carries the language core (syntax, types, ownership, math, actors, observability, errors, iterators, modules, runtime, async, FFI, attributes, testing, diagnostics, manifest) plus a new "Common LLM Mistakes" appendix; `LANGUAGE_SPEC_PROMPT_WEB3.md` carries the §11 on-chain surface (`onchain mod`, `storage`, `ctx`, storage layout §11.1a, reentrancy guard §11.3a, cross-contract calls §11.4a, gas/CU §11.7a, events §11.5, `@payable` / `@reentrant`, `ChainError`). The on-chain prohibition list is **deliberately duplicated** in both files (~150 tokens overhead) so each audience sees the compact reminder without loading the other artifact. **§1 principle 7 updated**: per-file soft targets are roughly 4,800 tokens (`_CORE`) and roughly 1,500 tokens (`_WEB3`), framed as soft targets per the v0.5.1 softening; the strict CI-enforcement path is the v0.5.9 follow-up. The `_CORE` target was calibrated upward from an initial `~4,000` to `~4,800` after the split landed at 4,616 measured tokens, preserving the v0.5.1 soft-target framing rather than re-trimming high-value reference content (notably the §4.10 float-method enumeration); `_WEB3` stayed at `~1,500` (measured 1,327, ~173-token headroom). **Retired combined file**: `LANGUAGE_SPEC_PROMPT.md` is kept in place (so inbound links don't 404) with a short redirect note pointing at the two new files. **New "Common LLM Mistakes" appendix** (last section of `_CORE`) — 10 single-line restatements of existing rules covering lifetime annotations, `as`-numeric-only, pattern-binding move semantics, capitalized variants, actor `&mut self` vs `&self` parameter rules, checked arithmetic, `Shared<T>` immutability, pipe + `?` precedence, test-assertion borrow semantics, and `chain::call` ergonomics. No new spec semantics — purely a denser presentation of existing rules. **Mirror-doc sweep**: `docs/spec-plans/AGENTS.md` Files table updated to list both new files with per-file budgets; root `AGENTS.md` "Documentation = Language" mirror table and JIT Index updated; `VISION.md` reference list updated; `.factory/droids/sploosh-spec-steward.md` mirror reference updated; `docs/spec-plans/LANGUAGE_SPEC_REVIEW.md` historical numbers preserved. No grammar changes. No new keywords (39 unchanged). No new diagnostic registry entries. **Slice plan**: GitHub issue titles for #19/#20 not renumbered — the slice number labels (v0.5.9 / v0.5.10) are the maintainer-locked plan slot labels. |
@@ -4952,4 +5034,4 @@ Source (.sp)
 ---
 
 *Working title: Sploosh. Name subject to change.*
-*This spec is a living document. v0.5.10-draft — May 2026.*
+*This spec is a living document. v0.5.11-draft — June 2026.*
