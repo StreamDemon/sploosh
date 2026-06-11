@@ -21,8 +21,8 @@ onchain mod token {
 ```
 
 ## `ctx` API
-- All targets: `ctx::caller() -> Address`, `ctx::self_address() -> Address`, `ctx::timestamp() -> u64`, `ctx::block_number() -> u64`.
-- EVM-only: `ctx::value() -> u256` (requires `@payable`), `ctx::gas_remaining() -> u256`, `ctx::chain_id() -> u64`.
+- All targets: `ctx::caller() -> Address`, `ctx::self_address() -> Address`, `ctx::timestamp() -> u256`, `ctx::block_number() -> u256`.
+- EVM-only: `ctx::value() -> u256` (requires `@payable`), `ctx::gas_remaining() -> u256`, `ctx::chain_id() -> u256`.
 - SVM-only: `ctx::lamports() -> u64`, `ctx::program_id() -> Address`, `ctx::signer() -> Address`, `ctx::compute_units_remaining() -> u64`.
 
 ## Attributes

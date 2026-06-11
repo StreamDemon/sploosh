@@ -11,7 +11,7 @@ Sploosh: AI-native language. Rust safety + Elixir concurrency + web3 targeting.
 - No null, no exceptions, no operator overloading, no implicit conversions, no unsafe.
 
 ## Types
-Primitives: `i8 i16 i32 i64 u8 u16 u32 u64 f32 f64 u256 bool char str String Address ()`. Compounds: `[T; N]` `Vec<T>` `Map<K,V>` `Set<T>` `Box<T>` `Shared<T>` `(T, U)` `Option<T>` `Result<T, E>`. Channels: `Channel<T>` `Sender<T>` `Receiver<T>`.
+Primitives: `i8 i16 i32 i64 i128 u8 u16 u32 u64 u128 f32 f64 u256 bool char str String Address ()`. Compounds: `[T; N]` `Vec<T>` `Map<K,V>` `Set<T>` `Box<T>` `Shared<T>` `(T, U)` `Option<T>` `Result<T, E>`. Channels: `Channel<T>` `Sender<T>` `Receiver<T>`.
 Custom: `struct Name { field: Type }` / `enum Name { A, B(T), C { x: T } }`. Generics: `fn name<T: Bound>(x: T) -> T { }`. Traits: `trait Name { type Item; fn method(&self) -> T; }` / `impl Trait for Type { }`. Supertraits: `trait Loggable: Printable { }` (implementors must impl both). Dynamic dispatch: `&dyn Trait`, `Box<dyn Trait>` for heterogeneous collections.
 
 ## Standard Traits
@@ -160,4 +160,4 @@ Compile errors inside `onchain`: `actor`, `spawn`, `send`, `send_timeout`, `sele
 - **Pipe + `?` precedence:** `expr |> f?` parses as `(expr |> f)?` — apply `?` per fallible stage.
 - **Test assertions borrow:** `assert_eq(a, b)` / `assert_ne(a, b)` take `&T` (test-only, `T: Eq + Debug`). Outside tests → `E1410`.
 - **`chain::call` ergonomics:** `chain::call(addr, mod::fn, args)` returns `Result<T, ChainError>`; `?` unwraps `T`. Don't double-unwrap.
-- **`u256` off-chain cost (`W0010`):** `u256` arithmetic is software-emulated on native/wasm (~10–50x slower than `u64`). Warn-by-default lint fires on arithmetic and comparison operators plus multi-instruction integer methods (canonical trigger list in `docs/reference/compiler-errors.md` and §3.1). Does not fire on declarations, params, casts, literals, or no-op-on-unsigned methods (`abs` / `min` / `max` / `clamp`). Suppress with `#[allow(W0010)]`. Not emitted on-chain.
+- **`u256` off-chain cost (`W0010`):** `u256` arithmetic is software-emulated on native/wasm (~10–50x slower than `u64`). Warn-by-default lint fires on arithmetic and comparison operators plus multi-instruction integer methods (canonical trigger list in `docs/reference/compiler-errors.md` and §3.1). Does not fire on declarations, params, casts, literals, or zero-cost methods (`abs` / `min` / `max` / `clamp`). Suppress with `#[allow(W0010)]`. Not emitted on-chain.
