@@ -30,7 +30,9 @@ let result = 10 |> (|v| multiply(3, v));   // multiply(3, 10) = 30
 
 ## Pipe + Error Propagation
 
-`?` (precedence 12) binds tighter than `|>` (precedence 8). Use `?` on each fallible stage:
+A trailing `?` on a pipe stage is part of the pipe grammar itself (spec §5.7,
+§16 `pipe_stage`) and applies to the accumulated pipe result: `expr |> f?`
+parses as `(expr |> f)?`, i.e. `f(expr)?`. Use `?` on each fallible stage:
 
 ```sploosh
 let report = raw_input

@@ -23,11 +23,17 @@
 
 ## Key Interaction: Pipe + Error Propagation
 
-Since `?` (12) binds tighter than `|>` (8):
+Inside a pipe chain, `?` is not resolved by the precedence table at all — it is
+part of the pipe-stage grammar (LANGUAGE_SPEC.md §5.7 and §16: `pipe_expr = expr
+{ "|>" pipe_stage }`, `pipe_stage = stage_callee [ "(" args ")" ] [ "?" ]`). A
+stage's trailing `?` applies to the accumulated pipe application result:
 
 ```sploosh
 expr |> f?    // parsed as (expr |> f)?  =  f(expr)?
 ```
+
+Outside pipe chains, `?` remains the ordinary postfix operator at precedence 12
+— plain `expr?` is unchanged.
 
 ## Sigils
 
