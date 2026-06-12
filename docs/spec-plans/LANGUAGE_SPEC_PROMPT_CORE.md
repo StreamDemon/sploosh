@@ -1,4 +1,4 @@
-# SPLOOSH Quick Reference — Core (v0.5.10) — LLM System Prompt Edition
+# SPLOOSH Quick Reference — Core (v0.5.12) — LLM System Prompt Edition
 
 Sploosh: AI-native language. Rust safety + Elixir concurrency + web3 targeting.
 
@@ -145,7 +145,7 @@ Every diagnostic carries a stable code (`E<NNNN>` error / `W<NNNN>` warning / `L
 Cargo-shape. `[project]` (`name`, `version`, `edition = "0.5"`), `[dependencies]`, `[dev-dependencies]` (not forwarded), `[build-dependencies]` (reserved). Inline-table form: `{ version, features, default-features, optional, git+rev, path }` — `rev` SHA required for git; `path` workspace-internal only. `[features]`: `"name"` / `"crate/feat"` / `"dep:crate"`. `[target.{native|wasm|evm|svm}.dependencies]` additive merge. Four profiles: `dev`, `release`, `test` (← `dev`), `bench` (← `release`); knobs `opt-level`/`lto`/`debug`/`strip`/`incremental`/`overflow-checks`. `overflow-checks` **frozen `true` on `evm`/`svm`**. No `codegen-units`, no `panic`. Workspaces: root `[workspace]` with `members`/`exclude`/`resolver = "2"`; members inherit via `field.workspace = true`; single `sploosh.lock` at workspace root. Lockfile: TOML, **Blake3** checksums (32-byte digest, base32-no-pad, prefix `"blake3:"`), deterministic ordering, schema `version = 1`. `sploosh build|test|check` verify only; `sploosh update` is the sole writer.
 
 ## On-chain Prohibitions
-Compile errors inside `onchain`: `actor`, `spawn`, `send`, `send_timeout`, `select`, `timeout(ms)`, `Handle<T>`, `Channel<T>`, `Sender<T>`, `Receiver<T>`, `JoinHandle<T>`, `@supervisor`, `@mailbox`, `async fn`/`.await`, `extern "C"`/`extern "C" async`, every `f32`/`f64` math method, `@fast_math`, `@overflow(wrapping)`, `Shared<T>`, `std::test` (incl. `assert_eq`/`assert_ne`/`assert_matches`), `std::actor::observe`, `ActorId`, `std::{fs,net,io,db,web,env}`. Float values, fields, comparisons, and integer math stay allowed.
+Compile errors inside `onchain`: `actor`, `spawn`, `send`, `send_timeout`, `select`, `timeout(ms)`, `Handle<T>`, `Channel<T>`, `Sender<T>`, `Receiver<T>`, `JoinHandle<T>`, `@supervisor`, `@mailbox`, `async fn`/`.await`, `extern "C"`/`extern "C" async`, every `f32`/`f64` math method, `@fast_math`, `@overflow(wrapping)`, `Shared<T>`, `std::test` (incl. `assert_eq`/`assert_ne`/`assert_matches`), `std::actor::observe`, `ActorId`, `std::{fs,net,io,db,web,env,log,time}`. Float values, fields, comparisons, and integer math stay allowed.
 
 ## File ext: `.sp` — Entry: `src/main.sp` — Manifest: `sploosh.toml`
 

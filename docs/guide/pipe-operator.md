@@ -50,9 +50,13 @@ let output = raw_input
     |> extract_name;        // infallible, no ?
 ```
 
-## Pipe with Iterators
+## Pipe with Methods
 
-Pipe and method chains are interchangeable for iterator operations:
+When the piped value's type has a method matching the stage name,
+`expr |> method(args)` desugars to `expr.method(args)` — for **any** receiver
+type, not just iterators (the method wins over a same-named free function;
+otherwise the stage is a free-function call with the piped value as first
+argument). Iterator chains are the most common case:
 
 ```sploosh
 // These are identical:
@@ -67,7 +71,7 @@ let names = users.iter() |> filter(|u| u.active) |> map(|u| u.name.clone()) |> c
 | `x \|> f` | `f(x)` |
 | `x \|> f(a, b)` | `f(x, a, b)` |
 | `x \|> f?` | `f(x)?` |
-| `iter \|> method(args)` | `iter.method(args)` |
+| `x \|> method(args)` | `x.method(args)` (any receiver whose type has the method; method wins over a same-named free function) |
 
 ## Next Steps
 

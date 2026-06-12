@@ -27,7 +27,7 @@ fn diagnose(target: &Handle<Worker>) {
     let alive = target.alive();
     let id = target.actor_id();
 
-    log::info(format("worker {} alive={} mailbox={}/{}", id, alive, len, cap));
+    log::info(format("worker {:?} alive={} mailbox={}/{}", id, alive, len, cap));
 
     if !alive {
         // Dead-actor recipe below.
@@ -63,18 +63,18 @@ fn triage(handle: &Handle<Worker>) -> String {
     match observe::actor_info(handle) {
         None => "snapshot already gc'd (no live handle clones remain)".into(),
         Some(info) => match info.death_cause {
-            None => format("worker {} is {:?}", info.id, info.lifecycle_state),
+            None => format("worker {:?} is {:?}", info.id, info.lifecycle_state),
             Some(DeathCause::RuntimeFailure { panic }) =>
-                format("worker {} died: {}", info.id, panic),
+                format("worker {:?} died: {}", info.id, panic),
             Some(DeathCause::Stopped) =>
-                format("worker {} was stopped cooperatively", info.id),
+                format("worker {:?} was stopped cooperatively", info.id),
             Some(DeathCause::Killed) =>
-                format("worker {} was killed", info.id),
+                format("worker {:?} was killed", info.id),
             Some(DeathCause::Supervised { restart_pending }) =>
-                format("worker {} terminated by supervisor (restart_pending={})",
+                format("worker {:?} terminated by supervisor (restart_pending={})",
                        info.id, restart_pending),
             Some(DeathCause::RuntimeShutdown) =>
-                format("worker {} dropped on runtime shutdown", info.id),
+                format("worker {:?} dropped on runtime shutdown", info.id),
         },
     }
 }
@@ -96,7 +96,7 @@ fn report_top_mailboxes(n: usize) {
     all.sort_by(|a, b| b.mailbox_len.cmp(&a.mailbox_len));
     for info in all.iter().take(n) {
         log::info(format(
-            "{} ({}): mailbox={}/{} state={:?}",
+            "{} ({:?}): mailbox={}/{} state={:?}",
             info.name, info.id, info.mailbox_len, info.mailbox_capacity, info.lifecycle_state
         ));
     }
@@ -119,14 +119,14 @@ use std::actor::observe;
 fn dump_tree(root: &Handle<RootSupervisor>) {
     let root_info = observe::actor_info(root)
         .expect("root supervisor must have a live snapshot");
-    log::info(format("{} ({})", root_info.name, root_info.id));
+    log::info(format("{} ({:?})", root_info.name, root_info.id));
     walk_by_supervisor(root_info.id, 1);
 }
 
 fn walk_by_supervisor(parent_id: ActorId, depth: usize) {
     let indent: String = " ".repeat(depth * 2);
     for info in observe::actors().filter(|i| i.supervisor == Some(parent_id)) {
-        log::info(format("{}- {} ({}) state={:?}", indent, info.name, info.id, info.lifecycle_state));
+        log::info(format("{}- {} ({:?}) state={:?}", indent, info.name, info.id, info.lifecycle_state));
         walk_by_supervisor(info.id, depth + 1);
     }
 }
@@ -141,8 +141,8 @@ fn restart_storm_audit(sup: &Handle<WorkerPool>) {
         // Here we assume `sup.child_handle(id)` is exposed by the supervisor:
         let child = sup.child_handle(child_info.id);
         match sup.restart_count(&child) {
-            Ok(n) if n > 10 => log::warn(format("child {} restarted {} times", child_info.id, n)),
-            Ok(n) => log::info(format("child {} restarted {} times", child_info.id, n)),
+            Ok(n) if n > 10 => log::warn(format("child {:?} restarted {} times", child_info.id, n)),
+            Ok(n) => log::info(format("child {:?} restarted {} times", child_info.id, n)),
             Err(ObserveError::NotASupervisedChild) => log::error("child not supervised here"),
         }
     }

@@ -79,7 +79,7 @@ break_stmt     = "break" ";" ;
 continue_stmt  = "continue" ";" ;
 expr_stmt      = expr ";" ;
 
-expr           = literal | "self" | IDENT | path_expr
+expr           = literal | "self" | IDENT | path_expr | struct_literal
                | expr "." IDENT | expr "(" args ")"  | expr "[" expr "]"
                | expr BINOP expr | UNOP expr | "&" [ "mut" ] expr
                | expr "?" | expr "as" type
@@ -90,6 +90,15 @@ expr           = literal | "self" | IDENT | path_expr
                | select_expr
                | "for" pattern "in" expr block
                | "while" expr block | while_let_expr | "loop" block ;
+
+struct_literal = path_expr "{" field_inits "}" ;
+                 (* side condition (block-head restriction, Rust precedent):
+                    a struct_literal may not appear as the outermost
+                    expression of an "if"/"while" condition, a "match"
+                    scrutinee, or a "for" iterable — parenthesize to use one
+                    in those positions ("if (x { f: 1 }) == y { ... }").
+                    See §5.1, §5.2. field_inits supports shorthand (§16
+                    field_init). *)
 
 pipe_expr      = expr "|>" pipe_stage { "|>" pipe_stage } ;
 pipe_stage     = stage_callee [ "(" args ")" ] [ "?" ] ;
