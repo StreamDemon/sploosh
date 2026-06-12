@@ -55,5 +55,5 @@ rg -n "f64\.sqrt|@fast_math" docs/examples/token-contract.md   # should match no
 git diff --name-only main...HEAD | findstr -r "examples spec-plans"
 
 # Verify on-chain examples don't reference forbidden APIs
-rg -n "(fs|net|io|db|web|env|log|time|spawn|actor)::" docs/examples/token-contract.md
+rg -n "(fs|net|io|db|web|env|log|time|test|spawn|actor)::" docs/examples/token-contract.md
 ```
