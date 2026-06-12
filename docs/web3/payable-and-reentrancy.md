@@ -94,9 +94,11 @@ state" note above), not persistent storage. On EVM, it lowers to **transient
 storage** — `TLOAD` / `TSTORE` (EIP-1153) on Cancun and later hard forks —
 adding one `TLOAD` on entry plus one `TSTORE` on entry and exit of every
 non-`@reentrant` `pub` function, priced per the active hard fork's gas
-schedule. Pre-1153 forks are not supported target environments: §11.3a
-requires the mechanism to be unwound automatically on transaction revert,
-which transient storage provides natively. Exact costs vary by hard fork;
+schedule. Pre-1153 EVM implementations may fall back to `SLOAD` / `SSTORE`
+on a reserved slot with a mandatory clear-on-exit write — the VM's
+journaling then provides the same unwind-on-revert guarantee (§11.3a).
+Either way, the flag is never observable across transactions. Exact costs
+vary by hard fork;
 the overhead is small compared with most real-world contract logic but not
 free.
 

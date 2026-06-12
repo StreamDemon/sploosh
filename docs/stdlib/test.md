@@ -181,7 +181,7 @@ trait Gen {
 
 | Type | Generation strategy |
 |---|---|
-| `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`, `u256` | Uniform across the type's range; shrinks toward 0 |
+| `i8`, `i16`, `i32`, `i64`, `i128`, `u8`, `u16`, `u32`, `u64`, `u128`, `u256` | Uniform across the type's range; shrinks toward 0 |
 | `bool` | 50/50; shrinks toward `false` |
 | `f32`, `f64` | Uniform-ish across the representable range, biased toward typical values; shrinks toward 0.0 |
 | `char` | Uniform across valid Unicode scalar values |
@@ -232,7 +232,7 @@ sploosh test --format json | jq '.'               # machine-readable
 | `TestFailure` | struct | Failure record for `Result<(), TestFailure>`-shaped tests; `From<E>` for every `E: Error` |
 | `Gen` | trait | Generates and shrinks values for property tests |
 | `Rng` | opaque type | Deterministic random source passed to `Gen::generate`; methods `next_u32`, `next_u64`, `gen_range(min, max)`, `shuffle(&mut [T])` |
-| `assert_eq`, `assert_ne`, `assert_matches` | intrinsics | Re-exported for documentation locality (auto-imported via test-only prelude) |
+| `assert`, `assert_eq`, `assert_ne`, `assert_matches` | intrinsics | Re-exported for documentation locality (§13.3.8; `assert` is a general prelude intrinsic, the other three auto-import via the test-only prelude) |
 
 All items are `#[cfg(test)]`-only. Referencing them outside a test build is a compile error (`E1411`).
 

@@ -23,7 +23,8 @@ pub fn save_to_disk(data: &[u8]) -> Result<(), AppError> {
 
 Code using only universal stdlib modules works on all targets:
 
-- `std::math` -- all targets
+- `std::math` (integer methods) -- all targets
+- `std::math` (float methods, `@fast_math`) -- native and wasm only (§13.2)
 - `std::crypto` -- all targets
 - `std::collections` -- all targets
 - `std::chain` -- all targets

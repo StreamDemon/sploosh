@@ -240,7 +240,7 @@ sploosh test --filter property_               # property tests only (by conventi
 
 ## On-Chain Test Patterns
 
-> **Status: deferred.** `std::test` is a compile error inside `onchain` modules in v0.5.5. On-chain code is tested off-chain by spawning a simulated execution context; the `@onchain_test` attribute (with simulated `ctx`, mocked storage, and event assertions) is targeted for a later spec amendment.
+> **Status: deferred.** `std::test` is currently a compile error inside `onchain` modules. On-chain code is tested off-chain by spawning a simulated execution context; the `@onchain_test` attribute (with simulated `ctx`, mocked storage, and event assertions) is targeted for a later spec amendment.
 
 In the meantime, on-chain code can be tested at the boundary by:
 

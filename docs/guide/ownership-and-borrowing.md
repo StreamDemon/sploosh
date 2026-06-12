@@ -44,7 +44,7 @@ let b = Box::new(42);          // allocate an i64 on the heap
 let val = *b;                  // dereference to get the inner value
 
 let s = Box::new(String::from("hello"));
-println("{}", *s);             // auto-deref also works for method calls
+print(format("{}", *s));       // auto-deref also works for method calls
 ```
 
 `Box<T>` implements the `Drop` trait, so cleanup happens automatically when it leaves scope. Use `Box<T>` when you need:

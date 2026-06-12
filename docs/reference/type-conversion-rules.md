@@ -19,7 +19,8 @@ float types, and integer-to-float or float-to-integer.
 
 - **Widening** (e.g., `i32` -> `i64`): lossless, value is preserved.
 - **Narrowing** (e.g., `i64` -> `i32`): truncates to the lower bits of the source value.
-- **Float -> Int** (e.g., `f64` -> `i32`): truncates toward zero. Values exceeding the target range saturate to the min/max of the target type.
+- **Float -> Int** (e.g., `f64` -> `i32`): truncates toward zero. Out-of-range finite values saturate to the min/max of the target type.
+- **Float -> Int, non-finite values** (§3.11): `NaN` -> `0`; positive infinity -> the target type's `MAX`; negative infinity -> the target type's `MIN` for signed types, `0` for unsigned types. This matches WebAssembly's `trunc_sat` semantics and is identical on every target — no implementation-defined drift.
 - **Int -> Float** (e.g., `i64` -> `f64`): nearest representable float; large values may lose precision.
 - **Float -> Float** (e.g., `f64` -> `f32`): rounds to nearest representable value.
 
