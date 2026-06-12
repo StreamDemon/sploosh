@@ -6,7 +6,7 @@
 
 - **Sploosh** — an AI-native programming language: Rust safety + Elixir concurrency + web3 dual-target (native/wasm/evm/svm).
 - **Spec-only repository.** No compiler, no runtime, no source code. Every artifact lives under `docs/`.
-- **Source of truth:** `docs/spec-plans/LANGUAGE_SPEC.md` (currently v0.5.12-draft).
+- **Source of truth:** `docs/spec-plans/LANGUAGE_SPEC.md` (currently v0.5.13-draft).
 - **Sub-trees have their own `AGENTS.md`** — read the nearest one to the file you're touching.
 
 ## Setup Commands
