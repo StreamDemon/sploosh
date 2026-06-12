@@ -119,10 +119,10 @@ fn watchdog(workers: &[Handle<Worker>]) {
         let len = w.mailbox_len();
         let cap = w.mailbox_capacity();
         if len > cap * 8 / 10 {
-            log::warn(format("worker {} backed up: {}/{}", w.actor_id(), len, cap));
+            log::warn(format("worker {:?} backed up: {}/{}", w.actor_id(), len, cap));
         }
         if !w.alive() {
-            log::error(format("worker {} died", w.actor_id()));
+            log::error(format("worker {:?} died", w.actor_id()));
         }
     }
 }
@@ -144,7 +144,7 @@ actor WorkerPool {
 
 fn audit(pool: &Handle<WorkerPool>) {
     for child_info in pool.children() {
-        log::info(format("child {} state={:?} mailbox={}/{}",
+        log::info(format("child {:?} state={:?} mailbox={}/{}",
             child_info.id, child_info.lifecycle_state,
             child_info.mailbox_len, child_info.mailbox_capacity));
     }
@@ -170,16 +170,16 @@ fn explain_failure(handle: &Handle<Worker>) -> String {
     match observe::actor_info(handle) {
         Some(info) => match info.death_cause {
             Some(DeathCause::RuntimeFailure { panic }) =>
-                format("worker {} died: {}", info.id, panic),
+                format("worker {:?} died: {}", info.id, panic),
             Some(DeathCause::Stopped) =>
-                format("worker {} was stopped cooperatively", info.id),
+                format("worker {:?} was stopped cooperatively", info.id),
             Some(DeathCause::Killed) =>
-                format("worker {} was killed", info.id),
+                format("worker {:?} was killed", info.id),
             Some(DeathCause::Supervised { restart_pending }) =>
-                format("worker {} terminated by supervisor (restart_pending={})", info.id, restart_pending),
+                format("worker {:?} terminated by supervisor (restart_pending={})", info.id, restart_pending),
             Some(DeathCause::RuntimeShutdown) =>
-                format("worker {} dropped on runtime shutdown", info.id),
-            None => format("worker {} is still {:?}", info.id, info.lifecycle_state),
+                format("worker {:?} dropped on runtime shutdown", info.id),
+            None => format("worker {:?} is still {:?}", info.id, info.lifecycle_state),
         },
         None => "snapshot already gc'd".into(),
     }

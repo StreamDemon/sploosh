@@ -21,7 +21,7 @@ deploy/
 ## Off-Chain Interaction
 
 ```sploosh
-offchain fn check_balance(user: Address) -> Result<u256, AppError> {
+offchain async fn check_balance(user: Address) -> Result<u256, AppError> {
     let contract = Contract::connect("0x1234...")?;
     let balance = contract.call(token::balance_of, user).await?;
     Ok(balance)

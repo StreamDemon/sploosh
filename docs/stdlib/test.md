@@ -121,7 +121,7 @@ Each test runs inside its own runtime-spawned isolation actor. The runner observ
 
 1. **`Ok(())`** — handler returned normally. Test passes.
 2. **`Err(TestFailure)`** — handler returned `Err`. Test fails; the runner records the `TestFailure`.
-3. **Actor death** — handler panicked (failed `assert*`, bounds check, overflow, etc.). The runner observes `Err(ActorError::Dead { panic: Some(msg) })` and records the panic message.
+3. **Actor death** — handler panicked (failed `assert*`, bounds check, overflow, etc.). The runner observes `Err(ActorError::Dead)` (§8.8) and records the panic message read from the dead isolation actor's snapshot (`DeathCause::RuntimeFailure { panic }`, §8.12).
 
 Per-test isolation means a failed test never aborts the runner. The supervisor strategy for the test cohort is conceptually `one_for_one` with `max_restarts: 0` — a failed test is recorded, not restarted.
 

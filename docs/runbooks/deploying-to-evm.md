@@ -27,7 +27,7 @@
 ## Off-Chain Integration
 
 ```sploosh
-offchain fn interact() -> Result<(), AppError> {
+offchain async fn interact() -> Result<(), AppError> {
     let contract = Contract::connect("0xDEPLOYED_ADDRESS")?;
     let result = contract.call(token::balance_of, address).await?;
     Ok(())

@@ -86,18 +86,18 @@ On the EVM target, `chain::call` lowers to an EVM `CALL` opcode:
 - **Synchronous.** The caller's execution blocks until the callee returns
   or reverts.
 - **Gas forwarding.** The EVM default applies — all remaining gas minus the
-  1/64 reserve (EIP-150). Explicit per-call `#[gas_limit]` is deferred to
-  v0.5.0.
+  1/64 reserve (EIP-150). Explicit per-call `#[gas_limit]` is not yet
+  specified; deferred to a future amendment.
 - **ABI encoding.** Arguments are Solidity-ABI-encoded with a 4-byte
   function selector `keccak256(signature_string)[0..4]` derived from the
   Sploosh signature using Solidity type names (`address`, `uint256`, `bool`,
   `bytes`, `string`, ...). This matches Solidity's selector derivation
   exactly, enabling bidirectional Sploosh ↔ Solidity calls.
 
-**No delegatecall in v0.4.x.** Sploosh does not yet expose the EVM
+**No delegatecall.** Sploosh does not yet expose the EVM
 `DELEGATECALL` opcode. `chain::call` always uses `CALL` semantics (callee
-executes in its own storage context). A delegate-call intrinsic is deferred
-to v0.5.0.
+executes in its own storage context). A delegate-call intrinsic is not yet
+specified; deferred to a future amendment.
 
 ## SVM Call Model
 

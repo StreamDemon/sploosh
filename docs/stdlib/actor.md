@@ -44,7 +44,7 @@ All four methods are `&self`, infallible, and **available on dead handles**. Con
 
 ```sploosh
 let worker = spawn Worker::init();
-log::info(format("worker {}: alive={}, mailbox={}/{}",
+log::info(format("worker {:?}: alive={}, mailbox={}/{}",
     worker.actor_id(),
     worker.alive(),
     worker.mailbox_len(),
@@ -153,10 +153,13 @@ for event in pool.restart_history(&target).unwrap() {
 ```sploosh
 struct ActorId( /* opaque */ );
 
-impl Copy for ActorId {}
-impl Eq   for ActorId {}
-impl Hash for ActorId {}
+impl Copy  for ActorId {}
+impl Eq    for ActorId {}
+impl Hash  for ActorId {}
+impl Debug for ActorId {}
 ```
+
+The `Debug` rendering is an opaque, implementation-defined form (e.g. `ActorId(42)`) for logs and diagnostics — not to be parsed. `ActorId` does not implement `Display`; format it with `{:?}`.
 
 Opaque, monotonically assigned at `spawn`. Two distinct actors never share an `ActorId`; an ID is **never reused** even after the actor it identified has died and its snapshot has been GC'd. The runtime assigns IDs from a non-zero counter; `ActorId(0)` is reserved as a sentinel.
 

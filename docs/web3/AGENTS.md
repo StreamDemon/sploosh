@@ -28,7 +28,7 @@ evm-vs-svm.md            deploying-contracts.md
 - `storage-and-state.md` — Solidity-compatible slot layout (§11.1a). Maps hash to `keccak256(abi.encode(key, slot))`. Vec/String length-then-data convention.
 - `payable-and-reentrancy.md` — `@payable` (must annotate to receive ETH/lamports), `@reentrant` (opts out of guard for that fn only).
 - `evm-vs-svm.md` — gas vs compute units, `ctx::gas_remaining()` (EVM) vs `ctx::compute_units_remaining()` (SVM), `#[gas_limit(N)]` (EVM-only).
-- `cross-contract-calls.md` — `ChainError = { Reverted, OutOfGas, Reentrancy, InvalidTarget, DecodingError }`. No delegatecall in v0.4.x.
+- `cross-contract-calls.md` — `ChainError = { Reverted, OutOfGas, Reentrancy, InvalidTarget, DecodingError }`. No delegatecall (not yet specified).
 
 ## JIT Index Hints
 

@@ -59,7 +59,8 @@ locality.
 - **EVM.** `chain::call` lowers to `CALL`. Synchronous. Solidity ABI
   encoding with a 4-byte function selector derived from
   `keccak256(signature_string)[0..4]`. Gas forwarded per EVM default
-  (remaining minus 1/64, EIP-150). No delegatecall in v0.4.x.
+  (remaining minus 1/64, EIP-150). No delegatecall (not yet specified;
+  deferred to a future amendment).
 - **SVM.** `chain::call` lowers to a Solana CPI instruction. User-level
   surface (synchronous-looking `Result<T, ChainError>`, `?` propagation) is
   preserved; concrete CPI ABI and account-passing conventions are deferred
