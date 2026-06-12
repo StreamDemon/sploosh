@@ -1,0 +1,85 @@
+docs/spec-plans/LANGUAGE_SPEC.md
+  s_c088730cf554db::t_2ae503407e6d3b 4835
+  s_c088730cf554db::t_320322ed4065d2 4838-4839
+  s_c088730cf554db::t_e1b1e070a562b9 5065
+  s_c088730cf554db::t_73aa622cb8843b 5067
+  s_c088730cf554db::t_080ba1c210e210 4635,4647-4654
+  s_c088730cf554db::t_ba7088866866c2 1500-1502
+  s_c088730cf554db::t_6a02c1c367fc64 2479
+  s_c088730cf554db::t_0d060c7519592c 5080
+  s_c088730cf554db::t_16c71a45195559 1276-1279,1287-1292
+  s_c088730cf554db::t_728f0809aa1e01 3833
+  s_c088730cf554db::t_3c148638336bb0 2619-2623
+  s_c088730cf554db::t_7c8fa1c54d69f7 3279,3282-3283
+  s_c088730cf554db::t_a4539dffaa6d6d 3352,3359-3361
+  s_c088730cf554db::t_6f15ddcda06525 3592-3593,3597
+  s_c088730cf554db::t_3ec0c0ab8edbdb 3598-3601
+  s_c088730cf554db::t_f2aa0a3c731df9 3975-3978
+  s_c088730cf554db::t_9953442a5ec830 3231
+  s_c088730cf554db::t_fcb3c1d211ab1f 1,3362,4655
+  s_c088730cf554db::t_77c198c83653e0 1091-1095
+  s_c088730cf554db::t_95d31883686e36 308-309
+  s_c088730cf554db::t_4f8a6b2fc5335d 1126-1127
+docs/guide/pipe-operator.md
+  s_c088730cf554db::t_cec604aa7b0ff4 53,55-59
+  s_c088730cf554db::t_5015c796d2d318 74
+docs/runbooks/actor-debugging.md
+  s_c088730cf554db::t_66a5152c04695f 144-145
+  s_c088730cf554db::t_b6b2a63f0f792d 66,68,70,72,74,77
+  s_c088730cf554db::t_b50ad908fd4b88 99
+  s_c088730cf554db::t_70c842801be57c 30
+  s_c088730cf554db::t_c623367b98af44 122
+  s_c088730cf554db::t_586b2682d2617e 129
+docs/stdlib/chain.md
+  s_c088730cf554db::t_1b8f8c78e746ad 62-63
+docs/stdlib/time.md
+  s_c088730cf554db::t_be96604920cf25 7-8
+docs/spec-plans/LANGUAGE_SPEC_PROMPT_WEB3.md
+  s_c088730cf554db::t_6d30b1c25f245f 1
+  s_c088730cf554db::t_31fb692022366d 46
+  s_c088730cf554db::t_672996b4e36e41 55
+docs/guide/actors-and-concurrency.md
+  s_c088730cf554db::t_4716bed2cc757d 173,175,177,179,181-182
+  s_c088730cf554db::t_9291f170ef2d8e 147
+  s_c088730cf554db::t_97e2643ce648f6 122,125
+docs/web3/AGENTS.md
+  s_c088730cf554db::t_79637f88889d77 31
+docs/reference/grammar.md
+  s_c088730cf554db::t_2c5b9decb85803 82,94-102
+docs/spec-plans/LANGUAGE_SPEC_PROMPT_CORE.md
+  s_c088730cf554db::t_1d88e51b1ed707 148
+  s_c088730cf554db::t_6b50ffd8455a2c 1
+docs/stdlib/test.md
+  s_c088730cf554db::t_0af46308336771 124
+docs/stdlib/actor.md
+  s_c088730cf554db::t_408a554379a759 47
+  s_c088730cf554db::t_6c387b1f48a193 156-159,162-163
+docs/runbooks/deploying-to-evm.md
+  s_c088730cf554db::t_706a341a5c7eab 30
+docs/web3/deploying-contracts.md
+  s_c088730cf554db::t_0c05b6d143f096 24
+docs/stdlib/log.md
+  s_c088730cf554db::t_1a48c91ad85a41 7-8
+docs/web3/cross-contract-calls.md
+  s_c088730cf554db::t_63e5b88724693c 89-90
+  s_c088730cf554db::t_73cd35d9d701b4 97,99-100
+docs/reference/compiler-errors.md
+  s_c088730cf554db::t_b9a83046f15bb6 123
+  s_c088730cf554db::t_3029f286cccc41 63
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "73218427ef655adcd7a457bbef28c5c0e846c8fe",
+  "prompts": {},
+  "sessions": {
+    "s_c088730cf554db": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "518ec5d7-53a7-40b7-a819-9225dc80f0e3",
+        "model": "claude-fable-5"
+      },
+      "human_author": "StreamDemon <revenantpulse@gmail.com>"
+    }
+  }
+}
