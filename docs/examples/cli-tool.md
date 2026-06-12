@@ -13,7 +13,7 @@ use std::json;
 enum CliError {
     MissingArgument { name: String },
     FileNotFound { path: String },
-    Io(FsError),                    // From<FsError> auto-generated (§6.3)
+    Io(fs::FsError),                // From<fs::FsError> auto-generated (§6.3)
     ParseError(json::JsonError),    // From<json::JsonError> auto-generated
 }
 
