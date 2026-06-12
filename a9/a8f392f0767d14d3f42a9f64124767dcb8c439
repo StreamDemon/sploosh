@@ -1,0 +1,46 @@
+docs/migration/AGENTS.md
+  s_c088730cf554db::t_83e97c9946acc5 20
+docs/runbooks/AGENTS.md
+  s_c088730cf554db::t_928b2433bd9696 48
+  s_c088730cf554db::t_139d5542a07c85 23
+docs/tooling/AGENTS.md
+  s_c088730cf554db::t_c3a5d88d1b3ec5 15
+  s_c088730cf554db::t_0d016006592b5e 35-36
+  s_c088730cf554db::t_b7e8013b21cb68 55
+docs/examples/AGENTS.md
+  s_c088730cf554db::t_8421ad7c4fc61d 19-21
+  s_c088730cf554db::t_55a57805160cec 27
+  s_c088730cf554db::t_d20aedcda77cfa 29
+  s_c088730cf554db::t_1176742745033f 47
+  s_c088730cf554db::t_c84fb4a750ab90 58
+docs/guide/AGENTS.md
+  s_c088730cf554db::t_25658e6edcfdb5 34
+  s_c088730cf554db::t_34fdaf4fc026f6 61-62
+  s_c088730cf554db::t_23c01ec141db96 46
+  s_c088730cf554db::t_7411de8a920a7b 27
+docs/reference/AGENTS.md
+  s_c088730cf554db::t_c60255b62716d3 7
+  s_c088730cf554db::t_d121a85cddab27 15
+docs/stdlib/AGENTS.md
+  s_c088730cf554db::t_37cd4ff1ecebcb 58-59
+  s_c088730cf554db::t_25676a6b724dda 21
+  s_c088730cf554db::t_f339ea335653b5 19
+  s_c088730cf554db::t_796662ac9ec30d 29-30
+  s_c088730cf554db::t_866a385bf8a93b 12-14
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "a9a8f392f0767d14d3f42a9f64124767dcb8c439",
+  "prompts": {},
+  "sessions": {
+    "s_c088730cf554db": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "518ec5d7-53a7-40b7-a819-9225dc80f0e3",
+        "model": "claude-fable-5"
+      },
+      "human_author": "StreamDemon <revenantpulse@gmail.com>"
+    }
+  }
+}
