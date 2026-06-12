@@ -1,0 +1,21 @@
+docs/reference/attributes.md
+  s_c088730cf554db::t_cf3cbc7e798608 17
+docs/examples/cli-tool.md
+  s_c088730cf554db::t_4f8e91ef63af90 16
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "91930f75a26b368b951cc0082dd74e199c92d8e5",
+  "prompts": {},
+  "sessions": {
+    "s_c088730cf554db": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "518ec5d7-53a7-40b7-a819-9225dc80f0e3",
+        "model": "claude-fable-5"
+      },
+      "human_author": "StreamDemon <revenantpulse@gmail.com>"
+    }
+  }
+}
