@@ -8,7 +8,8 @@ artifacts with cl100k_base and applies a three-tier rule:
   * >= warn-at fraction and <= 100%  -> warn (exit 0)
   * > 100% of ceiling                -> fail (exit 1)
 
-Defaults match the v0.5.9 budgets: _CORE = 4800, _WEB3 = 1500, warn at 90%.
+Defaults match the principle-7 budgets (as amended in v0.5.13):
+_CORE = 5600, _WEB3 = 1500, warn at 90%.
 """
 
 from __future__ import annotations
@@ -44,7 +45,7 @@ def report(label: str, tokens: int, ceiling: int, status: str) -> str:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--core-ceiling", type=int, default=4800)
+    parser.add_argument("--core-ceiling", type=int, default=5600)
     parser.add_argument("--web3-ceiling", type=int, default=1500)
     parser.add_argument("--warn-at", type=float, default=0.9,
                         help="Warn threshold as a fraction of the ceiling (default: 0.9)")

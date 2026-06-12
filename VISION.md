@@ -116,7 +116,7 @@ Things we might add later (not now):
 
 - `AGENTS.md` — root agent guide; nearest-wins hierarchy across `docs/`.
 - `CLAUDE.md` — local-only project notes (gitignored).
-- `docs/spec-plans/LANGUAGE_SPEC.md` — authoritative spec (v0.5.12-draft).
+- `docs/spec-plans/LANGUAGE_SPEC.md` — authoritative spec (v0.5.13-draft).
 - `docs/spec-plans/LANGUAGE_SPEC_PROMPT_CORE.md` — prompt-sized mirror (language core).
 - `docs/spec-plans/LANGUAGE_SPEC_PROMPT_WEB3.md` — prompt-sized mirror (§11 on-chain surface).
 - `.github/pull_request_template.md` — PR scaffold.
