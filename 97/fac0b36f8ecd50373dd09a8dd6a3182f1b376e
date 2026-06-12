@@ -1,0 +1,29 @@
+scripts/check_prompt_budget.py
+  s_c088730cf554db::t_f8e5c5b087d2f9 11-12
+  s_c088730cf554db::t_98efdcffc265a0 48
+docs/spec-plans/AGENTS.md
+  s_c088730cf554db::t_1e48bd4a2a1832 24
+  s_c088730cf554db::t_ee836bcce836de 14
+docs/spec-plans/LANGUAGE_SPEC.md
+  s_c088730cf554db::t_ca5f2fdfa7f8b9 4840
+  s_c088730cf554db::t_639a81bc61b732 19
+  s_c088730cf554db::t_b031030e8c4433 1
+  s_c088730cf554db::t_b6e863f8d2114f 5066
+  s_c088730cf554db::t_03ca2de2797e7c 5082
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "97fac0b36f8ecd50373dd09a8dd6a3182f1b376e",
+  "prompts": {},
+  "sessions": {
+    "s_c088730cf554db": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "518ec5d7-53a7-40b7-a819-9225dc80f0e3",
+        "model": "claude-fable-5"
+      },
+      "human_author": "StreamDemon <revenantpulse@gmail.com>"
+    }
+  }
+}
