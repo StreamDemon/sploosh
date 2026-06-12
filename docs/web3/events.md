@@ -54,9 +54,9 @@ subgraph, or a Solidity-ABI-compatible indexer) subscribes to a contract's
 event topics and decodes each matching log. For EVM contracts, a future
 Sploosh compiler release will emit an event ABI alongside the deployed
 bytecode so indexers can decode the topic/data split for each variant.
-ABI emission artifacts (bytecode + ABI JSON + metadata) are deferred to
-v0.5.0 — v0.4.4 specifies the event *shape* and topic layout, but no
-compiler output exists yet.
+ABI emission artifacts (bytecode + ABI JSON + metadata) are not yet
+specified — the current spec defines the event *shape* and topic layout,
+but no compiler output exists yet.
 
 Concrete indexer integration patterns (subgraph manifests, block-by-block
 replay, reorg handling) are deployment-tooling concerns and will be covered

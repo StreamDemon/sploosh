@@ -8,7 +8,7 @@
 |----------|---------|-------|
 | `contract MyToken { }` | `onchain mod my_token { }` | Module-based, not class-based |
 | `mapping(address => uint256)` | `storage { balances: Map<Address, u256> }` | Storage layout is Solidity-compatible on EVM — see §11.1a and "Storage Layout" below |
-| `mapping(address => mapping(uint256 => ...))` | `Map<Address, Map<u256, ...>>` | Nested maps recurse via `keccak256(key ++ slot)` on EVM, identical to Solidity |
+| `mapping(address => mapping(uint256 => ...))` | `Map<Address, Map<u256, ...>>` | Nested maps recurse via `keccak256(abi.encode(key, map_slot))` on EVM, identical to Solidity |
 | `msg.sender` | `ctx::caller()` | Function call, not magic global |
 | `msg.value` | `ctx::value()` | Requires `@payable` annotation |
 | `block.timestamp` | `ctx::timestamp()` | Same semantics |

@@ -31,7 +31,7 @@ The following modules are compile-time errors inside `onchain`:
 - `std::web` -- no HTTP server
 - `std::env` -- no environment variables
 
-**Concurrency primitives are also forbidden on-chain.** The `actor` keyword, the `spawn`, `send`, `send_timeout`, `select`, and `timeout(ms)` intrinsics, the `Handle<T>`, `Channel<T>`, `Sender<T>`, `Receiver<T>`, and `JoinHandle<T>` types, and the `@supervisor` and `@mailbox` attributes are all compile errors inside `onchain`. `extern "C"` and `extern "C" async` FFI blocks are also rejected. On-chain execution is synchronous, single-threaded, and transactional — there is no runtime scheduler for any of these to run on. Transitive imports of native modules that internally use actors are still allowed, provided the functions called across the `onchain` boundary do not themselves touch actor intrinsics. See §8.1, §11.1, and §12.3 of the language specification for the full list.
+**Concurrency primitives are also forbidden on-chain.** The `actor` keyword, the `spawn`, `send`, `send_timeout`, `select`, and `timeout(ms)` intrinsics, the `Handle<T>`, `Channel<T>`, `Sender<T>`, `Receiver<T>`, and `JoinHandle<T>` types, and the `@supervisor` and `@mailbox` attributes are all compile errors inside `onchain`. The `async` function modifier and the `.await` operator are likewise compile errors inside `onchain`. The `Shared<T>` refcounted pointer type (§4.4a) is forbidden on-chain as well — reference counting has no gas-model home in a transactional VM. `extern "C"` and `extern "C" async` FFI blocks are also rejected. On-chain execution is synchronous, single-threaded, and transactional — there is no runtime scheduler for any of these to run on. Transitive imports of native modules that internally use actors are still allowed, provided the functions called across the `onchain` boundary do not themselves touch actor intrinsics. See §8.1, §11.1, and §12.3 of the language specification for the full list.
 
 **Available inside onchain:** `std::math` (integer methods only — floating-point methods are forbidden), `std::crypto`, `std::chain`, `std::collections`, and all core types.
 
@@ -39,7 +39,6 @@ The following modules are compile-time errors inside `onchain`:
 
 - All state lives in `storage` blocks (persistent on-chain)
 - Functions are non-reentrant by default
-- No references in public function parameters (messages cross transaction boundaries)
 - Events via `emit` keyword
 - Blockchain context via `ctx` module
 - **No concurrency** -- on-chain execution is sequential within a transaction. No actors, no async, no channels, no FFI. On-chain functions are non-reentrant by default; the `@reentrant` attribute is the explicit opt-in (§11.3). This is a wholly separate mechanism from the off-chain actor-handler `SelfCall` detection — the two do not overlap.

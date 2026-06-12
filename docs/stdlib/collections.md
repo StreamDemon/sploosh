@@ -2,6 +2,8 @@
 
 > Vec, Map, Set -- methods and usage patterns.
 
+**Available targets:** all (including onchain)
+
 ## Vec\<T\>
 
 Growable, heap-allocated list.

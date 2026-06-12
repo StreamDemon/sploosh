@@ -8,8 +8,11 @@
 
 Each diagnostic that the compiler or runtime emits carries a stable code of
 the form `E<NNNN>` (error), `W<NNNN>` (warning), or `L<NNNN>` (lint). The
-`Kind` column distinguishes three classes of diagnostic: **compile error**
-(raised at build time, no deployed artifact); **runtime revert** (raised
+`Kind` column distinguishes four classes of diagnostic: **compile error**
+(raised at build time, no deployed artifact); **compile warning** (raised
+at build time but does not fail the build — `W<NNNN>` codes, e.g. `W0010`;
+lint rows, when the `L<NNNN>` range is populated, will carry a **lint**
+kind on the same model); **runtime revert** (raised
 during on-chain transaction execution — the entire transaction's state
 mutations and emitted events are unwound, per §11.7a); and **runtime
 error** (raised by an off-chain runtime API as a `Result::Err` value,
@@ -21,8 +24,10 @@ semantics are specified there, and this page is the canonical source of
 each stable code number. The `Cluster` column locates the code in the
 partitioning defined in §18.2. The `Status` column is one of `stable` (published code — the
 `code → meaning` mapping is frozen per §18.4), `deprecated` (superseded —
-carries a `superseded_by: <code>` note), or `reserved` (range reserved for
-future assignment by cluster).
+carries a `superseded_by: <code>` note), `reserved` (range reserved for
+future assignment by cluster), or `vacant` (intentionally unassigned — the
+slot's would-be meaning is covered by another code and, per §18.4
+frozen-on-publish, the slot is never reassigned; e.g. `E1114`).
 
 ## Cluster A — Lexical / parser / basic syntax · `E0001–E0999`
 

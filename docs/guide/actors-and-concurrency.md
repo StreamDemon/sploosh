@@ -287,11 +287,11 @@ Channels provide typed, bounded communication between actors or async tasks.
 ```sploosh
 let (tx, rx) = Channel::new(16);   // bounded channel with capacity 16
 
-// Sender side
-tx.send("hello".into());           // blocks if the channel is full
+// Sender side (blocks if the channel is full, returns Err if receiver dropped)
+tx.send("hello".into())?;
 
-// Receiver side
-let msg: String = rx.recv();       // blocks until a message is available
+// Receiver side (blocks until a message is available, returns Err if all senders dropped)
+let msg: String = rx.recv()?;
 ```
 
 `Sender<T>` and `Receiver<T>` are the two halves of a channel. Both implement `Send` so they can be passed to other actors.
@@ -301,12 +301,15 @@ let msg: String = rx.recv();       // blocks until a message is available
 match send_timeout(tx.send("hello".into()), 500) {
     Ok(()) => { /* sent */ }
     Err(SendError::Timeout) => { /* channel full after 500ms */ }
+    Err(SendError::Dead) => { /* destination died or is draining */ }
 }
 ```
 
 ## Mailbox Configuration
 
 Every actor has a bounded mailbox. Use the `@mailbox` attribute to configure its capacity. The default capacity is 1024. When the mailbox is full, the sender blocks until space is available.
+
+Message ordering is guaranteed **per sender**: messages from the same sender to the same actor are processed in send order (per-sender FIFO, §8.11). No global ordering across different senders is guaranteed.
 
 ```sploosh
 @mailbox(capacity: 256)
@@ -325,8 +328,8 @@ actor Logger {
 
 ```sploosh
 select {
-    msg = recv channel_a => handle_a(msg),
-    msg = recv channel_b => handle_b(msg),
+    msg = channel_a.recv() => handle_a(msg),
+    msg = channel_b.recv() => handle_b(msg),
     _ = timeout(5000) => return Err(AppError::Timeout),
 }
 ```

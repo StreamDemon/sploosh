@@ -23,8 +23,8 @@ pub fn get_sent_value() -> u64 {
 | Aspect | EVM (Ethereum) | SVM (Solana) |
 |--------|---------------|--------------|
 | Native token context | `ctx::value()` (u256, wei) | `ctx::lamports()` (u64) |
-| Caller | `ctx::caller()` | `ctx::signer()` |
-| Contract address | `ctx::self_address()` | `ctx::program_id()` |
+| Caller | `ctx::caller()` (universal) | `ctx::caller()` (universal), plus SVM-only `ctx::signer()` |
+| Contract address | `ctx::self_address()` (universal) | `ctx::self_address()` (universal), plus SVM-only `ctx::program_id()` |
 | Gas model | Gas-based | Compute units |
 | Integer size | u256 native | u64 native |
 

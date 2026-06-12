@@ -33,18 +33,20 @@ async fn fetch(url: &str) -> Result<Response, NetError> {
 Use `spawn async` to run an async function as a standalone task that is not an actor. It returns a `JoinHandle<T>` that you can `.await` to get the result.
 
 ```sploosh
-let handle: JoinHandle<Result<Response, NetError>> = spawn async fetch_data("https://example.com");
+let handle: JoinHandle<Response> = spawn async {
+    fetch_data("https://example.com").await
+};
 
 // Do other work...
 
-let response = handle.await?;   // wait for the task to finish
+let response = handle.await?;   // wait for the task to finish; `?` yields the Response
 ```
 
 Multiple tasks can run concurrently:
 
 ```sploosh
-let h1 = spawn async fetch_data("https://api.one.com");
-let h2 = spawn async fetch_data("https://api.two.com");
+let h1 = spawn async { fetch_data("https://api.one.com").await };
+let h2 = spawn async { fetch_data("https://api.two.com").await };
 
 let (r1, r2) = (h1.await?, h2.await?);
 ```

@@ -77,9 +77,7 @@ where `abi.encode` is Solidity's ABI encoding of the key — for value-type
 keys (integers, `Address`, `bool`, fixed-size byte arrays) this is the key
 padded to 32 bytes. `Address` keys pad with 12 leading zero bytes (low-order
 20 bytes hold the address, matching §3.1); integer keys are zero-extended
-big-endian. Dynamic-length keys (`bytes` / `String`) follow Solidity's rule
-that hashes the raw key bytes concatenated with the slot, not an `abi.encode`
-padded form; Sploosh `Map` keys are value-typed in v0.4.4, so only the
+big-endian. Sploosh `Map` keys are currently value-typed, so only the
 padded form is emitted.
 
 ### Nested maps

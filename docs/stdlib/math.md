@@ -190,6 +190,8 @@ Associated constants on `f32` and `f64`. Values below are for `f64`; `f32` has t
 
 All methods below are available on every integer type (`i8`..`i128`, `u8`..`u128`, `u256`) and on every target, **including `onchain`**. See §4.10 for the full catalog and §4.8 for checked/wrapping/saturating variants.
 
+Note: `u256` arithmetic in **off-chain** code fires the `W0010` software-emulation warning — canonical trigger list in spec §3.1 and `docs/reference/compiler-errors.md`.
+
 ### Arithmetic
 
 **Methods:** `abs` (signed types only), `min`, `max`, `clamp`, `pow`
@@ -263,7 +265,7 @@ fn polar_to_cartesian(r: f64, theta: f64) -> (f64, f64) {
 ### Square root of a u256 (on-chain safe)
 
 ```sploosh
-onchain module Pool {
+onchain mod Pool {
     pub fn price_sqrt(reserve_a: u256, reserve_b: u256) -> u256 {
         (reserve_a * reserve_b).isqrt()
     }

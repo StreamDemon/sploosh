@@ -41,14 +41,19 @@ match user.role {
 
 ## Actor Method References
 
-**Problem:** Using `&str` or `&T` in a `pub` actor method.
+**Problem:** Using `&str` or `&T` as a parameter of a `pub fn (&mut self, ...)` actor method.
 
-**Fix:** Use owned types (`String`, `T`) for all public actor method parameters.
+**Fix:** Use owned types (`String`, `T`) for the parameters of `&mut self` public actor methods (§8.2). `&self` request/reply methods *may* take references — the caller blocks for the reply, so the borrow is sound.
 
 ```sploosh
 // WRONG: pub fn log(&mut self, msg: &str)
 // RIGHT:
 pub fn log(&mut self, msg: String) { /* ... */ }
+
+// Also fine — &self request/reply may borrow (caller blocks):
+pub fn lookup(&self, key: &str) -> Option<String> { /* ... */ }
 ```
+
+If the fix-by-cloning feels expensive for large read-mostly data, reach for `Shared<T>` (§4.4a): the wrapper itself is an owned value (satisfying the `&mut self` owned-parameter rule) while the inner data is shared by an O(1) refcount bump instead of a deep clone.
 
 <!-- TODO: Add more patterns with actual compiler error messages once the compiler exists -->

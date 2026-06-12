@@ -19,6 +19,6 @@ sploosh run
 
 ## What's Happening
 
-- `fn main()` -- entry point, must return `Result<(), AppError>`
+- `fn main()` -- entry point, conventionally returns `Result<(), AppError>`
 - `print()` -- built-in function (prelude), not a macro
 - `Ok(())` -- explicit success return with unit value

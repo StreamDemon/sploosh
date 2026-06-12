@@ -13,7 +13,8 @@ use std::json;
 enum CliError {
     MissingArgument { name: String },
     FileNotFound { path: String },
-    ParseError(json::JsonError),
+    Io(FsError),                    // From<FsError> auto-generated (§6.3)
+    ParseError(json::JsonError),    // From<json::JsonError> auto-generated
 }
 
 fn main() -> Result<(), CliError> {
@@ -29,17 +30,19 @@ fn main() -> Result<(), CliError> {
 
     let config: Config = json::parse(&content)?;
 
-    match config.command.as_str() {
+    let command = config.command.clone();   // clone so `config` can move into the arms
+    match command.as_str() {
         "build" => run_build(config),
         "test" => run_tests(config),
         "deploy" => run_deploy(config),
         _ => {
-            print(format("Unknown command: {}", config.command));
+            print(format("Unknown command: {}", command));
             Ok(())
         }
     }
 }
 
+@derive(Deserialize)
 struct Config {
     command: String,
     target: String,
@@ -63,5 +66,5 @@ fn run_deploy(config: Config) -> Result<(), CliError> { Ok(()) }
 - **`@error` derive** for clean error enum with auto-generated `From` impls
 - **`env::args()`** for CLI arguments
 - **`.context()`** for adding error context
-- **Match on strings** for command dispatch
+- **Match on strings** for command dispatch (clone the matched field first so the owning struct can move into the arms)
 - **Result-based flow** throughout -- no exceptions
