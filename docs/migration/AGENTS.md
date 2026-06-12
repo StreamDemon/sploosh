@@ -17,7 +17,7 @@ from-solidity.md     from-typescript.md
 
 - **Side-by-side examples.** Two code blocks: source language on the left/top, Sploosh on the right/bottom.
 - **Honest about differences.** Don't oversell. If Sploosh is missing a feature (e.g., no `Rc`/`Arc`, no delegatecall), say so.
-- **Map the surprises.** Each guide should have a "Things that will surprise you" section.
+- **Map the surprises.** Calling out what will trip up an experienced reader is the genre's core value. Existing guides weave surprises inline; new guides should collect them in a dedicated "Things that will surprise you" section (existing guides are being restructured opportunistically — none has one yet).
 - **Concise.** These are reference cards, not tutorials. Send readers to `docs/guide/` for depth.
 
 ## Touch Points

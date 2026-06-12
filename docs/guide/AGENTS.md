@@ -24,14 +24,14 @@ modules-and-visibility.md
 - **Voice:** friendly, second-person ("you write"), pragmatic. Match `actors-and-concurrency.md` and `ownership-and-borrowing.md` for tone.
 - **Examples must compile in a hypothetical world.** No spec-illegal code, even in motivational snippets.
 - **Lead with motivation, not syntax.** A two-sentence "why this exists" before any example.
-- **Cross-link the spec.** End each guide with `Spec reference: §<n>` for readers who want the formal rules.
+- **Cross-link the spec.** New guides should end with a `Spec reference: §<n>` footer for readers who want the formal rules; existing guides predate this convention and are being backfilled opportunistically (none has a footer yet).
 - **No new language design.** If a guide implies behaviour the spec doesn't say, the guide is wrong.
 
 ## Touch Points
 
 - `getting-started.md` is the canonical first read — keep it under 1,500 words and make it install→hello-world→next-step.
 - `actors-and-concurrency.md` and `ownership-and-borrowing.md` are the longest guides; they're also the most spec-load-bearing. Sweep them when §4 (ownership) or §8 (concurrency) changes.
-- `pipe-operator.md` codifies the `expr |> f?` precedence rule (`(expr |> f)?`) — must mirror §5.
+- `pipe-operator.md` codifies the `expr |> f?` precedence rule (`(expr |> f)?`) — must mirror §5.7 (pipe-stage `?`).
 
 ## JIT Index Hints
 
@@ -43,7 +43,7 @@ rg -l "Shared<T>" docs/guide
 rg -n "Spec reference" docs/guide
 
 # Find guides missing a spec reference
-rg -L "Spec reference" docs/guide
+rg --files-without-match "Spec reference" -g '!AGENTS.md' docs/guide
 ```
 
 ## Common Gotchas
@@ -58,6 +58,6 @@ rg -L "Spec reference" docs/guide
 # If you changed a guide, did the underlying spec also change?
 git diff --name-only main...HEAD | findstr -r "guide spec-plans"
 
-# All guides should have a Spec reference footer
-rg -L "Spec reference" docs/guide
+# Guides still missing a Spec reference footer (aspirational — backfill opportunistically)
+rg --files-without-match "Spec reference" -g '!AGENTS.md' docs/guide
 ```

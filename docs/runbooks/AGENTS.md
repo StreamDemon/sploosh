@@ -20,7 +20,7 @@ upgrading-sploosh-version.md
 
 - **Numbered steps, copy-pasteable commands.** Prose between steps stays minimal.
 - **Pre-conditions stated up front.** "You have a working `sploosh` toolchain installed and `sploosh.toml` configured."
-- **Failure modes & recovery.** Each runbook has a "If something goes wrong" section that maps observed errors → fixes.
+- **Failure modes & recovery.** Longer runbooks (`actor-debugging.md`, `testing-strategies.md`) have an "If something goes wrong" section that maps observed errors → fixes. Add one to any runbook that grows beyond a short procedure; the still-stubbed deployment runbooks don't have one yet.
 - **Tool-version specific.** When a step depends on a specific tool version (e.g., `forge`, `solana-cli`), pin it.
 
 ## Touch Points
@@ -45,6 +45,7 @@ rg -n "E\d{4}" docs/runbooks
 - **Runbooks lag the spec.** When a behaviour changes (e.g., new error code, new attribute), runbooks often miss the update. When changing the spec, sweep `docs/runbooks/`.
 - **Solana deploy runbook is short on purpose** — SVM specifics are still being amended in the spec. Don't add detail the spec doesn't yet endorse.
 - **Don't duplicate the build-system docs.** Runbooks reference `docs/tooling/build-system.md`; they don't restate it.
+- **`TODO` markers are tracked debt.** Runbooks carry the largest share of the docs-wide `<!-- TODO: ... once implemented -->` deferrals — expected while the project is spec-only; closing them is compiler-bootstrap-era work. Keep markers in the HTML-comment form so the inventory stays greppable, and re-enumerate before claiming any are closed: `rg -n "^\s*<!-- TODO" docs`.
 
 ## Pre-PR Checks
 

@@ -4,7 +4,7 @@ Mirror of authoritative spec sections. **These files restate the spec; they don'
 
 ## Identity
 
-Per-topic quick-references derived from the spec. Used by IDE-style lookups and by anyone who doesn't want to read a 180KB document.
+Per-topic quick-references derived from the spec. Used by IDE-style lookups and by anyone who doesn't want to read the full spec.
 
 ## Files & Spec Mapping
 
@@ -12,7 +12,7 @@ Per-topic quick-references derived from the spec. Used by IDE-style lookups and 
 |---|---|
 | `grammar.md` | `LANGUAGE_SPEC.md` §16 (EBNF) |
 | `keywords.md` | §2.3 (44 keywords: 36 reserved + 8 contextual) |
-| `attributes.md` | §12 (`@test`, `@derive`, `@inline`, `@error`, `@payable`, `@reentrant`, `@supervisor`, `@mailbox`, `@overflow`, `@fast_math`) |
+| `attributes.md` | §12 (`@test`, `@property`, `@derive`, `@inline`, `@error`, `@payable`, `@reentrant`, `@supervisor`, `@mailbox`, `@overflow`, `@fast_math`) |
 | `operator-precedence.md` | §2.4 |
 | `type-conversion-rules.md` | §3 / §4 (`as` rules) |
 | `compiler-errors.md` | §18 |

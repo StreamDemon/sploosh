@@ -12,7 +12,7 @@ This folder describes the *toolchain* — separate from the language itself. The
 |---|---|
 | `build-system.md` | `sploosh build`, target selection, output layout |
 | `package-management.md` | Dependencies, registries, version resolution |
-| `sploosh-toml.md` | Manifest schema (`[package]`, `[dependencies]`, `[targets]`, etc.) |
+| `sploosh-toml.md` | Manifest schema (`[project]`, `[dependencies]`, `[targets]`, etc.) |
 | `editor-setup.md` | LSP / editor integration |
 
 ## Patterns & Conventions
@@ -32,8 +32,8 @@ This folder describes the *toolchain* — separate from the language itself. The
 ## JIT Index Hints
 
 ```pwsh
-# Find every `sploosh.toml` example
-rg -n "\[package\]|\[dependencies\]" docs
+# Find every `sploosh.toml` example (manifest table is `[project]`; `[[package]]` exists only in the lockfile)
+rg -n "\[project\]|\[dependencies\]" docs
 
 # Find every CLI invocation
 rg -n "sploosh build|sploosh new|sploosh test" docs
@@ -52,5 +52,5 @@ rg -n "sploosh build|sploosh new|sploosh test" docs
 git diff --name-only main...HEAD | findstr -r "tooling runbooks examples"
 
 # Confirm sploosh.toml examples are valid against the schema
-rg -n "\[package\]" docs/examples docs/runbooks
+rg -n "\[project\]" docs/examples docs/runbooks
 ```
