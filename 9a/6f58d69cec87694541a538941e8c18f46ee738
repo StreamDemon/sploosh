@@ -1,0 +1,33 @@
+.github/workflows/rust.yml
+  s_eda6822d1f2147::t_46f5a8a44ca3b2 26
+docs/runbooks/compiler-development.md
+  s_eda6822d1f2147::t_46f5a8a44ca3b2 57-59
+tests/corpus/basic.sp
+  s_eda6822d1f2147::t_c5a4f5901645fa 12-17
+crates/sploosh-parser/src/lib.rs
+  s_eda6822d1f2147::t_fdc03bfc8c64f4 119,144,236-245,247-251,283,423-428
+  s_eda6822d1f2147::t_a6dd339da2b14e 1211-1251
+  s_eda6822d1f2147::t_78377cd830e6bd 70-75
+crates/sploosh-ast/src/lib.rs
+  s_eda6822d1f2147::t_46f5a8a44ca3b2 81,125-132
+.dockerignore
+  s_eda6822d1f2147::t_46f5a8a44ca3b2 3-4
+scripts/docker-check.ps1
+  s_eda6822d1f2147::t_46f5a8a44ca3b2 10-12
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "9a6f58d69cec87694541a538941e8c18f46ee738",
+  "prompts": {},
+  "sessions": {
+    "s_eda6822d1f2147": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f12c9-5e9d-7612-95d0-1aef54b28a0b",
+        "model": "gpt-5.5"
+      },
+      "human_author": "StreamDemon <revenantpulse@gmail.com>"
+    }
+  }
+}
