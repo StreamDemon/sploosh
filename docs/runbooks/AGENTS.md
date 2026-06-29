@@ -13,7 +13,7 @@ new-project-setup.md           adding-onchain-module.md
 cross-target-builds.md         actor-debugging.md
 debugging-ownership-errors.md  testing-strategies.md
 deploying-to-evm.md            deploying-to-solana.md
-upgrading-sploosh-version.md
+upgrading-sploosh-version.md   compiler-development.md
 ```
 
 ## Patterns & Conventions
@@ -29,6 +29,8 @@ upgrading-sploosh-version.md
 - `actor-debugging.md` references supervision strategies (§8) — sync when supervisor semantics change.
 - `debugging-ownership-errors.md` mirrors `docs/reference/compiler-errors.md` for ownership-related diagnostics.
 - `cross-target-builds.md` covers `sploosh build --target {native,wasm,evm,svm}` — sync with `docs/tooling/build-system.md`.
+- `compiler-development.md` covers local checks for compiler crates — sync with
+  `crates/AGENTS.md` and `.github/workflows/rust.yml`.
 
 ## JIT Index Hints
 
@@ -45,7 +47,7 @@ rg -n "E\d{4}" docs/runbooks
 - **Runbooks lag the spec.** When a behaviour changes (e.g., new error code, new attribute), runbooks often miss the update. When changing the spec, sweep `docs/runbooks/`.
 - **Solana deploy runbook is short on purpose** — SVM specifics are still being amended in the spec. Don't add detail the spec doesn't yet endorse.
 - **Don't duplicate the build-system docs.** Runbooks reference `docs/tooling/build-system.md`; they don't restate it.
-- **`TODO` markers are tracked debt.** Runbooks carry the largest share of the docs-wide `<!-- TODO: ... once implemented -->` deferrals — expected while the project is spec-only; closing them is compiler-bootstrap-era work. Keep markers in the HTML-comment form so the inventory stays greppable, and re-enumerate before claiming any are closed: `rg -n "^\s*<!-- TODO" docs`.
+- **`TODO` markers are tracked debt.** Runbooks carry the largest share of the docs-wide `<!-- TODO: ... once implemented -->` deferrals from the pre-bootstrap era; closing them is compiler-bootstrap-era work. Keep markers in the HTML-comment form so the inventory stays greppable, and re-enumerate before claiming any are closed: `rg -n "^\s*<!-- TODO" docs`.
 
 ## Pre-PR Checks
 

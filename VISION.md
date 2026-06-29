@@ -2,7 +2,7 @@
 
 ## What This Is
 
-Sploosh is an AI-native programming language designed for LLMs to generate accurately on the first try. It blends Rust-level memory safety, Elixir-style actor concurrency, and dual-target compilation to web2 (native + WASM) and web3 (EVM + Solana SBF). The repository today is **spec-only** — the language definition, its prompt-sized mirror, and supporting documentation. The compiler comes next.
+Sploosh is an AI-native programming language designed for LLMs to generate accurately on the first try. It blends Rust-level memory safety, Elixir-style actor concurrency, and dual-target compilation to web2 (native + WASM) and web3 (EVM + Solana SBF). The repository is **spec-first** — the language definition, its prompt-sized mirror, supporting documentation, and early Rust compiler bootstrap crates live together.
 
 The thesis: today's programming languages were designed for humans, and LLMs have to imitate idiomatic human code as a side effect of training. Sploosh inverts that — it picks syntax and semantics from the **most-trained** vocabulary across the top dozen languages, with **one canonical way** to express every operation, so LLM completions converge on correct code with minimal context.
 
@@ -47,7 +47,7 @@ The thesis: today's programming languages were designed for humans, and LLMs hav
 
 ### Authorship Philosophy
 
-- **Documentation is the language.** With no compiler yet, the `docs/` tree is the sole source of truth. Stale docs are language bugs.
+- **Documentation is the language.** Until the compiler is complete, the `docs/` tree is the sole behavioral source of truth. Stale docs are language bugs.
 - **Spec-first PRs.** Every behavioural change updates `LANGUAGE_SPEC.md` in the same PR — never a behaviour change without a spec change.
 - **Conservative additions.** The spec resists features. Adding one means cutting another, or splitting the prompt-sized artifact.
 

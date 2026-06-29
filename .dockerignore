@@ -1,0 +1,15 @@
+.git/
+target/
+.brv/
+.claude/
+.codex/
+.factory/
+.remember/
+.agents/
+
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
