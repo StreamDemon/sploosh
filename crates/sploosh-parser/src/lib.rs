@@ -499,6 +499,17 @@ impl Parser {
     }
 
     fn block(&mut self) -> Option<Block> {
+        // A block is always a fresh scope: the struct-literal block-head
+        // restriction (§5.1) must not leak into its body, even when the block
+        // belongs to an `if`/`while` nested inside a restricted condition.
+        let prev = self.no_struct_literal;
+        self.no_struct_literal = false;
+        let result = self.block_inner();
+        self.no_struct_literal = prev;
+        result
+    }
+
+    fn block_inner(&mut self) -> Option<Block> {
         let start = self.expect(TokenKind::LBrace)?.span.start;
         let mut statements = Vec::new();
         let mut tail = None;
@@ -796,18 +807,10 @@ impl Parser {
                     ..expr
                 })
             }
-            TokenKind::LBrace => {
-                // A block is a fresh scope: struct literals are allowed inside it
-                // even when this block is itself an `if`/`while` condition.
-                let prev = self.no_struct_literal;
-                self.no_struct_literal = false;
-                let block = self.block();
-                self.no_struct_literal = prev;
-                block.map(|block| Expr {
-                    span: block.span,
-                    kind: ExprKind::Block(block),
-                })
-            }
+            TokenKind::LBrace => self.block().map(|block| Expr {
+                span: block.span,
+                kind: ExprKind::Block(block),
+            }),
             TokenKind::Keyword(Keyword::If) => self.if_expr(),
             _ => {
                 self.error_here("expected expression");
@@ -1288,6 +1291,14 @@ mod tests {
         );
         // The restriction must not leak into value position.
         assert!(parse_program("fn f() { let p = Point { x: 1, y: 2 }; }").is_ok());
+    }
+
+    #[test]
+    fn block_head_restriction_does_not_leak_into_nested_if_blocks() {
+        // A nested `if` in a non-parenthesized condition position must still
+        // allow value-position struct literals inside its own blocks.
+        let src = "fn f() -> i64 { if if a { Cfg { v: 1 }.on } else { false } { 1 } else { 2 } }";
+        assert!(parse_program(src).is_ok());
     }
 
     #[test]
