@@ -2,7 +2,11 @@ use sploosh_parser::parse_program;
 
 #[test]
 fn parses_corpus_files() {
-    for path in ["tests/corpus/basic.sp", "tests/corpus/actor.sp"] {
+    for path in [
+        "tests/corpus/basic.sp",
+        "tests/corpus/actor.sp",
+        "tests/corpus/control_flow.sp",
+    ] {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../..")
             .join(path);

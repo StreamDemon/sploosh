@@ -184,6 +184,8 @@ impl Lexer<'_> {
                     self.bump();
                 }
                 '/' if self.peek_next() == Some('/') => self.comment(),
+                // Block comments are intentionally omitted (§2.2); a lone `/` is division.
+                '/' => self.single(TokenKind::Slash),
                 c if is_ident_start(c) => self.ident_or_keyword(),
                 '0'..='9' => self.number(),
                 '"' => self.string(),
@@ -566,6 +568,21 @@ mod tests {
         assert_eq!(tokens[0].kind, TokenKind::Ident);
         assert_eq!(tokens[3].kind, TokenKind::Ident);
         assert_eq!(tokens[7].kind, TokenKind::Ident);
+    }
+
+    #[test]
+    fn lexes_division_and_keeps_comments() {
+        let tokens = lex("a / b").unwrap();
+        assert_eq!(tokens[1].kind, TokenKind::Slash);
+        // `//` still wins over `/` via the guarded arm: only the doc comment survives.
+        let doc = lex("/// d\na").unwrap();
+        assert_eq!(doc[0].kind, TokenKind::DocComment);
+        assert!(
+            lex("a // trailing\nb")
+                .unwrap()
+                .iter()
+                .all(|t| t.kind != TokenKind::Slash)
+        );
     }
 
     #[test]

@@ -28,6 +28,9 @@ struct Parser {
     tokens: Vec<Token>,
     pos: usize,
     errors: Vec<ParseError>,
+    /// When set, a `struct_literal` may not be the outermost expression — the
+    /// block-head restriction (§5.1, §5.2; §16 `struct_literal` side condition).
+    no_struct_literal: bool,
 }
 
 impl Parser {
@@ -36,6 +39,7 @@ impl Parser {
             tokens,
             pos: 0,
             errors: Vec::new(),
+            no_struct_literal: false,
         }
     }
 
@@ -610,7 +614,7 @@ impl Parser {
                 continue;
             }
             if self.eat(TokenKind::LBracket).is_some() {
-                let index = self.expr(0)?;
+                let index = self.delimited_expr()?;
                 let end = self.expect(TokenKind::RBracket)?.span.end;
                 let span = Span::new(lhs.span.start, end);
                 lhs = Expr {
@@ -665,6 +669,30 @@ impl Parser {
         Some(lhs)
     }
 
+    /// Condition / scrutinee expression with the struct-literal block-head
+    /// restriction active: a `struct_literal` may not be the outermost
+    /// expression of an `if`/`while` condition, `match` scrutinee, or `for`
+    /// iterable (LANGUAGE_SPEC §5.1, §5.2; §16 `struct_literal` side condition).
+    /// Parenthesize to use one there.
+    fn cond_expr(&mut self) -> Option<Expr> {
+        let prev = self.no_struct_literal;
+        self.no_struct_literal = true;
+        let result = self.expr(0);
+        self.no_struct_literal = prev;
+        result
+    }
+
+    /// Expression inside a delimited group (parens, call args, index, `vec!`),
+    /// where struct literals are allowed again — the restriction only binds the
+    /// outermost expression, not anything nested inside brackets.
+    fn delimited_expr(&mut self) -> Option<Expr> {
+        let prev = self.no_struct_literal;
+        self.no_struct_literal = false;
+        let result = self.expr(0);
+        self.no_struct_literal = prev;
+        result
+    }
+
     fn prefix(&mut self) -> Option<Expr> {
         let token = self.peek()?.clone();
         match token.kind {
@@ -698,9 +726,9 @@ impl Parser {
                             span: Span::new(token.span.start, self.prev_span().end),
                         });
                     }
-                    let first = self.expr(0)?;
+                    let first = self.delimited_expr()?;
                     if self.eat(TokenKind::Semi).is_some() {
-                        let count = self.expr(0)?;
+                        let count = self.delimited_expr()?;
                         let end = self.expect(TokenKind::RBracket)?.span.end;
                         return Some(Expr {
                             kind: ExprKind::VecRepeat {
@@ -712,7 +740,7 @@ impl Parser {
                     }
                     let mut items = vec![first];
                     while self.eat(TokenKind::Comma).is_some() && !self.at(TokenKind::RBracket) {
-                        items.push(self.expr(0)?);
+                        items.push(self.delimited_expr()?);
                     }
                     let end = self.expect(TokenKind::RBracket)?.span.end;
                     return Some(Expr {
@@ -730,7 +758,7 @@ impl Parser {
             }
             TokenKind::Ident | TokenKind::Keyword(Keyword::SelfValue | Keyword::SelfType) => {
                 let path = self.path()?;
-                if self.at(TokenKind::LBrace) {
+                if self.at(TokenKind::LBrace) && !self.no_struct_literal {
                     self.bump();
                     let fields = self.field_inits()?;
                     let end = self.expect(TokenKind::RBrace)?.span.end;
@@ -761,17 +789,25 @@ impl Parser {
             }
             TokenKind::LParen => {
                 self.bump();
-                let expr = self.expr(0)?;
+                let expr = self.delimited_expr()?;
                 let end = self.expect(TokenKind::RParen)?.span.end;
                 Some(Expr {
                     span: Span::new(token.span.start, end),
                     ..expr
                 })
             }
-            TokenKind::LBrace => self.block().map(|block| Expr {
-                span: block.span,
-                kind: ExprKind::Block(block),
-            }),
+            TokenKind::LBrace => {
+                // A block is a fresh scope: struct literals are allowed inside it
+                // even when this block is itself an `if`/`while` condition.
+                let prev = self.no_struct_literal;
+                self.no_struct_literal = false;
+                let block = self.block();
+                self.no_struct_literal = prev;
+                block.map(|block| Expr {
+                    span: block.span,
+                    kind: ExprKind::Block(block),
+                })
+            }
             TokenKind::Keyword(Keyword::If) => self.if_expr(),
             _ => {
                 self.error_here("expected expression");
@@ -782,7 +818,7 @@ impl Parser {
 
     fn if_expr(&mut self) -> Option<Expr> {
         let start = self.expect_keyword(Keyword::If)?.span.start;
-        let condition = self.expr(0)?;
+        let condition = self.cond_expr()?;
         let then_block = self.block()?;
         let else_branch = if self.eat_keyword(Keyword::Else).is_some() {
             Some(Box::new(if self.at_keyword(Keyword::If) {
@@ -813,7 +849,7 @@ impl Parser {
     fn args(&mut self, close: TokenKind) -> Option<Vec<Expr>> {
         let mut args = Vec::new();
         while !self.at(close.clone()) && !self.eof() {
-            args.push(self.expr(0)?);
+            args.push(self.delimited_expr()?);
             if self.eat(TokenKind::Comma).is_none() {
                 break;
             }
@@ -1230,6 +1266,42 @@ mod tests {
             panic!("expected extern block");
         };
         assert_eq!(extern_block.functions[0].visibility, Visibility::Public);
+    }
+
+    #[test]
+    fn if_condition_does_not_swallow_the_block_head() {
+        // Regression: the then-block `{ ... }` must not be parsed as a struct
+        // literal on the condition's trailing path operand.
+        assert!(parse_program("fn f() -> i64 { if a < b { 1 } else { 2 } }").is_ok());
+        assert!(parse_program("fn f() -> i64 { if flag { 1 } else { 2 } }").is_ok());
+    }
+
+    #[test]
+    fn struct_literal_block_head_restriction() {
+        // Outermost struct literal in a condition is rejected (§5.1)...
+        assert!(parse_program("fn f() -> i64 { if x { f: 1 } { 1 } else { 2 } }").is_err());
+        // ...parenthesized is accepted...
+        assert!(parse_program("fn f() -> i64 { if (x { f: 1 }) == y { 1 } else { 2 } }").is_ok());
+        // ...and a struct literal nested in call args (a delimited group) is fine.
+        assert!(
+            parse_program("fn f() -> i64 { if takes(Cfg { on: true }) { 1 } else { 2 } }").is_ok()
+        );
+        // The restriction must not leak into value position.
+        assert!(parse_program("fn f() { let p = Point { x: 1, y: 2 }; }").is_ok());
+    }
+
+    #[test]
+    fn parses_division_operator() {
+        let program = parse_program("fn f(a: i64, b: i64) -> i64 { a / b }").unwrap();
+        let ItemKind::Function(func) = &program.items[0].kind else {
+            panic!("expected function");
+        };
+        let block = func.body.as_ref().expect("function body");
+        let tail = block.tail.as_ref().expect("tail expression");
+        let ExprKind::Binary { op, .. } = &tail.kind else {
+            panic!("expected binary expression");
+        };
+        assert_eq!(op, "/");
     }
 
     #[test]

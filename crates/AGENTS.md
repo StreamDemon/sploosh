@@ -16,6 +16,26 @@ implementation or land a spec amendment first.
 | `sploosh-lexer` | UTF-8 lexer for §2 and §16.1 tokens. |
 | `sploosh-parser` | Recursive-descent parser targeting §16. |
 
+## Implemented subset (bootstrap)
+
+The parser covers a subset of §16, not the whole grammar. Treat anything outside
+the accepted list as **not yet implemented** — add a corpus fixture when it lands.
+
+- **Accepted:** every item form (`fn`, `struct`, `enum` incl. tuple/struct
+  variants, `actor`, `mod`, `use`, `const`, `type`, `trait`, `impl`,
+  `onchain mod`, `extern`); types incl. generics, references, arrays/slices,
+  tuples, `fn`/`dyn`; expressions incl. calls, turbofish, field/index,
+  unary/binary (incl. `/`), `?`, `.await`, `|>`, `as`, struct literals (with the
+  §5.1 block-head restriction), `vec!`, and `if`/`else`; `let`, `return`,
+  `break`, `continue`, `send`, and expression/tail statements.
+- **Not yet implemented:** `match`, `while`, `for`, `loop`, and closures (their
+  keywords lex but have no parse production); generic parameters and
+  `trait`/`impl` bodies are skipped, not stored in the AST; `let mut` / `&mut`
+  mutability and the `send` keyword are parsed but not preserved; a block-like
+  expression (`if`/block) used as a non-tail statement needs a trailing `;`.
+- **Intentionally absent:** block comments — §2.2 keeps one way to comment
+  (`//`, `///`).
+
 ## Conventions
 
 - Keep crates small and dependency-light during bootstrap.
