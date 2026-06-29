@@ -6,7 +6,7 @@
 
 - **Sploosh** — an AI-native programming language: Rust safety + Elixir concurrency + web3 dual-target (native/wasm/evm/svm).
 - **Spec-only repository.** No compiler, no runtime, no source code. Every artifact lives under `docs/`.
-- **Source of truth:** `docs/spec-plans/LANGUAGE_SPEC.md` (currently v0.5.13-draft).
+- **Source of truth:** `docs/spec-plans/LANGUAGE_SPEC.md` (currently v0.5.14-draft).
 - **Sub-trees have their own `AGENTS.md`** — read the nearest one to the file you're touching.
 
 ## Setup Commands
@@ -54,8 +54,8 @@ When you change `LANGUAGE_SPEC.md`, also check (and update if affected):
 
 | Mirror | Path |
 |---|---|
-| Prompt-sized reference (core) | `docs/spec-plans/LANGUAGE_SPEC_PROMPT_CORE.md` |
-| Prompt-sized reference (web3) | `docs/spec-plans/LANGUAGE_SPEC_PROMPT_WEB3.md` |
+| Prompt-sized reference (core, ≤5,600 cl100k tokens) | `docs/spec-plans/LANGUAGE_SPEC_PROMPT_CORE.md` |
+| Prompt-sized reference (web3, ≤1,500 cl100k tokens) | `docs/spec-plans/LANGUAGE_SPEC_PROMPT_WEB3.md` |
 | Project context (local) | `CLAUDE.md` (gitignored) |
 | Reference docs | `docs/reference/{grammar,keywords,attributes,operator-precedence,type-conversion-rules,compiler-errors}.md` |
 | Stdlib | `docs/stdlib/*.md` |
@@ -94,8 +94,8 @@ rg -n "^### 4\.4a" docs/spec-plans/LANGUAGE_SPEC.md
 # Find every mention of a keyword across docs
 rg -n "Shared<T>" docs
 
-# Find all attribute references
-rg -n "@(test|derive|inline|error|payable|reentrant|supervisor|mailbox|overflow|fast_math)\b" docs
+# Find all attribute / directive references
+rg -n "@(test|property|derive|inline|error|payable|reentrant|supervisor|mailbox|overflow|fast_math)\b|#\[(target|gas_limit|indexed|cfg)\b" docs
 
 # Find all on-chain compile-error rules
 rg -n "compile error.*onchain|onchain.*compile error" docs

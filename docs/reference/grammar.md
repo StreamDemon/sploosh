@@ -13,27 +13,32 @@ item_kind      = fn_def | struct_def | enum_def | trait_def
                | impl_block | mod_def | use_stmt | actor_def
                | onchain_mod | event_def | const_def | type_alias | extern_block ;
 
-fn_def         = [ attrs ] [ "pub" ] [ "offchain" ] [ "async" ] "fn" IDENT [ generics ]
-                 "(" params ")" [ "->" type ] block ;
+fn_def         = [ attrs ] [ "pub" ] [ "offchain" ] [ "async" ] "fn" IDENT [ generic_params ]
+                 "(" params ")" [ "->" type ] [ where_clause ] block ;
 params         = [ ( receiver | param ) { "," param } ] ;
 receiver       = [ "&" [ "mut" ] ] "self" ;
 param          = IDENT ":" type ;
 
-struct_def     = [ attrs ] [ "pub" ] "struct" IDENT [ generics ] "{" fields "}" ;
+struct_def     = [ attrs ] [ "pub" ] "struct" IDENT [ generic_params ] [ where_clause ]
+                 "{" fields "}" ;
 fields         = field { "," field } [ "," ] ;
 field          = [ directives ] [ "pub" ] IDENT ":" type ;
 
-enum_def       = [ attrs ] [ "pub" ] "enum" IDENT [ generics ] "{" variants "}" ;
+enum_def       = [ attrs ] [ "pub" ] "enum" IDENT [ generic_params ] [ where_clause ]
+                 "{" variants "}" ;
 variants       = variant { "," variant } [ "," ] ;
 variant        = [ directives ] IDENT [ "(" types ")" | "{" fields "}" ] ;
 
-trait_def      = [ "pub" ] "trait" IDENT [ generics ] [ ":" bounds ] "{" { trait_item } "}" ;
+trait_def      = [ "pub" ] "trait" IDENT [ generic_params ] [ ":" bounds ]
+                 [ where_clause ] "{" { trait_item } "}" ;
 trait_item     = fn_sig ( block | ";" ) | "type" IDENT [ ":" bounds ] ";" ;
 
-impl_block     = "impl" [ generics ] [ trait_ref "for" ] type "{" { impl_item } "}" ;
+impl_block     = "impl" [ generic_params ] [ trait_ref "for" ] type [ where_clause ]
+                 "{" { impl_item } "}" ;
 impl_item      = fn_def | "type" IDENT "=" type ";" ;
 
-actor_def      = [ attrs ] "actor" IDENT [ generics ] "{" [ fields ] { fn_def } "}" ;
+actor_def      = [ attrs ] "actor" IDENT [ generic_params ] [ where_clause ]
+                 "{" [ fields ] { fn_def } "}" ;
                  (* state fields first, comma-separated with optional trailing
                     comma exactly as struct fields; handler fns follow *)
 
@@ -41,29 +46,38 @@ mod_def        = [ "pub" ] "mod" IDENT ( ";" | "{" { item } "}" ) ;
 use_stmt       = [ "pub" ] "use" path [ "::" "{" idents "}" ] ";" ;
 
 onchain_mod    = "onchain" "mod" IDENT "{" { onchain_item } "}" ;
-onchain_item   = [ directives ] ( storage_block | fn_def | event_def ) ;
+onchain_item   = [ directives ] ( storage_block | fn_def | onchain_event_def ) ;
 storage_block  = "storage" "{" fields "}" ;
 
 extern_block   = "extern" extern_target "{" { extern_fn } "}" ;
-extern_target  = STRING_LIT | "onchain" "mod" IDENT ;
+extern_target  = STRING_LIT [ "async" ] | "onchain" "mod" IDENT ;
 extern_fn      = [ "pub" ] "fn" IDENT "(" params ")" [ "->" type ] ";" ;
+                 (* async applies only to string-target extern blocks:
+                    extern "C" async { ... }. extern onchain mod never accepts
+                    async. *)
 
-type           = prim_type | "Self" | IDENT [ generics ] | "&" [ lifetime ] [ "mut" ] type
+type           = prim_type | type_path [ type_args ] | "&" [ lifetime ] [ "mut" ] type
                | "[" type ";" expr "]" | "[" type "]"
                | "(" [ type { "," type } ] ")" | "fn" "(" types ")" "->" type
-               | "dyn" IDENT [ generics ] ;
+               | "dyn" trait_ref ;
 prim_type      = "i8" | "i16" | "i32" | "i64" | "i128"
                | "u8" | "u16" | "u32" | "u64" | "u128" | "u256"
                | "f32" | "f64" | "bool" | "char" | "str" | "String"
                | "Address" | "()" ;
 types          = [ type { "," type } [ "," ] ] ;
-type_alias     = [ "pub" ] "type" IDENT [ generics ] "=" type ";" ;
-trait_ref      = IDENT [ generics ] ;
-generics       = "<" type_params ">" ;
-type_params    = type_param { "," type_param } ;
-type_param     = IDENT [ ":" bounds ] | lifetime ;
+type_alias     = [ "pub" ] "type" IDENT [ generic_params ] "=" type ";" ;
+type_path      = ( "Self" | IDENT ) { "::" IDENT } ;
+trait_ref      = type_path [ type_args ] ;
+generic_params = "<" generic_param { "," generic_param } [ "," ] ">" ;
+generic_param  = IDENT [ ":" bounds ] | lifetime [ ":" lifetime_bounds ] ;
+type_args      = "<" type_arg { "," type_arg } [ "," ] ">" ;
+type_arg       = type | assoc_type_binding ;
+assoc_type_binding = IDENT "=" type ;
 bounds         = bound { "+" bound } ;
-bound          = IDENT [ generics ] | lifetime ;
+bound          = trait_ref | lifetime ;
+where_clause   = "where" where_pred { "," where_pred } [ "," ] ;
+where_pred     = type_path ":" bounds | lifetime ":" lifetime_bounds ;
+lifetime_bounds = lifetime { "+" lifetime } ;
 
 block          = "{" { statement } [ expr ] "}" ;
 statement      = let_stmt | expr_stmt | return_stmt | emit_stmt
@@ -80,16 +94,22 @@ continue_stmt  = "continue" ";" ;
 expr_stmt      = expr ";" ;
 
 expr           = literal | "self" | IDENT | path_expr | struct_literal
-               | expr "." IDENT | expr "(" args ")"  | expr "[" expr "]"
+               | expr "." IDENT [ turbofish ] | expr [ turbofish ] "(" args ")"
+               | expr "[" expr "]" | assign_expr
                | expr BINOP expr | UNOP expr | "&" [ "mut" ] expr
                | expr "?" | expr "as" type
                | if_expr | if_let_expr | match_expr | block | closure
-               | pipe_expr
+               | pipe_expr | vec_literal | assert_matches_expr
                | "spawn" expr | "spawn" "async" block
                | expr ".await"
                | select_expr
                | "for" pattern "in" expr block
                | "while" expr block | while_let_expr | "loop" block ;
+assign_expr    = assign_target "=" expr ;
+assign_target  = IDENT | "self" "." IDENT | expr "." IDENT | "*" expr
+               | expr "[" expr "]" ;
+                 (* assignment is right-associative (§2.4); the parser accepts
+                    only assign_target on the left side. *)
 
 struct_literal = path_expr "{" field_inits "}" ;
                  (* side condition (block-head restriction, Rust precedent):
@@ -104,7 +124,8 @@ pipe_expr      = expr "|>" pipe_stage { "|>" pipe_stage } ;
 pipe_stage     = stage_callee [ "(" args ")" ] [ "?" ] ;
                  (* a stage's trailing "?" applies to the accumulated pipe
                     application result — see §5.7 and the §2.4 footnote *)
-stage_callee   = path_expr { "." IDENT } | "(" closure ")" ;
+stage_callee   = path_expr [ turbofish ] { "." IDENT [ turbofish ] } | "(" closure ")" ;
+turbofish      = "::" type_args ;
 
 if_expr        = "if" expr block [ "else" ( if_expr | if_let_expr | block ) ] ;
 if_let_expr    = "if" "let" pattern "=" expr block [ "else" block ] ;
@@ -113,9 +134,14 @@ match_expr     = "match" expr "{" { match_arm } "}" ;
 match_arm      = pattern [ "if" expr ] "=>" ( expr "," | block ) ;
 select_expr    = "select" "{" { select_arm } "}" ;
 select_arm     = pattern "=" expr "=>" ( expr "," | block ) ;
-closure        = [ "move" ] "|" params "|" ( expr | block ) ;
+closure        = [ "move" ] "|" closure_params "|" ( expr | block ) ;
+closure_params = [ closure_param { "," closure_param } [ "," ] ] ;
+closure_param  = pattern [ ":" type ] ;
 
-path_expr      = IDENT { "::" IDENT } ;
+vec_literal    = "vec" "!" "[" ( args | expr ";" expr ) "]" ;
+assert_matches_expr = "assert_matches" "(" expr "," pattern ")" ;
+
+path_expr      = ( "Self" | IDENT ) { "::" IDENT } ;
 path           = ( "crate" | "super" | "self" | IDENT ) { "::" IDENT } ;
 args           = [ expr { "," expr } [ "," ] ] ;
 
@@ -123,7 +149,7 @@ BINOP          = "+" | "-" | "*" | "/" | "%"
                | "==" | "!=" | "<" | ">" | "<=" | ">="
                | "&&" | "||"
                | ".." | "..=" ;
-UNOP           = "!" | "-" ;
+UNOP           = "!" | "-" | "*" ;
 
 pattern        = "_" | literal | [ "ref" ] IDENT | path_expr
                | path_expr "(" patterns ")" | path_expr "{" field_pats [ ".." ] "}"
@@ -135,18 +161,16 @@ field_inits    = [ field_init { "," field_init } [ "," ] ] ;
 field_init     = IDENT [ ":" expr ] ;
 idents         = IDENT { "," IDENT } ;
 
-fn_sig         = [ "pub" ] [ "async" ] "fn" IDENT [ generics ] "(" params ")" [ "->" type ] ;
-event_def      = [ attrs ] [ "onchain" ] "enum" IDENT "{" variants "}" ;
-                 (* the "onchain" prefix is required when the event enum
-                    appears as a top-level item (§11.5) and optional inside
-                    an "onchain mod", where the context already marks it *)
+fn_sig         = [ "pub" ] [ "async" ] "fn" IDENT [ generic_params ]
+                 "(" params ")" [ "->" type ] [ where_clause ] ;
+event_def      = [ attrs ] "onchain" "enum" IDENT "{" variants "}" ;
+onchain_event_def = [ attrs ] [ "onchain" ] "enum" IDENT "{" variants "}" ;
+                 (* top-level event declarations require "onchain enum"
+                    (§11.5). Inside onchain_mod, plain "enum Event" remains
+                    valid because the context already marks it on-chain. *)
 
-literal        = INT_LIT [ type_suffix ] | FLOAT_LIT [ type_suffix ]
-               | STRING_LIT | CHAR_LIT
+literal        = INT_LIT | FLOAT_LIT | STRING_LIT | CHAR_LIT
                | "true" | "false" ;
-type_suffix    = "i8" | "i16" | "i32" | "i64" | "i128"
-               | "u8" | "u16" | "u32" | "u64" | "u128" | "u256"
-               | "f32" | "f64" ;
 
 attrs          = { "@" IDENT [ "(" attr_args ")" ] } ;
 attr_args      = attr_arg { "," attr_arg } ;
@@ -171,16 +195,20 @@ ASCII_ALNUM_US = ASCII_ALPHA_US | DIGIT ;
 lifetime       = "'" IDENT ;
 
 (* Integer literals *)
-INT_LIT        = dec_lit | hex_lit | oct_lit | bin_lit ;
+INT_LIT        = ( dec_lit | hex_lit | oct_lit | bin_lit ) [ int_suffix ] ;
 dec_lit        = DIGIT { DIGIT | "_" } ;
 hex_lit        = "0x" HEX_DIGIT { HEX_DIGIT | "_" } ;
 oct_lit        = "0o" OCT_DIGIT { OCT_DIGIT | "_" } ;
 bin_lit        = "0b" BIN_DIGIT { BIN_DIGIT | "_" } ;
 
 (* Float literals *)
-FLOAT_LIT      = dec_lit "." dec_lit [ exp_part ]
-               | dec_lit exp_part ;
+FLOAT_LIT      = ( dec_lit "." dec_lit [ exp_part ]
+                 | dec_lit exp_part ) [ float_suffix ]
+               | dec_lit float_suffix ;
 exp_part       = ( "e" | "E" ) [ "+" | "-" ] dec_lit ;
+int_suffix     = "i8" | "i16" | "i32" | "i64" | "i128"
+               | "u8" | "u16" | "u32" | "u64" | "u128" | "u256" ;
+float_suffix   = "f32" | "f64" ;
 
 (* String and character literals *)
 STRING_LIT     = '"' { str_body_char } '"' ;
@@ -206,6 +234,7 @@ BIN_DIGIT      = "0" | "1" ;
 - `hex_escape` values must be in the range `0x00`–`0x7F` (ASCII only). Use `unicode_escape` for values ≥ `0x80`.
 - `unicode_escape` values must be a valid Unicode scalar value — surrogate code points `0xD800`–`0xDFFF` are rejected, as are values above `0x10FFFF`.
 - Literal overflow (the integer value does not fit in its declared or inferred numeric type) is a compile error at parse time, not a runtime check.
+- Numeric suffixes are part of the literal token and require no intervening whitespace. `42u32` is a suffixed `INT_LIT`; `42 u32` tokenizes as `INT_LIT` followed by `IDENT`.
 - `CHAR_LIT` contains exactly one Unicode scalar value. Empty character literals and multi-character character literals are compile errors.
 
 See LANGUAGE_SPEC.md §2.6 for worked examples of each literal form and §2.7 for the identifier rules in prose.

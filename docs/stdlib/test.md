@@ -131,7 +131,7 @@ Per-test isolation means a failed test never aborts the runner. The supervisor s
 
 ## Async and actor tests
 
-`async @test fn` is permitted. The runner spawns a fresh runtime per test and drives the future to completion under the same isolation actor. Channels, `select`, timeouts, and user-spawned actors all work as in production code.
+`@test async fn` is permitted. The runner spawns a fresh runtime per test and drives the future to completion under the same isolation actor. Channels, `select`, timeouts, and user-spawned actors all work as in production code.
 
 ```sploosh
 @test
