@@ -1,0 +1,104 @@
+crates/sploosh-ast/src/lib.rs
+  s_eda6822d1f2147::t_106a6935aca40c 183,190-195,236,271-274
+  s_eda6822d1f2147::t_3bdd0c22448e5e 184-185,188
+  s_eda6822d1f2147::t_182d881b17a4af 1-182,186-187,189,196-235,237-270,275-290
+docs/runbooks/compiler-development.md
+  s_eda6822d1f2147::t_6c9f1a09b7f6a7 12,32,35-42,47-50,54,66
+  s_eda6822d1f2147::t_ee7ef57f0841c0 28
+  s_eda6822d1f2147::t_182d881b17a4af 1-4,9-11,13-27,29-31,33-34,51-53,55-65
+  s_eda6822d1f2147::t_d18b896690e1b5 5-8,43-46
+crates/AGENTS.md
+  s_eda6822d1f2147::t_182d881b17a4af 1-29,34-35,37,41
+  s_eda6822d1f2147::t_ee7ef57f0841c0 36
+  s_eda6822d1f2147::t_6c9f1a09b7f6a7 38-40
+  s_eda6822d1f2147::t_d18b896690e1b5 30-33
+.dockerignore
+  s_eda6822d1f2147::t_6c9f1a09b7f6a7 1-15
+AGENTS.md
+  s_eda6822d1f2147::t_6c9f1a09b7f6a7 14,16
+  s_eda6822d1f2147::t_d18b896690e1b5 15
+  s_eda6822d1f2147::t_182d881b17a4af 8
+  s_b7a513518e6b14::t_972069d0b15742 24-31,43,61,87,122
+tests/corpus/basic.sp
+  s_eda6822d1f2147::t_182d881b17a4af 3-15
+  s_eda6822d1f2147::t_19fe21f1fbf829 1-2,16-21
+crates/sploosh-parser/tests/corpus.rs
+  s_eda6822d1f2147::t_182d881b17a4af 1-5,13-14
+  s_eda6822d1f2147::t_48fb1f2ea94ad0 6-11
+  s_eda6822d1f2147::t_758f2f801c9612 12
+crates/sploosh-parser/Cargo.toml
+  s_eda6822d1f2147::t_182d881b17a4af 1-15
+crates/sploosh-ast/Cargo.toml
+  s_eda6822d1f2147::t_182d881b17a4af 1-11
+crates/sploosh-lexer/Cargo.toml
+  s_eda6822d1f2147::t_182d881b17a4af 1-14
+.github/workflows/rust.yml
+  s_eda6822d1f2147::t_182d881b17a4af 1-22,25-28,30
+  s_eda6822d1f2147::t_ee7ef57f0841c0 23-24,29
+scripts/docker-check.ps1
+  s_eda6822d1f2147::t_478db39294b2c5 23
+  s_eda6822d1f2147::t_6c9f1a09b7f6a7 1-11,14
+  s_eda6822d1f2147::t_8e63bfd49d5fb5 12-13,15-22,24-30
+crates/sploosh-parser/src/lib.rs
+  s_eda6822d1f2147::t_3bdd0c22448e5e 4
+  s_eda6822d1f2147::t_1b81ecc909bfeb 470-471,474
+  s_eda6822d1f2147::t_3841e4b7fd5331 564,571-586
+  s_eda6822d1f2147::t_a9dbefa65c4335 827-828,843-846,857
+  s_eda6822d1f2147::t_53af6611c836f6 935-955,963-968
+  s_eda6822d1f2147::t_adb759f6fbdbce 485,510-513
+  s_eda6822d1f2147::t_dbd4b34536b641 1066-1082
+  s_eda6822d1f2147::t_c8161455fd758c 45,59,106
+  s_eda6822d1f2147::t_7216990dd81dce 673-675,682-711,730-732
+  s_eda6822d1f2147::t_c2fab3e6a2c7cb 196,259,302,373,407,483
+  s_eda6822d1f2147::t_c50691521ee57c 676-681
+  s_eda6822d1f2147::t_62ccf7049192f8 1155-1190
+  s_eda6822d1f2147::t_182d881b17a4af 1-3,5-44,46-58,60-105,107-195,197-258,260-301,303-372,374-406,408-469,472-473,475-482,484,486-509,514-563,565-570,587-623,625-637,639-672,712-729,733-826,829-842,847-856,858-873,877,913-934,956-962,969-996,998,1005-1065,1083-1089,1091-1154,1191-1192
+  s_eda6822d1f2147::t_b83736e944a957 997,999-1004
+  s_eda6822d1f2147::t_6dea69e672e0d3 874-876,878-912
+  s_eda6822d1f2147::t_f6499e9f9a3200 624,638,1090
+crates/sploosh-lexer/src/lib.rs
+  s_eda6822d1f2147::t_693c01e4afc203 586-594
+  s_eda6822d1f2147::t_f9339a1490e954 437,439-443,464-467
+  s_eda6822d1f2147::t_3343b733dc3342 334,337-358
+  s_eda6822d1f2147::t_7c219f9112261e 468-472
+  s_eda6822d1f2147::t_673d21c0f0ca3b 335-336
+  s_eda6822d1f2147::t_182d881b17a4af 1-319,322-333,359-394,400-406,411-436,438,444-457,463,473-585,595
+  s_eda6822d1f2147::t_3bdd0c22448e5e 320-321,395-399,407-410,458-462
+Dockerfile
+  s_eda6822d1f2147::t_6c9f1a09b7f6a7 1-5,7-10
+  s_eda6822d1f2147::t_aadefb0ab5d872 6
+tests/corpus/actor.sp
+  s_eda6822d1f2147::t_182d881b17a4af 1-12
+Cargo.toml
+  s_eda6822d1f2147::t_182d881b17a4af 1-14
+Cargo.lock
+  s_eda6822d1f2147::t_aa1680b7e5baae 1-22
+VISION.md
+  s_b7a513518e6b14::t_4f1134b7d3aaec 5,50
+docs/runbooks/AGENTS.md
+  s_eda6822d1f2147::t_2d104e990641e1 16,32-33,50
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "f03f8bdd40b7ef121ac89e3f6dd32e7803b5058c",
+  "prompts": {},
+  "sessions": {
+    "s_b7a513518e6b14": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f1270-3d38-7403-8e50-ad09ecb978e9",
+        "model": "gpt-5.5"
+      },
+      "human_author": "StreamDemon <revenantpulse@gmail.com>"
+    },
+    "s_eda6822d1f2147": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f12c9-5e9d-7612-95d0-1aef54b28a0b",
+        "model": "gpt-5.5"
+      },
+      "human_author": "StreamDemon <revenantpulse@gmail.com>"
+    }
+  }
+}
