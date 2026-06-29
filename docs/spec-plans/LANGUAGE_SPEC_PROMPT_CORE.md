@@ -1,4 +1,4 @@
-# SPLOOSH Quick Reference — Core (v0.5.12) — LLM System Prompt Edition
+# SPLOOSH Quick Reference — Core (v0.5.14) — LLM System Prompt Edition
 
 Sploosh: AI-native language. Rust safety + Elixir concurrency + web3 targeting.
 
@@ -6,13 +6,15 @@ Sploosh: AI-native language. Rust safety + Elixir concurrency + web3 targeting.
 
 ## Syntax Core
 - Blocks: `{ }` — Functions: `fn` — Bindings: `let` / `const` — Types: `name: Type`
-- Match: `match val { Pat => expr, }` — Pipe: `expr |> fn` — Error prop: `expr?`
+- Match: `match val { Pat => expr, }` — Assign: `target = expr` (right-assoc; target id/field/deref/index)
+- Pipe: `expr |> fn` — Error prop: `expr?`
 - Cast: `expr as Type` (numeric only) — Visibility: `pub` or private.
+- Literals/forms: `vec![items]`, `vec![value; count]`, `assert_matches(value, pattern)`.
 - No null, no exceptions, no operator overloading, no implicit conversions, no unsafe.
 
 ## Types
 Primitives: `i8 i16 i32 i64 i128 u8 u16 u32 u64 u128 f32 f64 u256 bool char str String Address ()`. Compounds: `[T; N]` `Vec<T>` `Map<K,V>` `Set<T>` `Box<T>` `Shared<T>` `(T, U)` `Option<T>` `Result<T, E>`. Channels: `Channel<T>` `Sender<T>` `Receiver<T>`.
-Custom: `struct Name { field: Type }` / `enum Name { A, B(T), C { x: T } }`. Generics: `fn name<T: Bound>(x: T) -> T { }`. Traits: `trait Name { type Item; fn method(&self) -> T; }` / `impl Trait for Type { }`. Supertraits: `trait Loggable: Printable { }` (implementors must impl both). Dynamic dispatch: `&dyn Trait`, `Box<dyn Trait>` for heterogeneous collections.
+Custom: `struct Name { field: Type }` / `enum Name { A, B(T), C { x: T } }`. Generics: declarations use `<T: Bound>`; use-sites use `Vec<u8>`, `Result<(), E>`, `Self::Item`, `Iter<Item = String>`, calls may turbofish `collect::<Vec<String>>()`. `where` clauses allowed after fn/type/trait headers. Traits: `trait Name { type Item; fn method(&self) -> T; }` / `impl Trait for Type { }`. Supertraits: `trait Loggable: Printable { }` (implementors must impl both). Dynamic dispatch: `&dyn Trait`, `Box<dyn Trait>` for heterogeneous collections.
 
 ## Standard Traits
 Marker: `Copy`, `Send`, `Sync`. Derivable: `Clone`, `Debug`, `Display`, `Eq`, `Ord`, `Hash`, `Serialize`, `Deserialize` (Display derive mirrors Debug shape). Conversion: `From<T>`, `Into<T>`, `TryFrom<T>`, `TryInto<T>`. Error/cleanup: `Error: Display`, `Drop` (mutually exclusive with `Copy`). Closures: `Fn`, `FnMut`, `FnOnce`. Iterators: `Iter { type Item; }`, `FromIter`.
@@ -46,7 +48,7 @@ Method syntax on numeric types; math methods are compiler intrinsics lowering to
 **`@fast_math(flags)`** — LLVM fast-math: `contract`, `afn`, `reassoc`, `arcp`, `nnan`, `ninf`, `nsz`. Bare `@fast_math` = `(contract, afn)` (FMA fusion + approximate transcendentals). Per-function, not inherited. **Compile error on-chain.**
 
 ## Closures
-Capture by usage: `&T` (read), `&mut T` (modify), `move` (take ownership). `move` required for `spawn` or function-return. Traits: `Fn` (borrow), `FnMut` (mut borrow), `FnOnce` (move, call once).
+Capture by usage: `&T` (read), `&mut T` (modify), `move` (take ownership). Params may be inferred/wildcard (`|u|`, `|_|`) or typed (`|u: User|`). `move` required for `spawn` or function-return. Traits: `Fn` (borrow), `FnMut` (mut borrow), `FnOnce` (move, call once).
 
 ## Error Handling
 ```sploosh
@@ -114,7 +116,7 @@ extern "C" {
     fn c_open(path: &str, flags: i32) -> Result<i32, FfiError>;
 }
 ```
-No `unsafe`. Compiler generates safe wrappers. No raw pointers.
+No `unsafe`. Compiler generates safe wrappers. No raw pointers. Use `extern "C" async { ... }` for handler-safe awaitable FFI wrappers.
 
 ## Modules
 ```sploosh
@@ -133,7 +135,7 @@ File resolution: `mod foo;` → `foo.sp` or `foo/mod.sp`. Orphan rule: impl trai
 Derives: `Debug`, `Display`, `Clone`, `Copy`, `Eq`, `Hash`, `Serialize`, `Deserialize`, `Ord`.
 
 ## Testing
-`@test fn name() { assert_eq(a, b); }` — zero params, returns `()` or `Result<(), TestFailure>`; may be `async`. Honored only under `#[cfg(test)]`. Each test runs in its own isolation actor; failure paths: `Err(TestFailure)` or actor death (panic). `assert_eq(a, b)` / `assert_ne(a, b)` are test-only intrinsics (`E1410` outside tests, `T: Eq + Debug`, operands borrowed as `&T`); `assert_matches(value, pattern)` only requires `Debug`. `?` propagates via `TestFailure: From<E>` for every `E: Error`. Layout: unit tests in `#[cfg(test)] mod tests`, integration tests in `tests/*.sp` (separate crate, `pub`-only). `@property fn name(x: T) { ... }` runs 256 cases with deterministic shrinking; `T: Gen` (primitives, `bool`, `String`, `Vec<T: Gen>`, `Option`, `Result`, tuples ≤12). CLI: `sploosh test [--filter pat] [--exact] [--test-threads N] [--nocapture] [--seed hex] [--cases N] [--format human|json]`. `--test-threads=1 --seed=<fixed>` is byte-deterministic. Exit codes: `0`/`1`/`2` (pass/fail/runner-error). **Compile error inside `onchain`.**
+`@test fn name() { assert_eq(a, b); }` / `@test async fn name() { ... }` — zero params, returns `()` or `Result<(), TestFailure>`. Honored only under `#[cfg(test)]`. Each test runs in its own isolation actor; failure paths: `Err(TestFailure)` or actor death (panic). `assert_eq(a, b)` / `assert_ne(a, b)` are test-only intrinsics (`E1410` outside tests, `T: Eq + Debug`, operands borrowed as `&T`); `assert_matches(value, pattern)` is a special form over §5.2 patterns. `?` propagates via `TestFailure: From<E>` for every `E: Error`. Layout: unit tests in `#[cfg(test)] mod tests`, integration tests in `tests/*.sp` (separate crate, `pub`-only). `@property fn name(x: T) { ... }` runs 256 cases with deterministic shrinking; `T: Gen` (primitives, `bool`, `String`, `Vec<T: Gen>`, `Option`, `Result`, tuples ≤12). CLI: `sploosh test [--filter pat] [--exact] [--test-threads N] [--nocapture] [--seed hex] [--cases N] [--format human|json]`. `--test-threads=1 --seed=<fixed>` is byte-deterministic. Exit codes: `0`/`1`/`2` (pass/fail/runner-error). **Compile error inside `onchain`.**
 
 ## Build
 `sploosh build --target native|wasm|evm|svm`
@@ -158,6 +160,7 @@ Compile errors inside `onchain`: `actor`, `spawn`, `send`, `send_timeout`, `sele
 - **Checked arithmetic:** `+`/`-`/`*` panic on overflow by default. Use `wrapping_*` / `saturating_*` / `checked_*` for explicit semantics. `@overflow(wrapping)` per-function (off-chain only).
 - **`Shared<T>` is read-only:** atomically refcounted, immutable through the pointer. No `&mut *shared`, no `Weak`, no cycles. Forbidden on-chain.
 - **Pipe + `?` precedence:** `expr |> f?` parses as `(expr |> f)?` — apply `?` per fallible stage.
+- **Async tests:** put the attribute before async: `@test async fn`.
 - **Test assertions borrow:** `assert_eq(a, b)` / `assert_ne(a, b)` take `&T` (test-only, `T: Eq + Debug`). Outside tests → `E1410`.
 - **`chain::call` ergonomics:** `chain::call(addr, mod::fn, args)` returns `Result<T, ChainError>`; `?` unwraps `T`. Don't double-unwrap.
 - **`u256` off-chain cost (`W0010`):** `u256` arithmetic is software-emulated on native/wasm (~10–50x slower than `u64`). Warn-by-default lint fires on arithmetic and comparison operators plus multi-instruction integer methods (canonical trigger list in `docs/reference/compiler-errors.md` and §3.1). Does not fire on declarations, params, casts, literals, or zero-cost methods (`abs` / `min` / `max` / `clamp`). Suppress with `#[allow(W0010)]`. Not emitted on-chain.

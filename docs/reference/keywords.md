@@ -1,4 +1,4 @@
-# Keywords (44 Total: 36 Reserved + 8 Contextual)
+# Keywords (45 Total: 36 Reserved + 9 Contextual)
 
 > All keywords in Sploosh. Authoritative list: LANGUAGE_SPEC.md §2.3.
 
@@ -73,7 +73,7 @@ Sploosh distinguishes two keyword categories (§2.3, §2.7):
 | `offchain` | Off-chain function |
 | `emit` | Emit on-chain event |
 
-## Contextual Keywords (8)
+## Contextual Keywords (9)
 
 | Keyword | Keyword position(s) | Identifier everywhere else — e.g. |
 |---------|---------------------|-----------------------------------|
@@ -85,6 +85,7 @@ Sploosh distinguishes two keyword categories (§2.3, §2.7):
 | `ref` | Pattern-binding position: `ref name` inside a pattern (§3.7) | any other position |
 | `crate` | Path head: `crate::models::User` (§10) | any non-path-head position |
 | `super` | Path head: `super::sibling` (§10) | any non-path-head position |
+| `where` | Bound-clause head after a function signature or type/trait header (§3.6, §16 `where_clause`) | any other position |
 
 **Statement-head `send` disambiguation (§2.7):** `send` as the first token of a
 statement, followed by any token that can begin an expression, always opens a

@@ -26,7 +26,7 @@ This folder holds the language specification, its prompt-sized mirror, and the l
 
 ## Touch Points
 
-- Keywords list: `LANGUAGE_SPEC.md` §2.3 (44 keywords: 36 reserved + 8 contextual) — mirror in `docs/reference/keywords.md`.
+- Keywords list: `LANGUAGE_SPEC.md` §2.3 (45 keywords: 36 reserved + 9 contextual) — mirror in `docs/reference/keywords.md`.
 - Operator precedence: §2.4 — mirror in `docs/reference/operator-precedence.md`.
 - EBNF grammar: §16 — mirror in `docs/reference/grammar.md`.
 - Attributes: §12 — mirror in `docs/reference/attributes.md`.
