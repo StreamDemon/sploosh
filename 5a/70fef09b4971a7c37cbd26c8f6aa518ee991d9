@@ -1,0 +1,40 @@
+crates/sploosh-parser/tests/corpus.rs
+  s_20b205ba0ce60c::t_c4132423a724cd 5-9
+crates/AGENTS.md
+  s_20b205ba0ce60c::t_84264ee219f386 19-38
+crates/sploosh-lexer/src/lib.rs
+  s_20b205ba0ce60c::t_726ee297b44e5e 187-188
+  s_20b205ba0ce60c::t_41bab19dde7d48 580-585
+  s_20b205ba0ce60c::t_261ac3de8a5039 574-579,586-587
+  s_20b205ba0ce60c::t_5387b1c2c1d51c 573
+crates/sploosh-parser/src/lib.rs
+  s_20b205ba0ce60c::t_d7b154467f9784 31-33,42
+  s_20b205ba0ce60c::t_f5198114944c37 743
+  s_20b205ba0ce60c::t_4ca59721ce8445 672-695
+  s_20b205ba0ce60c::t_6925e025e52105 821
+  s_20b205ba0ce60c::t_41bab19dde7d48 1286-1288
+  s_20b205ba0ce60c::t_4ad11a94ca50ed 1271-1285,1289-1306
+  s_20b205ba0ce60c::t_b2451538065979 852
+  s_20b205ba0ce60c::t_8cab0f782aeb7a 761
+  s_20b205ba0ce60c::t_a6cc2c099ac522 617
+  s_20b205ba0ce60c::t_39387d94ea9161 792,799-810
+  s_20b205ba0ce60c::t_5c53974576dc1b 729,731
+tests/corpus/control_flow.sp
+  s_20b205ba0ce60c::t_8169701696c215 1-22
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "5a70fef09b4971a7c37cbd26c8f6aa518ee991d9",
+  "prompts": {},
+  "sessions": {
+    "s_20b205ba0ce60c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1b81f73f-fe10-4ecf-8318-2204ce749907",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "StreamDemon <revenantpulse@gmail.com>"
+    }
+  }
+}
