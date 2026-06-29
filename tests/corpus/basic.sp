@@ -9,6 +9,12 @@ struct User {
     name: String,
 }
 
+enum Message {
+    Quit,
+    Move(i64, i64),
+    Write { text: String },
+}
+
 const MAX_USERS: u64 = 1_000u64;
 
 type Users = Vec<User>;

@@ -78,6 +78,7 @@ pub struct Attribute {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Function {
     pub name: Ident,
+    pub visibility: Visibility,
     pub is_async: bool,
     pub is_offchain: bool,
     pub params: Vec<Param>,
@@ -121,6 +122,14 @@ pub struct Enum {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Variant {
     pub name: Ident,
+    pub kind: VariantKind,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum VariantKind {
+    Unit,
+    Tuple(Vec<Type>),
+    Struct(Vec<Field>),
 }
 
 #[derive(Debug, Clone, PartialEq)]

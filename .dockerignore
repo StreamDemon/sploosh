@@ -1,5 +1,7 @@
 .git/
 target/
+.env
+.env.*
 .brv/
 .claude/
 .codex/
@@ -12,4 +14,3 @@ target/
 *~
 .DS_Store
 Thumbs.db
-

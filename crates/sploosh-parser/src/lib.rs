@@ -67,9 +67,12 @@ impl Parser {
         let is_offchain = self.eat_keyword(Keyword::Offchain).is_some();
         let is_async = self.eat_keyword(Keyword::Async).is_some();
         let kind = match self.peek_kind()? {
-            TokenKind::Keyword(Keyword::Fn) => {
-                ItemKind::Function(self.function_after_mods(is_async, is_offchain, true)?)
-            }
+            TokenKind::Keyword(Keyword::Fn) => ItemKind::Function(self.function_after_mods(
+                visibility,
+                is_async,
+                is_offchain,
+                true,
+            )?),
             TokenKind::Keyword(Keyword::Struct) => ItemKind::Struct(self.struct_def()?),
             TokenKind::Keyword(Keyword::Enum) => ItemKind::Enum(self.enum_def(false)?),
             TokenKind::Keyword(Keyword::Actor) => ItemKind::Actor(self.actor_def()?),
@@ -113,6 +116,7 @@ impl Parser {
 
     fn function_after_mods(
         &mut self,
+        visibility: Visibility,
         is_async: bool,
         is_offchain: bool,
         body: bool,
@@ -137,6 +141,7 @@ impl Parser {
         };
         Some(Function {
             name,
+            visibility,
             is_async,
             is_offchain,
             params,
@@ -228,12 +233,22 @@ impl Parser {
         let mut variants = Vec::new();
         while !self.at(TokenKind::RBrace) && !self.eof() {
             if let Some(name) = self.ident() {
-                variants.push(Variant { name });
-                if self.at(TokenKind::LParen) {
-                    self.skip_balanced(TokenKind::LParen, TokenKind::RParen);
+                let kind = if self.eat(TokenKind::LParen).is_some() {
+                    let mut types = Vec::new();
+                    while !self.at(TokenKind::RParen) && !self.eof() {
+                        types.push(self.ty()?);
+                        if self.eat(TokenKind::Comma).is_none() {
+                            break;
+                        }
+                    }
+                    self.expect(TokenKind::RParen)?;
+                    VariantKind::Tuple(types)
                 } else if self.at(TokenKind::LBrace) {
-                    self.skip_balanced(TokenKind::LBrace, TokenKind::RBrace);
-                }
+                    VariantKind::Struct(self.field_block()?)
+                } else {
+                    VariantKind::Unit
+                };
+                variants.push(Variant { name, kind });
             }
             if self.eat(TokenKind::Comma).is_none() {
                 break;
@@ -265,7 +280,7 @@ impl Parser {
             };
             let is_async = self.eat_keyword(Keyword::Async).is_some();
             if self.at_keyword(Keyword::Fn) {
-                handlers.push(self.function_after_mods(is_async, false, true)?);
+                handlers.push(self.function_after_mods(visibility, is_async, false, true)?);
             } else {
                 let name = self.ident()?;
                 self.expect(TokenKind::Colon)?;
@@ -405,8 +420,12 @@ impl Parser {
         let mut functions = Vec::new();
         while !self.at(TokenKind::RBrace) && !self.eof() {
             self.skip_doc_comments();
-            let _vis = self.eat_keyword(Keyword::Pub);
-            functions.push(self.function_after_mods(false, false, false)?);
+            let visibility = if self.eat_keyword(Keyword::Pub).is_some() {
+                Visibility::Public
+            } else {
+                Visibility::Private
+            };
+            functions.push(self.function_after_mods(visibility, false, false, false)?);
         }
         self.expect(TokenKind::RBrace)?;
         Some(ExternBlock { target, functions })
@@ -1188,5 +1207,46 @@ mod tests {
             }
         "#;
         assert!(parse_program(source).is_ok());
+    }
+
+    #[test]
+    fn preserves_function_visibility_in_nested_items() {
+        let source = r#"
+            actor Counter {
+                state: i64,
+                pub fn inc(&mut self) {}
+            }
+
+            extern "C" {
+                pub fn puts(s: &str);
+            }
+        "#;
+        let program = parse_program(source).unwrap();
+        let ItemKind::Actor(actor) = &program.items[0].kind else {
+            panic!("expected actor");
+        };
+        assert_eq!(actor.handlers[0].visibility, Visibility::Public);
+        let ItemKind::ExternBlock(extern_block) = &program.items[1].kind else {
+            panic!("expected extern block");
+        };
+        assert_eq!(extern_block.functions[0].visibility, Visibility::Public);
+    }
+
+    #[test]
+    fn preserves_enum_variant_payloads() {
+        let source = "enum Message { Quit, Move(i64, i64), Write { text: String }, }";
+        let program = parse_program(source).unwrap();
+        let ItemKind::Enum(enm) = &program.items[0].kind else {
+            panic!("expected enum");
+        };
+        assert!(matches!(enm.variants[0].kind, VariantKind::Unit));
+        let VariantKind::Tuple(types) = &enm.variants[1].kind else {
+            panic!("expected tuple variant");
+        };
+        assert_eq!(types.len(), 2);
+        let VariantKind::Struct(fields) = &enm.variants[2].kind else {
+            panic!("expected struct variant");
+        };
+        assert_eq!(fields.len(), 1);
     }
 }

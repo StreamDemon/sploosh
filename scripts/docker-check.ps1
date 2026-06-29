@@ -7,6 +7,9 @@ $ErrorActionPreference = "Stop"
 
 if ($Build) {
     docker build -t $Image .
+    if ($LASTEXITCODE -ne 0) {
+        exit $LASTEXITCODE
+    }
 }
 
 $workspace = (Get-Location).ProviderPath

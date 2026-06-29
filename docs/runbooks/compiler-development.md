@@ -54,7 +54,9 @@ rg -n "<syntax-shape>" docs/spec-plans/LANGUAGE_SPEC.md tests/corpus
 5. If compiler behavior disagrees with the spec, fix the compiler first.
 
 If the spec is wrong, land a spec amendment before changing the compiler to match
-the new behavior.
+the new behavior. Sync the required mirror docs in the same PR, including
+`LANGUAGE_SPEC_PROMPT_CORE.md`, `LANGUAGE_SPEC_PROMPT_WEB3.md`,
+`docs/reference/`, `docs/stdlib/`, and any affected guides or runbooks.
 
 ## If Something Goes Wrong
 
