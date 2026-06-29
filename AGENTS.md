@@ -5,13 +5,15 @@
 ## Project Snapshot
 
 - **Sploosh** — an AI-native programming language: Rust safety + Elixir concurrency + web3 dual-target (native/wasm/evm/svm).
-- **Spec-only repository.** No compiler, no runtime, no source code. Every artifact lives under `docs/`.
+- **Compiler bootstrap has started.** The language remains spec-first, with early Rust crates under `crates/`.
 - **Source of truth:** `docs/spec-plans/LANGUAGE_SPEC.md` (currently v0.5.14-draft).
 - **Sub-trees have their own `AGENTS.md`** — read the nearest one to the file you're touching.
 
 ## Setup Commands
 
-There is nothing to install or build. The repo is pure markdown.
+Docs need no build step. Compiler crates use Cargo. On Windows, prefer the
+Ubuntu Docker check before PRs so local validation matches GitHub Actions and
+avoids Windows Cargo lock/cache quirks.
 
 ```pwsh
 # Clone
@@ -19,6 +21,14 @@ git clone https://github.com/StreamDemon/sploosh.git
 
 # View the spec
 code docs/spec-plans/LANGUAGE_SPEC.md
+
+# Check compiler crates
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace
+
+# Check compiler crates in Ubuntu Docker (CI parity / Windows-stable path)
+.\scripts\docker-check.ps1 -Build
 ```
 
 Optional (for ByteRover-aware agents):
@@ -30,7 +40,7 @@ brv query "..."    # query curated knowledge
 
 ## Universal Conventions
 
-- **Markdown only.** No source code yet. File extension for future Sploosh code is `.sp`.
+- **Docs plus Rust compiler crates.** Language docs live under `docs/`; compiler bootstrap crates live under `crates/`. Sploosh source fixtures use `.sp`.
 - **Spec-first.** Every behavioural change lands in `docs/spec-plans/LANGUAGE_SPEC.md` first; mirrors elsewhere update in the same PR.
 - **Wording style:** terse, declarative, present tense. Match the existing voice in `LANGUAGE_SPEC.md`.
 - **Examples in spec snippets** use the `sploosh` code-fence language tag.
@@ -48,7 +58,7 @@ brv query "..."    # query curated knowledge
 
 ## Documentation = Language
 
-Sploosh has no compiler, no Stack Overflow, no legacy code. The `docs/` tree IS the language. Stale or contradictory docs are bugs.
+Sploosh has no shipped compiler, no Stack Overflow, no legacy code. The `docs/` tree remains the language authority; compiler crates must follow it. Stale or contradictory docs are bugs.
 
 When you change `LANGUAGE_SPEC.md`, also check (and update if affected):
 
@@ -74,6 +84,7 @@ If you spot drift outside the scope of your task, **flag it in the PR descriptio
 
 | Topic | Path | Sub-AGENTS.md |
 |---|---|---|
+| Compiler crates | `crates/` | `crates/AGENTS.md` |
 | Spec + prompt + review | `docs/spec-plans/` | `docs/spec-plans/AGENTS.md` |
 | Reference (grammar, keywords, attrs) | `docs/reference/` | `docs/reference/AGENTS.md` |
 | Stdlib API pages | `docs/stdlib/` | `docs/stdlib/AGENTS.md` |
@@ -108,7 +119,7 @@ rg -n "^## " docs/spec-plans/LANGUAGE_SPEC.md
 
 - [ ] `LANGUAGE_SPEC.md` updated if behaviour changed.
 - [ ] All mirror docs synced (`LANGUAGE_SPEC_PROMPT_CORE.md`, `LANGUAGE_SPEC_PROMPT_WEB3.md`, `docs/reference/`, `docs/stdlib/`, etc.).
-- [ ] Examples still type-check by inspection (no compiler yet — read carefully).
+- [ ] Examples still type-check by inspection until compiler coverage exists; add/update corpus tests when parser behavior is involved.
 - [ ] Appendix D changelog entry added for material spec changes.
 - [ ] PR template sections all filled.
 - [ ] Branch is up to date with `main` (rebase, don't merge `main` into branch).
