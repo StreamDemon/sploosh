@@ -1,0 +1,19 @@
+crates/AGENTS.md
+  s_bf7cb61b4276e5::t_7f12731f0ae980 45-46
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.8",
+  "base_commit_sha": "1c100cbe0ab2f2af432ce617d3eb77dd2893f5ce",
+  "prompts": {},
+  "sessions": {
+    "s_bf7cb61b4276e5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "223fd7d8-6617-4861-8749-b41a931f4261",
+        "model": "unknown"
+      },
+      "human_author": "StreamDemon <revenantpulse@gmail.com>"
+    }
+  }
+}
