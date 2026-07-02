@@ -1,0 +1,21 @@
+crates/AGENTS.md
+  s_bf7cb61b4276e5::t_a42e688b8bb911 39-41
+crates/sploosh-lexer/src/lib.rs
+  s_bf7cb61b4276e5::t_1ada7a0dfa5d46 279,281-292,316-330,332,357,372-375,378,433,441-442,446-449,645-694
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.8",
+  "base_commit_sha": "478e9db1251cb0080000a234834c466bd9e45ca4",
+  "prompts": {},
+  "sessions": {
+    "s_bf7cb61b4276e5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "223fd7d8-6617-4861-8749-b41a931f4261",
+        "model": "unknown"
+      },
+      "human_author": "StreamDemon <revenantpulse@gmail.com>"
+    }
+  }
+}
