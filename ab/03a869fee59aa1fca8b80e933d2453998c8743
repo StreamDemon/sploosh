@@ -1,0 +1,21 @@
+crates/sploosh-lexer/src/lib.rs
+  s_d4dd1fa21e9b88::t_dcc722b5777a19 5,19
+crates/sploosh-parser/src/lib.rs
+  s_d4dd1fa21e9b88::t_988b7c27abb7a3 616,830,1061,1120,1197,1199,1218,1220,1273,1315,1330,1334,1359,1407
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.8",
+  "base_commit_sha": "ab03a869fee59aa1fca8b80e933d2453998c8743",
+  "prompts": {},
+  "sessions": {
+    "s_d4dd1fa21e9b88": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4452e644-3cc7-4655-ad1d-4473bf019857",
+        "model": "unknown"
+      },
+      "human_author": "StreamDemon <revenantpulse@gmail.com>"
+    }
+  }
+}
