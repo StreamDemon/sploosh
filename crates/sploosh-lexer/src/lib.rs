@@ -148,6 +148,13 @@ pub fn is_contextual_keyword(text: &str) -> bool {
     )
 }
 
+/// §16.1 numeric suffixes, longest-first so prefix scanning never matches a
+/// shorter suffix inside a longer one. Shared by suffix scanning and
+/// separator validation.
+const NUMERIC_SUFFIXES: [&str; 13] = [
+    "i128", "u128", "u256", "i64", "u64", "f64", "i32", "u32", "f32", "i16", "u16", "i8", "u8",
+];
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LexError {
     pub message: String,
@@ -339,16 +346,12 @@ impl Lexer<'_> {
         }
     }
 
-    fn numeric_suffix(&mut self) -> Option<String> {
+    fn numeric_suffix(&mut self) -> Option<&'static str> {
         let rest = &self.source[self.pos..];
-        let suffixes = [
-            "i128", "u128", "u256", "i64", "u64", "f64", "i32", "u32", "f32", "i16", "u16", "i8",
-            "u8",
-        ];
-        for suffix in suffixes {
+        for suffix in NUMERIC_SUFFIXES {
             if rest.starts_with(suffix) {
                 self.pos += suffix.len();
-                return Some(suffix.to_string());
+                return Some(suffix);
             }
         }
         None
@@ -356,11 +359,7 @@ impl Lexer<'_> {
 
     fn validate_numeric_body(&mut self, start: usize, base: u8) {
         let text = &self.source[start..self.pos];
-        let suffixes = [
-            "i128", "u128", "u256", "i64", "u64", "f64", "i32", "u32", "f32", "i16", "u16", "i8",
-            "u8",
-        ];
-        let body = suffixes
+        let body = NUMERIC_SUFFIXES
             .iter()
             .find_map(|suffix| text.strip_suffix(suffix))
             .unwrap_or(text);
@@ -626,6 +625,23 @@ mod tests {
         assert_eq!(tokens[2].kind, TokenKind::FloatLit);
         assert_eq!(tokens[3].kind, TokenKind::FloatLit);
         assert_eq!(tokens[4].kind, TokenKind::IntLit);
+    }
+
+    #[test]
+    fn every_numeric_suffix_lexes() {
+        for suffix in NUMERIC_SUFFIXES {
+            let source = format!("1{suffix}");
+            let tokens = lex(&source).unwrap();
+            assert_eq!(tokens.len(), 1, "{source}");
+            let expected = if suffix.starts_with('f') {
+                TokenKind::FloatLit
+            } else {
+                TokenKind::IntLit
+            };
+            assert_eq!(tokens[0].kind, expected, "{source}");
+            assert_eq!(tokens[0].lexeme, source);
+            assert_eq!(tokens[0].span, Span::new(0, source.len()));
+        }
     }
 
     #[test]
