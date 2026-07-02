@@ -22,11 +22,16 @@ The parser covers a subset of §16, not the whole grammar. Treat anything outsid
 the accepted list as **not yet implemented** — add a corpus fixture when it lands.
 
 - **Accepted:** every item form (`fn`, `struct`, `enum` incl. tuple/struct
-  variants, `actor`, `mod`, `use`, `const`, `type`, `trait`, `impl`,
+  variants, `actor`, `mod`, `use`, `const`, `type`, `trait` incl. generics,
+  supertrait bounds, and `where` clauses (bounds parsed but not stored),
+  `impl Type` and `impl Trait for Type` (trait ref recorded in the AST),
   `onchain mod`, `extern`); types incl. generics, references, arrays/slices,
-  tuples, `fn`/`dyn`; expressions incl. calls, turbofish, field/index,
-  unary/binary (incl. `/`), `?`, `.await`, `|>`, `as`, struct literals (with the
-  §5.1 block-head restriction), `vec!`, and `if`/`else`; `let`, `return`,
+  tuples, `fn`, and `dyn Trait<Args>` incl. associated-type bindings;
+  expressions incl. calls, turbofish, field/index,
+  unary/binary (incl. `/`), `?`, `.await`, `as`, struct literals (with the
+  §5.1 block-head restriction), `vec!`, and `if`/`else`; `|>` with §16
+  `pipe_stage` stages (`callee [args] [?]` — a stage's trailing `?` wraps the
+  accumulated pipe application per §5.7); `let`, `return`,
   `break`, `continue`, `send`, and expression/tail statements.
 - **Not yet implemented:** `match`, `while`, `for`, `loop`, `if let`, and
   closures (their keywords lex but have no parse production); `spawn`, `select`,
@@ -36,7 +41,8 @@ the accepted list as **not yet implemented** — add a corpus fixture when it la
   `let Some(x) = ...` are rejected); `#[...]` compiler directives are not parsed
   in any position (`#[cfg(test)]`, `#[target(...)]`, `#[indexed]` all fail);
   `storage { }` blocks inside `onchain mod` are consumed but discarded, not
-  stored in the AST; generic parameters and
+  stored in the AST; closure pipe stages (`x |> (|v| ...)`) and turbofish on a
+  non-final pipe-stage segment; generic parameters and
   `trait`/`impl` bodies are skipped, not stored in the AST; `let mut` / `&mut`
   mutability and the `send` keyword are parsed but not preserved; a block-like
   expression (`if`/block) used as a non-tail statement needs a trailing `;`.

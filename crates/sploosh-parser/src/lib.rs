@@ -370,16 +370,52 @@ impl Parser {
     fn trait_def(&mut self) -> Option<Trait> {
         self.expect_keyword(Keyword::Trait)?;
         let name = self.ident()?;
+        self.maybe_generic_params();
+        if self.eat(TokenKind::Colon).is_some() {
+            self.bounds();
+        }
+        self.maybe_where_clause();
         self.skip_item_body();
         Some(Trait { name })
+    }
+
+    /// `bounds = bound { "+" bound }` with `bound = trait_ref | lifetime` (§16).
+    /// Parsed for validation and diagnostics; not stored during bootstrap.
+    fn bounds(&mut self) {
+        loop {
+            if self.eat(TokenKind::Lifetime).is_none() && self.trait_ref().is_none() {
+                self.recover_until(&[TokenKind::LBrace, TokenKind::Semi]);
+                return;
+            }
+            if self.eat(TokenKind::Plus).is_none() {
+                break;
+            }
+        }
+    }
+
+    /// `trait_ref = type_path [ type_args ]` (§16).
+    fn trait_ref(&mut self) -> Option<TraitRef> {
+        let path = self.path()?;
+        let args = self.type_args();
+        Some(TraitRef { path, args })
     }
 
     fn impl_block(&mut self) -> Option<ImplBlock> {
         self.expect_keyword(Keyword::Impl)?;
         self.maybe_generic_params();
-        let target = self.ty()?;
+        let first = self.ty()?;
+        let (trait_ref, target) = if self.eat_keyword(Keyword::For).is_some() {
+            let Type::Path { path, args } = first else {
+                self.error_here("expected trait path before `for`");
+                return None;
+            };
+            (Some(TraitRef { path, args }), self.ty()?)
+        } else {
+            (None, first)
+        };
+        self.maybe_where_clause();
         self.skip_item_body();
-        Some(ImplBlock { target })
+        Some(ImplBlock { trait_ref, target })
     }
 
     fn onchain_item(&mut self) -> Option<ItemKind> {
@@ -487,7 +523,7 @@ impl Parser {
             });
         }
         if self.eat_ident_text("dyn").is_some() {
-            return Some(Type::Dyn(self.path()?));
+            return Some(Type::Dyn(self.trait_ref()?));
         }
         let path = self.path()?;
         let args = self.type_args();
@@ -656,6 +692,30 @@ impl Parser {
                 break;
             }
             let op_text = self.bump().lexeme;
+            if op == "|>" {
+                // §16: the RHS of `|>` is a `pipe_stage`, not a precedence-climbed
+                // expression.
+                let stage = self.pipe_stage()?;
+                let span = lhs.span.join(stage.span);
+                lhs = Expr {
+                    kind: ExprKind::Binary {
+                        op: op_text,
+                        left: Box::new(lhs),
+                        right: Box::new(stage),
+                    },
+                    span,
+                };
+                // §5.7: a stage's trailing `?` applies to the accumulated pipe
+                // application result — `x |> f?` is `(x |> f)?`.
+                if self.eat(TokenKind::Question).is_some() {
+                    let span = lhs.span.join(self.prev_span());
+                    lhs = Expr {
+                        kind: ExprKind::ErrorProp(Box::new(lhs)),
+                        span,
+                    };
+                }
+                continue;
+            }
             let rhs = self.expr(right_bp)?;
             let span = lhs.span.join(rhs.span);
             lhs = if op == "=" {
@@ -817,6 +877,73 @@ impl Parser {
                 None
             }
         }
+    }
+
+    /// `pipe_stage = stage_callee [ "(" args ")" ]` with
+    /// `stage_callee = path_expr [ turbofish ] { "." IDENT [ turbofish ] }` (§16).
+    /// The stage-trailing `?` is consumed by the caller so it can wrap the
+    /// accumulated pipe application (§5.7). The `"(" closure ")"` stage form is
+    /// not yet implemented — closures have no parse production.
+    fn pipe_stage(&mut self) -> Option<Expr> {
+        if self.at(TokenKind::LParen) {
+            self.error_here("closure pipe stages are not yet implemented");
+            return None;
+        }
+        if !matches!(
+            self.peek_kind(),
+            Some(TokenKind::Ident | TokenKind::Keyword(Keyword::SelfValue | Keyword::SelfType))
+        ) {
+            self.error_here("expected pipe stage: a function path or method chain");
+            return None;
+        }
+        let path = self.path()?;
+        let mut callee = Expr {
+            span: path.span,
+            kind: ExprKind::Path(path),
+        };
+        let mut type_args = self.turbofish();
+        while type_args.is_none() && self.eat(TokenKind::Dot).is_some() {
+            let name = self.ident()?.name;
+            let span = callee.span.join(self.prev_span());
+            callee = Expr {
+                kind: ExprKind::Field {
+                    base: Box::new(callee),
+                    name,
+                },
+                span,
+            };
+            type_args = self.turbofish();
+        }
+        if type_args.is_some() && self.at(TokenKind::Dot) {
+            self.error_here("turbofish on a non-final pipe-stage segment is not yet implemented");
+            return None;
+        }
+        if self.eat(TokenKind::LParen).is_some() {
+            let args = self.args(TokenKind::RParen)?;
+            let end = self.expect(TokenKind::RParen)?.span.end;
+            let span = Span::new(callee.span.start, end);
+            callee = Expr {
+                kind: ExprKind::Call {
+                    callee: Box::new(callee),
+                    type_args: type_args.unwrap_or_default(),
+                    args,
+                },
+                span,
+            };
+        } else if let Some(type_args) = type_args {
+            // `x |> parse::<i64>` has no parens; keep the type args on a zero-arg
+            // call — §5.6 desugaring makes this identical to `x |> parse::<i64>()`.
+            let span = callee.span.join(self.prev_span());
+            callee = Expr {
+                kind: ExprKind::Call {
+                    callee: Box::new(callee),
+                    type_args,
+                    args: Vec::new(),
+                },
+                span,
+            };
+        }
+        Some(callee)
     }
 
     fn if_expr(&mut self) -> Option<Expr> {
@@ -1331,5 +1458,242 @@ mod tests {
             panic!("expected struct variant");
         };
         assert_eq!(fields.len(), 1);
+    }
+
+    /// Parses `fn f() { let r = <expr>; }` and returns the bound expression.
+    fn let_value(expr_src: &str) -> Expr {
+        let source = format!("fn f() {{ let r = {expr_src}; }}");
+        let program = parse_program(&source).unwrap();
+        let ItemKind::Function(func) = &program.items[0].kind else {
+            panic!("expected function");
+        };
+        let Stmt::Let { value, .. } = &func.body.as_ref().unwrap().statements[0] else {
+            panic!("expected let statement");
+        };
+        value.clone()
+    }
+
+    fn path_named(expr: &Expr, name: &str) -> bool {
+        matches!(&expr.kind, ExprKind::Path(path) if path.segments == [name])
+    }
+
+    #[test]
+    fn pipe_stage_question_wraps_accumulated_pipe() {
+        // §5.7: `input |> parse?` is `(input |> parse)?`, never `input |> (parse?)`.
+        let value = let_value("input |> parse?");
+        let ExprKind::ErrorProp(inner) = &value.kind else {
+            panic!("expected ErrorProp at the top, got {value:?}");
+        };
+        let ExprKind::Binary { op, left, right } = &inner.kind else {
+            panic!("expected pipe binary inside ErrorProp");
+        };
+        assert_eq!(op, "|>");
+        assert!(path_named(left, "input"));
+        assert!(path_named(right, "parse"));
+    }
+
+    #[test]
+    fn pipe_chain_question_on_each_stage() {
+        // `a |> f? |> g?` nests as ErrorProp(Binary(ErrorProp(Binary(a, f)), g)).
+        let value = let_value("a |> f? |> g?");
+        let ExprKind::ErrorProp(outer) = &value.kind else {
+            panic!("expected outer ErrorProp");
+        };
+        let ExprKind::Binary { op, left, right } = &outer.kind else {
+            panic!("expected outer pipe binary");
+        };
+        assert_eq!(op, "|>");
+        assert!(path_named(right, "g"));
+        let ExprKind::ErrorProp(mid) = &left.kind else {
+            panic!("expected inner ErrorProp");
+        };
+        let ExprKind::Binary { op, left, right } = &mid.kind else {
+            panic!("expected inner pipe binary");
+        };
+        assert_eq!(op, "|>");
+        assert!(path_named(left, "a"));
+        assert!(path_named(right, "f"));
+    }
+
+    #[test]
+    fn pipe_stage_with_args_keeps_question_on_pipe() {
+        let value = let_value("x |> f(a)?");
+        let ExprKind::ErrorProp(inner) = &value.kind else {
+            panic!("expected ErrorProp at the top");
+        };
+        let ExprKind::Binary { op, right, .. } = &inner.kind else {
+            panic!("expected pipe binary");
+        };
+        assert_eq!(op, "|>");
+        let ExprKind::Call { callee, args, .. } = &right.kind else {
+            panic!("expected call stage");
+        };
+        assert!(path_named(callee, "f"));
+        assert_eq!(args.len(), 1);
+    }
+
+    #[test]
+    fn pipe_stage_method_chain_is_stage_callee() {
+        // The field chain belongs to the stage, not to the pipe expression.
+        let value = let_value("x |> svc.parse?");
+        let ExprKind::ErrorProp(inner) = &value.kind else {
+            panic!("expected ErrorProp at the top");
+        };
+        let ExprKind::Binary { op, right, .. } = &inner.kind else {
+            panic!("expected pipe binary");
+        };
+        assert_eq!(op, "|>");
+        let ExprKind::Field { base, name } = &right.kind else {
+            panic!("expected field-chain stage");
+        };
+        assert_eq!(name, "parse");
+        assert!(path_named(base, "svc"));
+    }
+
+    #[test]
+    fn pipe_stage_turbofish_without_parens() {
+        // `x |> parse::<i64>` desugars like `x |> parse::<i64>()`.
+        let value = let_value("x |> parse::<i64>?");
+        let ExprKind::ErrorProp(inner) = &value.kind else {
+            panic!("expected ErrorProp at the top");
+        };
+        let ExprKind::Binary { right, .. } = &inner.kind else {
+            panic!("expected pipe binary");
+        };
+        let ExprKind::Call {
+            callee,
+            type_args,
+            args,
+        } = &right.kind
+        else {
+            panic!("expected zero-arg call stage");
+        };
+        assert!(path_named(callee, "parse"));
+        assert_eq!(type_args.len(), 1);
+        assert!(args.is_empty());
+    }
+
+    #[test]
+    fn pipe_stage_is_callee_not_arithmetic() {
+        // A stage is only a callee: `x |> a + b` is `(x |> a) + b`.
+        let value = let_value("x |> a + b");
+        let ExprKind::Binary { op, left, right } = &value.kind else {
+            panic!("expected `+` at the top");
+        };
+        assert_eq!(op, "+");
+        assert!(path_named(right, "b"));
+        let ExprKind::Binary { op, left, right } = &left.kind else {
+            panic!("expected pipe binary on the left");
+        };
+        assert_eq!(op, "|>");
+        assert!(path_named(left, "x"));
+        assert!(path_named(right, "a"));
+    }
+
+    #[test]
+    fn pipe_rejects_non_callee_stage() {
+        let errors = parse_program("fn f() { let r = x |> 42; }").unwrap_err();
+        assert!(errors.iter().any(|err| err.message.contains("pipe stage")));
+    }
+
+    #[test]
+    fn pipe_rejects_closure_stage_for_now() {
+        let errors = parse_program("fn f() { let r = x |> (v); }").unwrap_err();
+        assert!(
+            errors
+                .iter()
+                .any(|err| err.message.contains("not yet implemented"))
+        );
+    }
+
+    #[test]
+    fn question_outside_pipe_unchanged() {
+        let value = let_value("fetch()?");
+        let ExprKind::ErrorProp(inner) = &value.kind else {
+            panic!("expected ErrorProp");
+        };
+        assert!(matches!(&inner.kind, ExprKind::Call { .. }));
+    }
+
+    #[test]
+    fn impl_trait_for_type_records_trait_ref() {
+        let program = parse_program("impl Display for User {}").unwrap();
+        let ItemKind::Impl(imp) = &program.items[0].kind else {
+            panic!("expected impl");
+        };
+        let trait_ref = imp.trait_ref.as_ref().expect("trait ref recorded");
+        assert_eq!(trait_ref.path.segments, ["Display"]);
+        assert!(trait_ref.args.is_empty());
+        assert!(matches!(
+            &imp.target,
+            Type::Path { path, .. } if path.segments == ["User"]
+        ));
+    }
+
+    #[test]
+    fn inherent_impl_has_no_trait_ref() {
+        let program = parse_program("impl User {}").unwrap();
+        let ItemKind::Impl(imp) = &program.items[0].kind else {
+            panic!("expected impl");
+        };
+        assert!(imp.trait_ref.is_none());
+    }
+
+    #[test]
+    fn impl_generic_trait_with_where_clause_parses() {
+        let source = "impl<T> Convert<T> for Wrapper<T> where T: Clone {}";
+        let program = parse_program(source).unwrap();
+        let ItemKind::Impl(imp) = &program.items[0].kind else {
+            panic!("expected impl");
+        };
+        let trait_ref = imp.trait_ref.as_ref().expect("trait ref recorded");
+        assert_eq!(trait_ref.path.segments, ["Convert"]);
+        assert_eq!(trait_ref.args.len(), 1);
+    }
+
+    #[test]
+    fn impl_rejects_non_path_trait_before_for() {
+        let errors = parse_program("impl &Foo for Bar {}").unwrap_err();
+        assert!(errors.iter().any(|err| err.message.contains("trait path")));
+    }
+
+    #[test]
+    fn trait_with_generics_supertraits_and_where_parses() {
+        let source = r#"
+            trait Convert<T> {}
+            trait Loggable: Printable {}
+            trait Bounded: Convert<i64> + Printable + 'static where Self: Printable {}
+        "#;
+        let program = parse_program(source).unwrap();
+        let names: Vec<_> = program
+            .items
+            .iter()
+            .map(|item| {
+                let ItemKind::Trait(tr) = &item.kind else {
+                    panic!("expected trait");
+                };
+                tr.name.name.as_str()
+            })
+            .collect();
+        assert_eq!(names, ["Convert", "Loggable", "Bounded"]);
+    }
+
+    #[test]
+    fn dyn_trait_type_args_with_assoc_binding() {
+        let program = parse_program("fn f(it: &dyn Iter<Item = i64>) {}").unwrap();
+        let ItemKind::Function(func) = &program.items[0].kind else {
+            panic!("expected function");
+        };
+        let Param::Named { ty, .. } = &func.params[0] else {
+            panic!("expected named param");
+        };
+        let Type::Reference { inner, .. } = ty else {
+            panic!("expected reference type");
+        };
+        let Type::Dyn(trait_ref) = inner.as_ref() else {
+            panic!("expected dyn type");
+        };
+        assert_eq!(trait_ref.path.segments, ["Iter"]);
+        assert!(matches!(&trait_ref.args[0], TypeArg::Assoc { name, .. } if name.name == "Item"));
     }
 }
