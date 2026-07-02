@@ -171,6 +171,8 @@ pub struct Trait {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ImplBlock {
+    /// `Some` for `impl Trait for Type`, `None` for an inherent `impl Type`.
+    pub trait_ref: Option<TraitRef>,
     pub target: Type,
 }
 
@@ -195,7 +197,14 @@ pub enum Type {
     Slice(Box<Type>),
     Tuple(Vec<Type>),
     Function { params: Vec<Type>, ret: Box<Type> },
-    Dyn(Path),
+    Dyn(TraitRef),
+}
+
+/// `trait_ref = type_path [ type_args ]` (§16).
+#[derive(Debug, Clone, PartialEq)]
+pub struct TraitRef {
+    pub path: Path,
+    pub args: Vec<TypeArg>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
