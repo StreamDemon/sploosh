@@ -23,11 +23,15 @@ the accepted list as **not yet implemented** — add a corpus fixture when it la
 
 - **Accepted:** every item form (`fn`, `struct`, `enum` incl. tuple/struct
   variants, `actor`, `mod`, `use`, `const`, `type`, `trait`, `impl`,
-  `onchain mod`, `extern`); types incl. generics, references, arrays/slices,
-  tuples, `fn`/`dyn`; expressions incl. calls, turbofish, field/index,
-  unary/binary (incl. `/`), `?`, `.await`, `|>`, `as`, struct literals (with the
-  §5.1 block-head restriction), `vec!`, and `if`/`else`; `let`, `return`,
-  `break`, `continue`, `send`, and expression/tail statements.
+  `onchain mod`, `extern`), with §16 modifier placement enforced —
+  `offchain`/`async` only on `fn` items, and `pub` rejected on `impl`,
+  `actor`, `onchain`, and `extern` items; types incl. generics, references,
+  arrays/slices, tuples, `fn`/`dyn`; expressions incl. calls, turbofish,
+  field/index, unary/binary (incl. `/`; `..`/`..=` are non-associative —
+  chained ranges are a parse error), `?`, `.await`, `|>`, `as`, struct
+  literals (with the §5.1 block-head restriction), `vec!`, and `if`/`else`;
+  `let`, `return`, `break`, `continue`, `send`, and expression/tail
+  statements.
 - **Not yet implemented:** `match`, `while`, `for`, `loop`, `if let`, and
   closures (their keywords lex but have no parse production); `spawn`, `select`,
   and `emit` (reserved keywords with no expression/statement production yet, so

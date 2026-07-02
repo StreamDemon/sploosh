@@ -63,14 +63,42 @@ impl Parser {
         self.skip_doc_comments();
         let start = self.peek()?.span.start;
         let attrs = self.attrs();
-        let visibility = if self.eat_keyword(Keyword::Pub).is_some() {
+        let pub_token = self.eat_keyword(Keyword::Pub);
+        let offchain_token = self.eat_keyword(Keyword::Offchain);
+        let async_token = self.eat_keyword(Keyword::Async);
+        let visibility = if pub_token.is_some() {
             Visibility::Public
         } else {
             Visibility::Private
         };
-        let is_offchain = self.eat_keyword(Keyword::Offchain).is_some();
-        let is_async = self.eat_keyword(Keyword::Async).is_some();
-        let kind = match self.peek_kind()? {
+        let is_offchain = offchain_token.is_some();
+        let is_async = async_token.is_some();
+        // §16: `offchain`/`async` prefix only `fn_def`; `pub` prefixes every
+        // item form except `impl_block`, `actor_def`, `onchain_mod`/`event_def`,
+        // and `extern_block`.
+        let next = self.peek_kind()?;
+        if !matches!(next, TokenKind::Keyword(Keyword::Fn)) {
+            if let Some(token) = &offchain_token {
+                self.error_at(token.span, "`offchain` applies only to `fn` items");
+            }
+            if let Some(token) = &async_token {
+                self.error_at(token.span, "`async` applies only to `fn` items");
+            }
+        }
+        if let Some(token) = &pub_token
+            && matches!(
+                next,
+                TokenKind::Keyword(
+                    Keyword::Impl | Keyword::Actor | Keyword::Onchain | Keyword::Extern
+                )
+            )
+        {
+            self.error_at(
+                token.span,
+                "`pub` is not allowed on `impl`, `actor`, `onchain`, or `extern` items",
+            );
+        }
+        let kind = match next {
             TokenKind::Keyword(Keyword::Fn) => ItemKind::Function(self.function_after_mods(
                 visibility,
                 is_async,
@@ -676,6 +704,16 @@ impl Parser {
                     span,
                 }
             };
+            // The precedence table marks `..`/`..=` non-associative: a range
+            // operand may not itself be an unparenthesized range.
+            if matches!(op, ".." | "..=")
+                && matches!(
+                    self.peek_kind(),
+                    Some(TokenKind::DotDot | TokenKind::DotDotEq)
+                )
+            {
+                self.error_here("range operators cannot be chained; parenthesize one side");
+            }
         }
         Some(lhs)
     }
@@ -1162,6 +1200,10 @@ impl Parser {
         let span = self
             .peek()
             .map_or_else(|| self.prev_span(), |token| token.span);
+        self.error_at(span, message);
+    }
+
+    fn error_at(&mut self, span: Span, message: impl Into<String>) {
         self.errors.push(ParseError {
             message: message.into(),
             span,
@@ -1331,5 +1373,80 @@ mod tests {
             panic!("expected struct variant");
         };
         assert_eq!(fields.len(), 1);
+    }
+
+    #[test]
+    fn range_operators_cannot_chain() {
+        for source in [
+            "fn f() { let r = a..b..c; }",
+            "fn f() { let r = a..=b..c; }",
+            "fn f() { let r = a..b..=c; }",
+        ] {
+            let errors = parse_program(source).unwrap_err();
+            assert!(
+                errors.iter().any(|err| err.message.contains("chained")),
+                "{source}: expected a range-chaining error, got {errors:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn single_and_parenthesized_ranges_parse() {
+        assert!(parse_program("fn f() { let r = lo..hi; }").is_ok());
+        assert!(parse_program("fn f() { let r = lo..=hi; }").is_ok());
+        assert!(parse_program("fn f() { let r = (a..b)..c; }").is_ok());
+    }
+
+    #[test]
+    fn offchain_and_async_apply_only_to_fn_items() {
+        for source in [
+            "offchain struct S { x: i64 }",
+            "async struct S { x: i64 }",
+            "pub async struct S { x: i64 }",
+            "async trait T {}",
+            "offchain mod m;",
+        ] {
+            let errors = parse_program(source).unwrap_err();
+            assert!(
+                errors
+                    .iter()
+                    .any(|err| err.message.contains("applies only to `fn` items")),
+                "{source}: expected a modifier error, got {errors:?}"
+            );
+        }
+        assert!(parse_program("pub offchain async fn f() {}").is_ok());
+        assert!(parse_program("offchain fn g() {}").is_ok());
+    }
+
+    #[test]
+    fn pub_rejected_where_grammar_omits_it() {
+        for source in [
+            "pub impl User {}",
+            "pub actor A { state: i64, }",
+            "pub onchain mod token {}",
+            "pub extern \"C\" { fn f(); }",
+        ] {
+            let errors = parse_program(source).unwrap_err();
+            assert!(
+                errors
+                    .iter()
+                    .any(|err| err.message.contains("`pub` is not allowed")),
+                "{source}: expected a pub-placement error, got {errors:?}"
+            );
+        }
+        for source in [
+            "pub struct S { x: i64 }",
+            "pub enum E { A }",
+            "pub trait T {}",
+            "pub mod m;",
+            "pub use crate::api;",
+            "pub const X: i64 = 1;",
+            "pub type Y = i64;",
+        ] {
+            assert!(
+                parse_program(source).is_ok(),
+                "{source}: `pub` should be accepted here"
+            );
+        }
     }
 }
