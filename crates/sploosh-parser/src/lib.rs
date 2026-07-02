@@ -11,7 +11,7 @@ pub struct ParseError {
 
 pub fn parse_program(source: &str) -> Result<Program, Vec<ParseError>> {
     let tokens = lex(source).map_err(lex_errors)?;
-    Parser::new(tokens).parse_program()
+    Parser::new(tokens, source).parse_program()
 }
 
 fn lex_errors(errors: Vec<LexError>) -> Vec<ParseError> {
@@ -24,8 +24,17 @@ fn lex_errors(errors: Vec<LexError>) -> Vec<ParseError> {
         .collect()
 }
 
-struct Parser {
+/// Parser-internal classification of infix operators: `=` builds an
+/// `ExprKind::Assign` node, everything else an `ExprKind::Binary`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Infix {
+    Assign,
+    Op(BinaryOp),
+}
+
+struct Parser<'src> {
     tokens: Vec<Token>,
+    source: &'src str,
     pos: usize,
     errors: Vec<ParseError>,
     /// When set, a `struct_literal` may not be the outermost expression — the
@@ -33,14 +42,20 @@ struct Parser {
     no_struct_literal: bool,
 }
 
-impl Parser {
-    fn new(tokens: Vec<Token>) -> Self {
+impl<'src> Parser<'src> {
+    fn new(tokens: Vec<Token>, source: &'src str) -> Self {
         Self {
             tokens,
+            source,
             pos: 0,
             errors: Vec::new(),
             no_struct_literal: false,
         }
+    }
+
+    /// Source text for a token; tokens carry only spans (see `Token::text`).
+    fn text(&self, token: &Token) -> &'src str {
+        token.text(self.source)
     }
 
     fn parse_program(mut self) -> Result<Program, Vec<ParseError>> {
@@ -132,18 +147,54 @@ impl Parser {
 
     fn attrs(&mut self) -> Vec<Attribute> {
         let mut attrs = Vec::new();
-        loop {
-            if self.eat(TokenKind::At).is_none() {
-                break;
-            }
+        while let Some(at) = self.eat(TokenKind::At) {
             if let Some(name) = self.ident() {
+                let mut args = Vec::new();
+                let mut end = name.span.end;
                 if self.eat(TokenKind::LParen).is_some() {
-                    self.skip_balanced_after_open(TokenKind::LParen, TokenKind::RParen);
+                    args = self.attr_args();
+                    end = match self.expect(TokenKind::RParen) {
+                        Some(close) => close.span.end,
+                        None => self.prev_span().end,
+                    };
                 }
-                attrs.push(Attribute { name });
+                attrs.push(Attribute {
+                    name,
+                    args,
+                    span: Span::new(at.span.start, end),
+                });
             }
         }
         attrs
+    }
+
+    /// `attr_args = attr_arg { "," attr_arg }` (§16).
+    fn attr_args(&mut self) -> Vec<AttrArg> {
+        let mut args = Vec::new();
+        while !self.at(TokenKind::RParen) && !self.eof() {
+            match self.attr_arg() {
+                Some(arg) => args.push(arg),
+                None => self.recover_until(&[TokenKind::Comma, TokenKind::RParen]),
+            }
+            if self.eat(TokenKind::Comma).is_none() {
+                break;
+            }
+        }
+        args
+    }
+
+    /// `attr_arg = IDENT [ ":" expr | "=" expr | "(" expr ")" ] | expr` (§16).
+    /// Only `IDENT ":"` needs lookahead — `:` cannot continue an expression.
+    /// The `=` and `(...)` alternatives are canonicalized out of the parsed
+    /// expression, since both are valid expression shapes themselves.
+    fn attr_arg(&mut self) -> Option<AttrArg> {
+        if self.at(TokenKind::Ident) && self.peek_kind_at(1) == Some(TokenKind::Colon) {
+            let name = self.ident()?;
+            self.bump();
+            let value = self.delimited_expr()?;
+            return Some(AttrArg::Named { name, value });
+        }
+        Some(classify_attr_expr(self.delimited_expr()?))
     }
 
     fn function_after_mods(
@@ -304,7 +355,11 @@ impl Parser {
         let mut handlers = Vec::new();
         while !self.at(TokenKind::RBrace) && !self.eof() {
             self.skip_doc_comments();
-            let _attrs = self.attrs();
+            // A handler is a `fn_def`, so its attrs (`@mailbox(...)`, ...) are
+            // preserved. Fields take no attrs in §16; anything parsed before a
+            // field is currently discarded, matching the item-position
+            // tolerance for attrs on kinds the grammar leaves bare.
+            let attrs = self.attrs();
             let visibility = if self.eat_keyword(Keyword::Pub).is_some() {
                 Visibility::Public
             } else {
@@ -312,7 +367,8 @@ impl Parser {
             };
             let is_async = self.eat_keyword(Keyword::Async).is_some();
             if self.at_keyword(Keyword::Fn) {
-                handlers.push(self.function_after_mods(visibility, is_async, false, true)?);
+                let function = self.function_after_mods(visibility, is_async, false, true)?;
+                handlers.push(Handler { attrs, function });
             } else {
                 let name = self.ident()?;
                 self.expect(TokenKind::Colon)?;
@@ -477,7 +533,8 @@ impl Parser {
     fn extern_block(&mut self) -> Option<ExternBlock> {
         self.expect_keyword(Keyword::Extern)?;
         let target = if self.at(TokenKind::StringLit) {
-            self.bump().lexeme
+            let token = self.bump();
+            self.text(&token).to_string()
         } else {
             self.expect_keyword(Keyword::Onchain)?;
             self.expect_keyword(Keyword::Mod)?;
@@ -605,10 +662,7 @@ impl Parser {
             } else if self.eat_keyword(Keyword::Continue).is_some() {
                 self.expect(TokenKind::Semi)?;
                 statements.push(Stmt::Continue);
-            } else if self.at_ident_text("send")
-                && self
-                    .peek_kind_at(1)
-                    .is_some_and(|kind| can_begin_expr(&kind))
+            } else if self.at_ident_text("send") && self.peek_kind_at(1).is_some_and(can_begin_expr)
             {
                 // §2.7: `send` at statement head followed by any token that can
                 // begin an expression always opens a send-statement; the operand
@@ -728,21 +782,21 @@ impl Parser {
                 };
                 continue;
             }
-            let Some((op, left_bp, right_bp)) = self.infix_binding_power() else {
+            let Some((infix, left_bp, right_bp)) = self.infix_binding_power() else {
                 break;
             };
             if left_bp < min_bp {
                 break;
             }
-            let op_text = self.bump().lexeme;
-            if op == "|>" {
+            self.bump();
+            if infix == Infix::Op(BinaryOp::Pipe) {
                 // §16: the RHS of `|>` is a `pipe_stage`, not a precedence-climbed
                 // expression.
                 let stage = self.pipe_stage()?;
                 let span = lhs.span.join(stage.span);
                 lhs = Expr {
                     kind: ExprKind::Binary {
-                        op: op_text,
+                        op: BinaryOp::Pipe,
                         left: Box::new(lhs),
                         right: Box::new(stage),
                     },
@@ -761,31 +815,32 @@ impl Parser {
             }
             let rhs = self.expr(right_bp)?;
             let span = lhs.span.join(rhs.span);
-            lhs = if op == "=" {
-                // §16: only an `assign_target` may appear on the left side.
-                if !is_assign_target(&lhs) {
-                    self.error_at(lhs.span, "invalid assignment target");
+            lhs = match infix {
+                Infix::Assign => {
+                    // §16: only an `assign_target` may appear on the left side.
+                    if !is_assign_target(&lhs) {
+                        self.error_at(lhs.span, "invalid assignment target");
+                    }
+                    Expr {
+                        kind: ExprKind::Assign {
+                            target: Box::new(lhs),
+                            value: Box::new(rhs),
+                        },
+                        span,
+                    }
                 }
-                Expr {
-                    kind: ExprKind::Assign {
-                        target: Box::new(lhs),
-                        value: Box::new(rhs),
-                    },
-                    span,
-                }
-            } else {
-                Expr {
+                Infix::Op(op) => Expr {
                     kind: ExprKind::Binary {
-                        op: op_text,
+                        op,
                         left: Box::new(lhs),
                         right: Box::new(rhs),
                     },
                     span,
-                }
+                },
             };
             // The precedence table marks `..`/`..=` non-associative: a range
             // operand may not itself be an unparenthesized range.
-            if matches!(op, ".." | "..=")
+            if matches!(infix, Infix::Op(BinaryOp::Range | BinaryOp::RangeInclusive))
                 && matches!(
                     self.peek_kind(),
                     Some(TokenKind::DotDot | TokenKind::DotDotEq)
@@ -822,15 +877,16 @@ impl Parser {
     }
 
     fn prefix(&mut self) -> Option<Expr> {
-        let token = self.peek()?.clone();
+        let token = *self.peek()?;
         match token.kind {
             TokenKind::IntLit | TokenKind::FloatLit | TokenKind::StringLit | TokenKind::CharLit => {
                 self.bump();
+                let text = self.text(&token).to_string();
                 let lit = match token.kind {
-                    TokenKind::IntLit => Literal::Int(token.lexeme),
-                    TokenKind::FloatLit => Literal::Float(token.lexeme),
-                    TokenKind::StringLit => Literal::String(token.lexeme),
-                    TokenKind::CharLit => Literal::Char(token.lexeme),
+                    TokenKind::IntLit => Literal::Int(text),
+                    TokenKind::FloatLit => Literal::Float(text),
+                    TokenKind::StringLit => Literal::String(text),
+                    TokenKind::CharLit => Literal::Char(text),
                     _ => unreachable!(),
                 };
                 Some(Expr {
@@ -841,11 +897,14 @@ impl Parser {
             TokenKind::Keyword(Keyword::True | Keyword::False) => {
                 self.bump();
                 Some(Expr {
-                    kind: ExprKind::Literal(Literal::Bool(token.lexeme == "true")),
+                    kind: ExprKind::Literal(Literal::Bool(matches!(
+                        token.kind,
+                        TokenKind::Keyword(Keyword::True)
+                    ))),
                     span: token.span,
                 })
             }
-            TokenKind::Ident if token.lexeme == "vec" => {
+            TokenKind::Ident if self.text(&token) == "vec" => {
                 self.bump();
                 if self.eat(TokenKind::Bang).is_some() {
                     // §16 `vec_literal`: `vec` "!" only ever binds to square
@@ -885,7 +944,7 @@ impl Parser {
                 }
                 Some(Expr {
                     kind: ExprKind::Path(Path {
-                        segments: vec![token.lexeme],
+                        segments: vec![self.text(&token).to_string()],
                         span: token.span,
                     }),
                     span: token.span,
@@ -908,8 +967,15 @@ impl Parser {
                 })
             }
             TokenKind::Bang | TokenKind::Minus | TokenKind::Star | TokenKind::Amp => {
-                let op = self.bump().lexeme;
-                if op == "&" {
+                let op = match token.kind {
+                    TokenKind::Bang => UnaryOp::Not,
+                    TokenKind::Minus => UnaryOp::Neg,
+                    TokenKind::Star => UnaryOp::Deref,
+                    TokenKind::Amp => UnaryOp::Ref,
+                    _ => unreachable!(),
+                };
+                self.bump();
+                if op == UnaryOp::Ref {
                     let _mutable = self.eat_ident_text("mut");
                 }
                 let expr = self.expr(11)?;
@@ -1042,7 +1108,7 @@ impl Parser {
 
     fn args(&mut self, close: TokenKind) -> Option<Vec<Expr>> {
         let mut args = Vec::new();
-        while !self.at(close.clone()) && !self.eof() {
+        while !self.at(close) && !self.eof() {
             args.push(self.delimited_expr()?);
             if self.eat(TokenKind::Comma).is_none() {
                 break;
@@ -1091,7 +1157,7 @@ impl Parser {
             | TokenKind::Keyword(Keyword::SelfType)
             | TokenKind::Keyword(Keyword::SelfValue) => {
                 let token = self.bump();
-                Some(Ident::new(token.lexeme, token.span))
+                Some(Ident::new(self.text(&token), token.span))
             }
             _ => {
                 self.error_here("expected path segment");
@@ -1101,11 +1167,11 @@ impl Parser {
     }
 
     fn ident(&mut self) -> Option<Ident> {
-        let token = self.peek()?.clone();
+        let token = *self.peek()?;
         match token.kind {
             TokenKind::Ident => {
                 self.bump();
-                Some(Ident::new(token.lexeme, token.span))
+                Some(Ident::new(self.text(&token), token.span))
             }
             _ => {
                 self.error_here("expected identifier");
@@ -1178,30 +1244,13 @@ impl Parser {
     fn skip_balanced(&mut self, open: TokenKind, close: TokenKind) {
         let mut depth = 0usize;
         while !self.eof() {
-            if self.at(open.clone()) {
+            if self.at(open) {
                 depth += 1;
-            } else if self.at(close.clone()) {
+            } else if self.at(close) {
                 if depth == 0 {
                     self.bump();
                     break;
                 }
-                depth -= 1;
-                self.bump();
-                if depth == 0 {
-                    break;
-                }
-                continue;
-            }
-            self.bump();
-        }
-    }
-
-    fn skip_balanced_after_open(&mut self, open: TokenKind, close: TokenKind) {
-        let mut depth = 1usize;
-        while !self.eof() {
-            if self.at(open.clone()) {
-                depth += 1;
-            } else if self.at(close.clone()) {
                 depth -= 1;
                 self.bump();
                 if depth == 0 {
@@ -1219,25 +1268,25 @@ impl Parser {
         }
     }
 
-    fn infix_binding_power(&self) -> Option<(&'static str, u8, u8)> {
+    fn infix_binding_power(&self) -> Option<(Infix, u8, u8)> {
         Some(match self.peek_kind()? {
-            TokenKind::Eq => ("=", 2, 1),
-            TokenKind::PipeGt => ("|>", 8, 9),
-            TokenKind::Plus => ("+", 9, 10),
-            TokenKind::Minus => ("-", 9, 10),
-            TokenKind::Star => ("*", 10, 11),
-            TokenKind::Slash => ("/", 10, 11),
-            TokenKind::Percent => ("%", 10, 11),
-            TokenKind::EqEq => ("==", 6, 7),
-            TokenKind::Ne => ("!=", 6, 7),
-            TokenKind::Lt => ("<", 7, 8),
-            TokenKind::Gt => (">", 7, 8),
-            TokenKind::Le => ("<=", 7, 8),
-            TokenKind::Ge => (">=", 7, 8),
-            TokenKind::AmpAmp => ("&&", 5, 6),
-            TokenKind::PipePipe => ("||", 4, 5),
-            TokenKind::DotDot => ("..", 3, 4),
-            TokenKind::DotDotEq => ("..=", 3, 4),
+            TokenKind::Eq => (Infix::Assign, 2, 1),
+            TokenKind::PipeGt => (Infix::Op(BinaryOp::Pipe), 8, 9),
+            TokenKind::Plus => (Infix::Op(BinaryOp::Add), 9, 10),
+            TokenKind::Minus => (Infix::Op(BinaryOp::Sub), 9, 10),
+            TokenKind::Star => (Infix::Op(BinaryOp::Mul), 10, 11),
+            TokenKind::Slash => (Infix::Op(BinaryOp::Div), 10, 11),
+            TokenKind::Percent => (Infix::Op(BinaryOp::Rem), 10, 11),
+            TokenKind::EqEq => (Infix::Op(BinaryOp::Eq), 6, 7),
+            TokenKind::Ne => (Infix::Op(BinaryOp::Ne), 6, 7),
+            TokenKind::Lt => (Infix::Op(BinaryOp::Lt), 7, 8),
+            TokenKind::Gt => (Infix::Op(BinaryOp::Gt), 7, 8),
+            TokenKind::Le => (Infix::Op(BinaryOp::Le), 7, 8),
+            TokenKind::Ge => (Infix::Op(BinaryOp::Ge), 7, 8),
+            TokenKind::AmpAmp => (Infix::Op(BinaryOp::And), 5, 6),
+            TokenKind::PipePipe => (Infix::Op(BinaryOp::Or), 4, 5),
+            TokenKind::DotDot => (Infix::Op(BinaryOp::Range), 3, 4),
+            TokenKind::DotDotEq => (Infix::Op(BinaryOp::RangeInclusive), 3, 4),
             _ => return None,
         })
     }
@@ -1254,7 +1303,7 @@ impl Parser {
     }
 
     fn recover_until(&mut self, kinds: &[TokenKind]) {
-        while !self.eof() && !kinds.iter().any(|kind| self.at(kind.clone())) {
+        while !self.eof() && !kinds.iter().any(|kind| self.at(*kind)) {
             self.bump();
         }
     }
@@ -1276,7 +1325,7 @@ impl Parser {
 
     fn at_ident_text(&self, text: &str) -> bool {
         self.peek()
-            .is_some_and(|token| token.kind == TokenKind::Ident && token.lexeme == text)
+            .is_some_and(|token| token.kind == TokenKind::Ident && token.text(self.source) == text)
     }
 
     fn eat_ident_text(&mut self, text: &str) -> Option<Token> {
@@ -1296,7 +1345,7 @@ impl Parser {
     }
 
     fn expect(&mut self, kind: TokenKind) -> Option<Token> {
-        self.eat(kind.clone()).or_else(|| {
+        self.eat(kind).or_else(|| {
             self.error_here(format!("expected `{kind:?}`"));
             None
         })
@@ -1311,13 +1360,11 @@ impl Parser {
     }
 
     fn peek_kind(&self) -> Option<TokenKind> {
-        self.peek().map(|token| token.kind.clone())
+        self.peek().map(|token| token.kind)
     }
 
     fn peek_kind_at(&self, offset: usize) -> Option<TokenKind> {
-        self.tokens
-            .get(self.pos + offset)
-            .map(|token| token.kind.clone())
+        self.tokens.get(self.pos + offset).map(|token| token.kind)
     }
 
     fn can_start_path_segment_at(&self, offset: usize) -> bool {
@@ -1342,7 +1389,7 @@ impl Parser {
     }
 
     fn bump(&mut self) -> Token {
-        let token = self.tokens[self.pos].clone();
+        let token = self.tokens[self.pos];
         self.pos += 1;
         token
     }
@@ -1366,6 +1413,63 @@ impl Parser {
     }
 }
 
+/// Canonicalizes the overlapping `attr_arg` alternatives (§16): a bare
+/// `IDENT`, `IDENT "=" expr`, and `IDENT "(" expr ")"` are all valid
+/// expressions too, so they parse as expressions and the most specific attr
+/// form is recovered from the shape afterwards.
+fn classify_attr_expr(expr: Expr) -> AttrArg {
+    let span = expr.span;
+    match expr.kind {
+        ExprKind::Path(path) if is_attr_ident(&path) => {
+            let name = path.segments.into_iter().next().unwrap();
+            AttrArg::Ident(Ident::new(name, path.span))
+        }
+        ExprKind::Assign { target, value } => match target.kind {
+            ExprKind::Path(path) if is_attr_ident(&path) => {
+                let name = path.segments.into_iter().next().unwrap();
+                AttrArg::Assigned {
+                    name: Ident::new(name, path.span),
+                    value: *value,
+                }
+            }
+            kind => AttrArg::Expr(Expr {
+                kind: ExprKind::Assign {
+                    target: Box::new(Expr {
+                        kind,
+                        span: target.span,
+                    }),
+                    value,
+                },
+                span,
+            }),
+        },
+        ExprKind::Call {
+            callee,
+            type_args,
+            mut args,
+        } if type_args.is_empty() && args.len() == 1 && is_attr_ident_expr(&callee) => {
+            let ExprKind::Path(path) = callee.kind else {
+                unreachable!();
+            };
+            let name = path.segments.into_iter().next().unwrap();
+            AttrArg::Call {
+                name: Ident::new(name, path.span),
+                arg: args.pop().unwrap(),
+            }
+        }
+        kind => AttrArg::Expr(Expr { kind, span }),
+    }
+}
+
+/// A single plain identifier — `self`/`Self` are keywords, not `IDENT` (§16.1).
+fn is_attr_ident(path: &Path) -> bool {
+    path.segments.len() == 1 && path.segments[0] != "self" && path.segments[0] != "Self"
+}
+
+fn is_attr_ident_expr(expr: &Expr) -> bool {
+    matches!(&expr.kind, ExprKind::Path(path) if is_attr_ident(path))
+}
+
 /// The §2.7 send-statement operand shape: `handle.method(args)` — a call whose
 /// callee is a field access.
 fn is_method_call(expr: &Expr) -> bool {
@@ -1384,13 +1488,13 @@ fn is_assign_target(expr: &Expr) -> bool {
             path.segments.len() == 1 && path.segments[0] != "self" && path.segments[0] != "Self"
         }
         ExprKind::Field { .. } | ExprKind::Index { .. } => true,
-        ExprKind::Unary { op, .. } => op == "*",
+        ExprKind::Unary { op, .. } => *op == UnaryOp::Deref,
         _ => false,
     }
 }
 
 /// Tokens that can begin an expression — must stay in sync with `prefix()`.
-fn can_begin_expr(kind: &TokenKind) -> bool {
+fn can_begin_expr(kind: TokenKind) -> bool {
     matches!(
         kind,
         TokenKind::IntLit
@@ -1475,6 +1579,122 @@ mod tests {
     }
 
     #[test]
+    fn attribute_arguments_are_preserved() {
+        let source = "@derive(Debug, Eq)\nstruct User { id: u64 }";
+        let program = parse_program(source).unwrap();
+        let attr = &program.items[0].attrs[0];
+        assert_eq!(attr.name.name, "derive");
+        // Attribute span covers `@derive(Debug, Eq)`.
+        assert_eq!(attr.span, Span::new(0, source.find('\n').unwrap()));
+        let names: Vec<_> = attr
+            .args
+            .iter()
+            .map(|arg| {
+                let AttrArg::Ident(ident) = arg else {
+                    panic!("expected bare ident arg, got {arg:?}");
+                };
+                ident.name.as_str()
+            })
+            .collect();
+        assert_eq!(names, ["Debug", "Eq"]);
+    }
+
+    #[test]
+    fn attribute_named_args_are_preserved() {
+        let source = r#"
+            @supervisor(strategy: "one_for_one", max_restarts: 5)
+            struct Sup { x: i64 }
+        "#;
+        let program = parse_program(source).unwrap();
+        let attr = &program.items[0].attrs[0];
+        assert_eq!(attr.name.name, "supervisor");
+        assert_eq!(attr.args.len(), 2);
+        let AttrArg::Named { name, value } = &attr.args[0] else {
+            panic!("expected named arg, got {:?}", attr.args[0]);
+        };
+        assert_eq!(name.name, "strategy");
+        assert!(matches!(
+            &value.kind,
+            ExprKind::Literal(Literal::String(text)) if text == "\"one_for_one\""
+        ));
+        let AttrArg::Named { name, value } = &attr.args[1] else {
+            panic!("expected named arg, got {:?}", attr.args[1]);
+        };
+        assert_eq!(name.name, "max_restarts");
+        assert!(matches!(
+            &value.kind,
+            ExprKind::Literal(Literal::Int(text)) if text == "5"
+        ));
+    }
+
+    #[test]
+    fn attribute_assigned_call_and_expr_args_are_preserved() {
+        let source = "@cfg(target = evm, feature(fast), CAP + 1)\nstruct S { x: i64 }";
+        let program = parse_program(source).unwrap();
+        let attr = &program.items[0].attrs[0];
+        assert_eq!(attr.args.len(), 3);
+        let AttrArg::Assigned { name, value } = &attr.args[0] else {
+            panic!("expected assigned arg, got {:?}", attr.args[0]);
+        };
+        assert_eq!(name.name, "target");
+        assert!(matches!(&value.kind, ExprKind::Path(path) if path.segments == ["evm"]));
+        let AttrArg::Call { name, arg } = &attr.args[1] else {
+            panic!("expected call arg, got {:?}", attr.args[1]);
+        };
+        assert_eq!(name.name, "feature");
+        assert!(matches!(&arg.kind, ExprKind::Path(path) if path.segments == ["fast"]));
+        let AttrArg::Expr(expr) = &attr.args[2] else {
+            panic!("expected expr arg, got {:?}", attr.args[2]);
+        };
+        assert!(matches!(
+            &expr.kind,
+            ExprKind::Binary {
+                op: BinaryOp::Add,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn bare_attribute_has_no_args_and_name_span() {
+        let program = parse_program("@test\nfn t() {}").unwrap();
+        let attr = &program.items[0].attrs[0];
+        assert_eq!(attr.name.name, "test");
+        assert!(attr.args.is_empty());
+        assert_eq!(attr.span, Span::new(0, 5));
+    }
+
+    #[test]
+    fn actor_handler_attributes_are_preserved() {
+        let source = r#"
+            actor Worker {
+                state: i64,
+                @mailbox(capacity: 2048)
+                pub fn run(&mut self, n: i64) {}
+            }
+        "#;
+        let program = parse_program(source).unwrap();
+        let ItemKind::Actor(actor) = &program.items[0].kind else {
+            panic!("expected actor");
+        };
+        let handler = &actor.handlers[0];
+        assert_eq!(handler.function.name.name, "run");
+        assert_eq!(handler.attrs.len(), 1);
+        let attr = &handler.attrs[0];
+        assert_eq!(attr.name.name, "mailbox");
+        // Span anchors to the `@` in the original source.
+        assert_eq!(attr.span.start, source.find('@').unwrap());
+        let AttrArg::Named { name, value } = &attr.args[0] else {
+            panic!("expected named arg, got {:?}", attr.args[0]);
+        };
+        assert_eq!(name.name, "capacity");
+        assert!(matches!(
+            &value.kind,
+            ExprKind::Literal(Literal::Int(text)) if text == "2048"
+        ));
+    }
+
+    #[test]
     fn declaration_names_cannot_be_reserved_keywords() {
         let errors = parse_program("fn self() {}").unwrap_err();
         assert!(errors.iter().any(|err| err.message.contains("identifier")));
@@ -1509,7 +1729,7 @@ mod tests {
         let ItemKind::Actor(actor) = &program.items[0].kind else {
             panic!("expected actor");
         };
-        assert_eq!(actor.handlers[0].visibility, Visibility::Public);
+        assert_eq!(actor.handlers[0].function.visibility, Visibility::Public);
         let ItemKind::ExternBlock(extern_block) = &program.items[1].kind else {
             panic!("expected extern block");
         };
@@ -1557,7 +1777,7 @@ mod tests {
         let ExprKind::Binary { op, .. } = &tail.kind else {
             panic!("expected binary expression");
         };
-        assert_eq!(op, "/");
+        assert_eq!(*op, BinaryOp::Div);
     }
 
     #[test]
@@ -1780,7 +2000,7 @@ mod tests {
         let ExprKind::Binary { op, left, right } = &inner.kind else {
             panic!("expected pipe binary inside ErrorProp");
         };
-        assert_eq!(op, "|>");
+        assert_eq!(*op, BinaryOp::Pipe);
         assert!(path_named(left, "input"));
         assert!(path_named(right, "parse"));
     }
@@ -1795,7 +2015,7 @@ mod tests {
         let ExprKind::Binary { op, left, right } = &outer.kind else {
             panic!("expected outer pipe binary");
         };
-        assert_eq!(op, "|>");
+        assert_eq!(*op, BinaryOp::Pipe);
         assert!(path_named(right, "g"));
         let ExprKind::ErrorProp(mid) = &left.kind else {
             panic!("expected inner ErrorProp");
@@ -1803,7 +2023,7 @@ mod tests {
         let ExprKind::Binary { op, left, right } = &mid.kind else {
             panic!("expected inner pipe binary");
         };
-        assert_eq!(op, "|>");
+        assert_eq!(*op, BinaryOp::Pipe);
         assert!(path_named(left, "a"));
         assert!(path_named(right, "f"));
     }
@@ -1817,7 +2037,7 @@ mod tests {
         let ExprKind::Binary { op, right, .. } = &inner.kind else {
             panic!("expected pipe binary");
         };
-        assert_eq!(op, "|>");
+        assert_eq!(*op, BinaryOp::Pipe);
         let ExprKind::Call { callee, args, .. } = &right.kind else {
             panic!("expected call stage");
         };
@@ -1835,7 +2055,7 @@ mod tests {
         let ExprKind::Binary { op, right, .. } = &inner.kind else {
             panic!("expected pipe binary");
         };
-        assert_eq!(op, "|>");
+        assert_eq!(*op, BinaryOp::Pipe);
         let ExprKind::Field { base, name } = &right.kind else {
             panic!("expected field-chain stage");
         };
@@ -1873,12 +2093,12 @@ mod tests {
         let ExprKind::Binary { op, left, right } = &value.kind else {
             panic!("expected `+` at the top");
         };
-        assert_eq!(op, "+");
+        assert_eq!(*op, BinaryOp::Add);
         assert!(path_named(right, "b"));
         let ExprKind::Binary { op, left, right } = &left.kind else {
             panic!("expected pipe binary on the left");
         };
-        assert_eq!(op, "|>");
+        assert_eq!(*op, BinaryOp::Pipe);
         assert!(path_named(left, "x"));
         assert!(path_named(right, "a"));
     }

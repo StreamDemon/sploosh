@@ -73,6 +73,26 @@ pub enum ItemKind {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Attribute {
     pub name: Ident,
+    pub args: Vec<AttrArg>,
+    /// Covers `@` through the closing `)` (or the name, when there are no args).
+    pub span: Span,
+}
+
+/// `attr_arg = IDENT [ ":" expr | "=" expr | "(" expr ")" ] | expr` (§16).
+/// The `IDENT`-headed alternatives overlap with `expr`; the parser stores the
+/// most specific form that matches.
+#[derive(Debug, Clone, PartialEq)]
+pub enum AttrArg {
+    /// Bare `IDENT` — `@derive(Debug)`, `@overflow(wrapping)`.
+    Ident(Ident),
+    /// `IDENT ":" expr` — `@mailbox(capacity: 2048)`.
+    Named { name: Ident, value: Expr },
+    /// `IDENT "=" expr`.
+    Assigned { name: Ident, value: Expr },
+    /// `IDENT "(" expr ")"`.
+    Call { name: Ident, arg: Expr },
+    /// Any other bare expression.
+    Expr(Expr),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -136,7 +156,16 @@ pub enum VariantKind {
 pub struct Actor {
     pub name: Ident,
     pub fields: Vec<Field>,
-    pub handlers: Vec<Function>,
+    pub handlers: Vec<Handler>,
+}
+
+/// A handler is a `fn_def` inside an `actor` body (§16), so it carries its
+/// own attributes (`@mailbox(capacity: N)`, ...). Item-position `fn` attrs
+/// stay hoisted on `Item.attrs` during bootstrap.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Handler {
+    pub attrs: Vec<Attribute>,
+    pub function: Function,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -239,6 +268,100 @@ pub enum Stmt {
     Continue,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UnaryOp {
+    /// `!`
+    Not,
+    /// `-`
+    Neg,
+    /// `*`
+    Deref,
+    /// `&`
+    Ref,
+}
+
+impl UnaryOp {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Not => "!",
+            Self::Neg => "-",
+            Self::Deref => "*",
+            Self::Ref => "&",
+        }
+    }
+}
+
+impl std::fmt::Display for UnaryOp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BinaryOp {
+    /// `|>`
+    Pipe,
+    /// `+`
+    Add,
+    /// `-`
+    Sub,
+    /// `*`
+    Mul,
+    /// `/`
+    Div,
+    /// `%`
+    Rem,
+    /// `==`
+    Eq,
+    /// `!=`
+    Ne,
+    /// `<`
+    Lt,
+    /// `>`
+    Gt,
+    /// `<=`
+    Le,
+    /// `>=`
+    Ge,
+    /// `&&`
+    And,
+    /// `||`
+    Or,
+    /// `..`
+    Range,
+    /// `..=`
+    RangeInclusive,
+}
+
+impl BinaryOp {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Pipe => "|>",
+            Self::Add => "+",
+            Self::Sub => "-",
+            Self::Mul => "*",
+            Self::Div => "/",
+            Self::Rem => "%",
+            Self::Eq => "==",
+            Self::Ne => "!=",
+            Self::Lt => "<",
+            Self::Gt => ">",
+            Self::Le => "<=",
+            Self::Ge => ">=",
+            Self::And => "&&",
+            Self::Or => "||",
+            Self::Range => "..",
+            Self::RangeInclusive => "..=",
+        }
+    }
+}
+
+impl std::fmt::Display for BinaryOp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Expr {
     pub kind: ExprKind,
@@ -263,11 +386,11 @@ pub enum ExprKind {
         index: Box<Expr>,
     },
     Unary {
-        op: String,
+        op: UnaryOp,
         expr: Box<Expr>,
     },
     Binary {
-        op: String,
+        op: BinaryOp,
         left: Box<Expr>,
         right: Box<Expr>,
     },
