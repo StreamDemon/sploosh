@@ -47,7 +47,9 @@ the accepted list as **not yet implemented** — add a corpus fixture when it la
   `storage { }` blocks inside `onchain mod` are consumed but discarded, not
   stored in the AST; closure pipe stages (`x |> (|v| ...)`) and turbofish on a
   non-final pipe-stage segment are rejected with explicit
-  not-yet-implemented parse errors; generic parameters and
+  not-yet-implemented parse errors; literal-overflow checking (a parse-time
+  error per `docs/reference/grammar.md`) is deferred to semantic analysis,
+  where literals gain types; generic parameters and
   `trait`/`impl` bodies are skipped, not stored in the AST; `let mut` / `&mut`
   mutability and the `send` keyword are parsed but not preserved; a block-like
   expression (`if`/block) used as a non-tail statement needs a trailing `;`.
