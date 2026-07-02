@@ -28,8 +28,15 @@ the accepted list as **not yet implemented** — add a corpus fixture when it la
   unary/binary (incl. `/`), `?`, `.await`, `|>`, `as`, struct literals (with the
   §5.1 block-head restriction), `vec!`, and `if`/`else`; `let`, `return`,
   `break`, `continue`, `send`, and expression/tail statements.
-- **Not yet implemented:** `match`, `while`, `for`, `loop`, and closures (their
-  keywords lex but have no parse production); generic parameters and
+- **Not yet implemented:** `match`, `while`, `for`, `loop`, `if let`, and
+  closures (their keywords lex but have no parse production); `spawn`, `select`,
+  and `emit` (reserved keywords with no expression/statement production yet, so
+  §8 actor spawns and §11.5 event emission do not parse); patterns — `let` binds
+  a single identifier only, no destructuring (`let (a, b) = ...` and
+  `let Some(x) = ...` are rejected); `#[...]` compiler directives are not parsed
+  in any position (`#[cfg(test)]`, `#[target(...)]`, `#[indexed]` all fail);
+  `storage { }` blocks inside `onchain mod` are consumed but discarded, not
+  stored in the AST; generic parameters and
   `trait`/`impl` bodies are skipped, not stored in the AST; `let mut` / `&mut`
   mutability and the `send` keyword are parsed but not preserved; a block-like
   expression (`if`/block) used as a non-tail statement needs a trailing `;`.
