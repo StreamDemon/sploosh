@@ -613,10 +613,7 @@ impl<'src> Parser<'src> {
             } else if self.eat_keyword(Keyword::Continue).is_some() {
                 self.expect(TokenKind::Semi)?;
                 statements.push(Stmt::Continue);
-            } else if self.at_ident_text("send")
-                && self
-                    .peek_kind_at(1)
-                    .is_some_and(|kind| can_begin_expr(&kind))
+            } else if self.at_ident_text("send") && self.peek_kind_at(1).is_some_and(can_begin_expr)
             {
                 // §2.7: `send` at statement head followed by any token that can
                 // begin an expression always opens a send-statement; the operand
@@ -830,7 +827,7 @@ impl<'src> Parser<'src> {
     }
 
     fn prefix(&mut self) -> Option<Expr> {
-        let token = self.peek()?.clone();
+        let token = *self.peek()?;
         match token.kind {
             TokenKind::IntLit | TokenKind::FloatLit | TokenKind::StringLit | TokenKind::CharLit => {
                 self.bump();
@@ -1061,7 +1058,7 @@ impl<'src> Parser<'src> {
 
     fn args(&mut self, close: TokenKind) -> Option<Vec<Expr>> {
         let mut args = Vec::new();
-        while !self.at(close.clone()) && !self.eof() {
+        while !self.at(close) && !self.eof() {
             args.push(self.delimited_expr()?);
             if self.eat(TokenKind::Comma).is_none() {
                 break;
@@ -1120,7 +1117,7 @@ impl<'src> Parser<'src> {
     }
 
     fn ident(&mut self) -> Option<Ident> {
-        let token = self.peek()?.clone();
+        let token = *self.peek()?;
         match token.kind {
             TokenKind::Ident => {
                 self.bump();
@@ -1197,9 +1194,9 @@ impl<'src> Parser<'src> {
     fn skip_balanced(&mut self, open: TokenKind, close: TokenKind) {
         let mut depth = 0usize;
         while !self.eof() {
-            if self.at(open.clone()) {
+            if self.at(open) {
                 depth += 1;
-            } else if self.at(close.clone()) {
+            } else if self.at(close) {
                 if depth == 0 {
                     self.bump();
                     break;
@@ -1218,9 +1215,9 @@ impl<'src> Parser<'src> {
     fn skip_balanced_after_open(&mut self, open: TokenKind, close: TokenKind) {
         let mut depth = 1usize;
         while !self.eof() {
-            if self.at(open.clone()) {
+            if self.at(open) {
                 depth += 1;
-            } else if self.at(close.clone()) {
+            } else if self.at(close) {
                 depth -= 1;
                 self.bump();
                 if depth == 0 {
@@ -1273,7 +1270,7 @@ impl<'src> Parser<'src> {
     }
 
     fn recover_until(&mut self, kinds: &[TokenKind]) {
-        while !self.eof() && !kinds.iter().any(|kind| self.at(kind.clone())) {
+        while !self.eof() && !kinds.iter().any(|kind| self.at(*kind)) {
             self.bump();
         }
     }
@@ -1315,7 +1312,7 @@ impl<'src> Parser<'src> {
     }
 
     fn expect(&mut self, kind: TokenKind) -> Option<Token> {
-        self.eat(kind.clone()).or_else(|| {
+        self.eat(kind).or_else(|| {
             self.error_here(format!("expected `{kind:?}`"));
             None
         })
@@ -1330,13 +1327,11 @@ impl<'src> Parser<'src> {
     }
 
     fn peek_kind(&self) -> Option<TokenKind> {
-        self.peek().map(|token| token.kind.clone())
+        self.peek().map(|token| token.kind)
     }
 
     fn peek_kind_at(&self, offset: usize) -> Option<TokenKind> {
-        self.tokens
-            .get(self.pos + offset)
-            .map(|token| token.kind.clone())
+        self.tokens.get(self.pos + offset).map(|token| token.kind)
     }
 
     fn can_start_path_segment_at(&self, offset: usize) -> bool {
@@ -1361,7 +1356,7 @@ impl<'src> Parser<'src> {
     }
 
     fn bump(&mut self) -> Token {
-        let token = self.tokens[self.pos].clone();
+        let token = self.tokens[self.pos];
         self.pos += 1;
         token
     }
@@ -1409,7 +1404,7 @@ fn is_assign_target(expr: &Expr) -> bool {
 }
 
 /// Tokens that can begin an expression — must stay in sync with `prefix()`.
-fn can_begin_expr(kind: &TokenKind) -> bool {
+fn can_begin_expr(kind: TokenKind) -> bool {
     matches!(
         kind,
         TokenKind::IntLit
