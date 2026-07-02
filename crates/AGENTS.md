@@ -25,9 +25,13 @@ the accepted list as **not yet implemented** — add a corpus fixture when it la
   variants, `actor`, `mod`, `use`, `const`, `type`, `trait`, `impl`,
   `onchain mod`, `extern`); types incl. generics, references, arrays/slices,
   tuples, `fn`/`dyn`; expressions incl. calls, turbofish, field/index,
-  unary/binary (incl. `/`), `?`, `.await`, `|>`, `as`, struct literals (with the
-  §5.1 block-head restriction), `vec!`, and `if`/`else`; `let`, `return`,
-  `break`, `continue`, `send`, and expression/tail statements.
+  unary/binary (incl. `/`), assignment (targets validated per §16
+  `assign_target`), `?`, `.await`, `|>`, `as`, struct literals (with the
+  §5.1 block-head restriction), `vec!` (square brackets required —
+  `vec!(...)` is a parse error), and `if`/`else`; `let`, `return`,
+  `break`, `continue`, `send` (statement-head rule per §2.7 — opens a
+  send-statement only when the next token can begin an expression, and the
+  operand must be a method call), and expression/tail statements.
 - **Not yet implemented:** `match`, `while`, `for`, `loop`, `if let`, and
   closures (their keywords lex but have no parse production); `spawn`, `select`,
   and `emit` (reserved keywords with no expression/statement production yet, so

@@ -541,8 +541,23 @@ impl Parser {
             } else if self.eat_keyword(Keyword::Continue).is_some() {
                 self.expect(TokenKind::Semi)?;
                 statements.push(Stmt::Continue);
-            } else if self.eat_ident_text("send").is_some() {
+            } else if self.at_ident_text("send")
+                && self
+                    .peek_kind_at(1)
+                    .is_some_and(|kind| can_begin_expr(&kind))
+            {
+                // §2.7: `send` at statement head followed by any token that can
+                // begin an expression always opens a send-statement; the operand
+                // must be a method call (`handle.method(args)`, §8.2). Before any
+                // other token, `send` stays an ordinary identifier.
+                self.bump();
                 let expr = self.expr(0)?;
+                if !is_method_call(&expr) {
+                    self.error_at(
+                        expr.span,
+                        "`send` operand must be a method call on a handle",
+                    );
+                }
                 self.expect(TokenKind::Semi)?;
                 statements.push(Stmt::Expr(expr));
             } else {
@@ -659,6 +674,10 @@ impl Parser {
             let rhs = self.expr(right_bp)?;
             let span = lhs.span.join(rhs.span);
             lhs = if op == "=" {
+                // §16: only an `assign_target` may appear on the left side.
+                if !is_assign_target(&lhs) {
+                    self.error_at(lhs.span, "invalid assignment target");
+                }
                 Expr {
                     kind: ExprKind::Assign {
                         target: Box::new(lhs),
@@ -730,7 +749,14 @@ impl Parser {
             }
             TokenKind::Ident if token.lexeme == "vec" => {
                 self.bump();
-                if self.eat(TokenKind::Bang).is_some() && self.eat(TokenKind::LBracket).is_some() {
+                if self.eat(TokenKind::Bang).is_some() {
+                    // §16 `vec_literal`: `vec` "!" only ever binds to square
+                    // brackets — `vec!(...)` / `vec!{...}` are parse errors, not
+                    // a silent fallback to a plain `vec` path.
+                    if self.eat(TokenKind::LBracket).is_none() {
+                        self.error_here("expected `[` after `vec!`");
+                        return None;
+                    }
                     if self.eat(TokenKind::RBracket).is_some() {
                         return Some(Expr {
                             kind: ExprKind::VecLiteral(Vec::new()),
@@ -1083,11 +1109,13 @@ impl Parser {
         })
     }
 
-    fn eat_ident_text(&mut self, text: &str) -> Option<Token> {
-        if self
-            .peek()
+    fn at_ident_text(&self, text: &str) -> bool {
+        self.peek()
             .is_some_and(|token| token.kind == TokenKind::Ident && token.lexeme == text)
-        {
+    }
+
+    fn eat_ident_text(&mut self, text: &str) -> Option<Token> {
+        if self.at_ident_text(text) {
             Some(self.bump())
         } else {
             None
@@ -1162,11 +1190,63 @@ impl Parser {
         let span = self
             .peek()
             .map_or_else(|| self.prev_span(), |token| token.span);
+        self.error_at(span, message);
+    }
+
+    fn error_at(&mut self, span: Span, message: impl Into<String>) {
         self.errors.push(ParseError {
             message: message.into(),
             span,
         });
     }
+}
+
+/// The §2.7 send-statement operand shape: `handle.method(args)` — a call whose
+/// callee is a field access.
+fn is_method_call(expr: &Expr) -> bool {
+    matches!(
+        &expr.kind,
+        ExprKind::Call { callee, .. } if matches!(callee.kind, ExprKind::Field { .. })
+    )
+}
+
+/// §16: `assign_target = IDENT | "self" "." IDENT | expr "." IDENT | "*" expr
+/// | expr "[" expr "]"`. `self`/`Self` alone and multi-segment paths are not
+/// assignable.
+fn is_assign_target(expr: &Expr) -> bool {
+    match &expr.kind {
+        ExprKind::Path(path) => {
+            path.segments.len() == 1 && path.segments[0] != "self" && path.segments[0] != "Self"
+        }
+        ExprKind::Field { .. } | ExprKind::Index { .. } => true,
+        ExprKind::Unary { op, .. } => op == "*",
+        _ => false,
+    }
+}
+
+/// Tokens that can begin an expression — must stay in sync with `prefix()`.
+fn can_begin_expr(kind: &TokenKind) -> bool {
+    matches!(
+        kind,
+        TokenKind::IntLit
+            | TokenKind::FloatLit
+            | TokenKind::StringLit
+            | TokenKind::CharLit
+            | TokenKind::Ident
+            | TokenKind::Keyword(
+                Keyword::True
+                    | Keyword::False
+                    | Keyword::SelfValue
+                    | Keyword::SelfType
+                    | Keyword::If
+            )
+            | TokenKind::Bang
+            | TokenKind::Minus
+            | TokenKind::Star
+            | TokenKind::Amp
+            | TokenKind::LParen
+            | TokenKind::LBrace
+    )
 }
 
 fn is_primitive_type(text: &str) -> bool {
@@ -1331,5 +1411,94 @@ mod tests {
             panic!("expected struct variant");
         };
         assert_eq!(fields.len(), 1);
+    }
+
+    #[test]
+    fn send_operand_must_be_method_call() {
+        // §2.7: inside a send-statement, anything but `handle.method(args)` is
+        // a parse error.
+        for source in [
+            "fn f() { send 42; }",
+            "fn f() { send free_fn(x); }",
+            "fn f() { send (x); }",
+            "fn f() { send vec![1]; }",
+        ] {
+            let errors = parse_program(source).unwrap_err();
+            assert!(
+                errors.iter().any(|err| err.message.contains("method call")),
+                "{source}: expected a method-call error, got {errors:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn send_method_call_operands_accepted() {
+        let source = r#"
+            fn f(worker: Handle<Worker>) {
+                send worker.run(1);
+                send hub.pool.run(2);
+                send self.notify(3);
+                send worker.push::<i64>(4);
+            }
+        "#;
+        assert!(parse_program(source).is_ok());
+    }
+
+    #[test]
+    fn send_head_before_non_expression_token_is_identifier() {
+        // §2.7: the send-statement opens only when the next token can begin an
+        // expression; otherwise `send` is an ordinary identifier.
+        assert!(parse_program("fn f() { send = x; }").is_ok());
+        assert!(parse_program("fn f() { send.reset(); }").is_ok());
+    }
+
+    #[test]
+    fn assignment_targets_follow_grammar() {
+        let source = r#"
+            fn f(p: Point, arr: Vec<i64>, ptr: &mut i64) {
+                x = 1;
+                p.f = 2;
+                arr[0] = 3;
+                *ptr = 4;
+                self.state = 5;
+                a = b = c;
+            }
+        "#;
+        assert!(parse_program(source).is_ok());
+    }
+
+    #[test]
+    fn assignment_rejects_invalid_targets() {
+        for source in [
+            "fn f() { 1 + 2 = 3; }",
+            "fn f() { g() = 1; }",
+            "fn f() { a::b = 1; }",
+            "fn f() { x? = 1; }",
+            "fn f() { self = x; }",
+        ] {
+            let errors = parse_program(source).unwrap_err();
+            assert!(
+                errors
+                    .iter()
+                    .any(|err| err.message.contains("assignment target")),
+                "{source}: expected an assignment-target error, got {errors:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn vec_bang_requires_square_brackets() {
+        for source in ["fn f() { let v = vec!(1); }", "fn f() { let v = vec!{1}; }"] {
+            let errors = parse_program(source).unwrap_err();
+            assert!(
+                errors.iter().any(|err| err.message.contains("vec!")),
+                "{source}: expected a vec! error, got {errors:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn vec_without_bang_is_plain_identifier() {
+        assert!(parse_program("fn f() { let v = vec; }").is_ok());
     }
 }
