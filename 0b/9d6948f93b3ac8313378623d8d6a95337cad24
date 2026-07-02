@@ -1,0 +1,45 @@
+crates/sploosh-lexer/src/lib.rs
+  s_d4dd1fa21e9b88::t_834ed1219e978f 158-164,356,358,361,369,636-647,649-652
+  s_d4dd1fa21e9b88::t_505ef8161cb9d0 11-18,648
+  s_d4dd1fa21e9b88::t_dcc722b5777a19 5,19
+crates/sploosh-parser/src/lib.rs
+  s_d4dd1fa21e9b88::t_08a217168954a5 14
+  s_d4dd1fa21e9b88::t_80800b9d190a64 37
+  s_d4dd1fa21e9b88::t_c7228f1ee51b5c 35
+  s_d4dd1fa21e9b88::t_efb1345fd461da 46
+  s_d4dd1fa21e9b88::t_b8e3c2dc34ca84 45
+  s_d4dd1fa21e9b88::t_eb1950ce6f8eee 49,56-60,536-537,791,884,886-889,900-903,907,947,970,975-977,1160,1174,1328
+  s_d4dd1fa21e9b88::t_988b7c27abb7a3 665,880,1111,1170,1247,1249,1306,1348,1363,1367,1392,1497
+  s_d4dd1fa21e9b88::t_a920ab35b14b30 1271,1273-1284
+  s_d4dd1fa21e9b88::t_be40374dadd2c6 27-34
+  s_d4dd1fa21e9b88::t_81bc4daab0b0f0 785,792
+  s_d4dd1fa21e9b88::t_7c369e223c0ad3 799
+  s_d4dd1fa21e9b88::t_78ed22dc5cf1a5 818-830,832,834,839,843
+  s_d4dd1fa21e9b88::t_3a59c09ac87bf2 1780,2003,2018,2026,2040,2058,2096,2101
+  s_d4dd1fa21e9b88::t_26a160a45d2a3a 973
+  s_d4dd1fa21e9b88::t_49664a4162ad96 971-972
+  s_d4dd1fa21e9b88::t_896fae2d7511f6 974
+  s_d4dd1fa21e9b88::t_f725576b814f75 1285-1287
+  s_d4dd1fa21e9b88::t_67ba1957fa70dd 978,985,1288-1289,1491
+  s_d4dd1fa21e9b88::t_fd3b7943eba37c 150
+  s_d4dd1fa21e9b88::t_0809ab596d76ec 152-153,155-159,161-165,171-199,358-362,370-371,1416-1472,1581-1696,1732
+crates/sploosh-ast/src/lib.rs
+  s_d4dd1fa21e9b88::t_b2dbc25bbe5597 271-364,389,393
+  s_d4dd1fa21e9b88::t_03d923d2c36e3d 76-95,159-168
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.8",
+  "base_commit_sha": "0b9d6948f93b3ac8313378623d8d6a95337cad24",
+  "prompts": {},
+  "sessions": {
+    "s_d4dd1fa21e9b88": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4452e644-3cc7-4655-ad1d-4473bf019857",
+        "model": "unknown"
+      },
+      "human_author": "StreamDemon <revenantpulse@gmail.com>"
+    }
+  }
+}
