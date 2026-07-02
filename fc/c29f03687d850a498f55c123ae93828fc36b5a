@@ -1,0 +1,21 @@
+tests/corpus/generic_args.sp
+  s_d4dd1fa21e9b88::t_56d13816959775 1-17
+crates/sploosh-parser/src/lib.rs
+  s_d4dd1fa21e9b88::t_6ca75c5b22f256 1208-1218,1222-1225,2199-2255
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.9",
+  "base_commit_sha": "fcc29f03687d850a498f55c123ae93828fc36b5a",
+  "prompts": {},
+  "sessions": {
+    "s_d4dd1fa21e9b88": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4452e644-3cc7-4655-ad1d-4473bf019857",
+        "model": "claude-fable-5"
+      },
+      "human_author": "StreamDemon <revenantpulse@gmail.com>"
+    }
+  }
+}
