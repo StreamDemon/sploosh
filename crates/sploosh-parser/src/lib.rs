@@ -1205,19 +1205,24 @@ impl<'src> Parser<'src> {
     fn type_args_after_open(&mut self) -> Vec<TypeArg> {
         let mut args = Vec::new();
         while !self.at(TokenKind::Gt) && !self.eof() {
-            let checkpoint = self.pos;
-            if let Some(name) = self.ident()
-                && self.eat(TokenKind::Eq).is_some()
-                && let Some(ty) = self.ty()
-            {
-                args.push(TypeArg::Assoc { name, ty });
-            } else {
-                self.pos = checkpoint;
-                if let Some(ty) = self.ty() {
-                    args.push(TypeArg::Type(ty));
+            // §16 `type_arg = type | IDENT "=" type`. Commit to the
+            // associated-type binding by peeking `IDENT "="` — probing with
+            // `ident()` and backtracking left its failure diagnostic in
+            // `errors`, wrongly rejecting non-ident-headed type args like
+            // `Vec<&str>` (issue #78).
+            if self.at(TokenKind::Ident) && self.peek_kind_at(1) == Some(TokenKind::Eq) {
+                if let Some(name) = self.ident()
+                    && self.eat(TokenKind::Eq).is_some()
+                    && let Some(ty) = self.ty()
+                {
+                    args.push(TypeArg::Assoc { name, ty });
                 } else {
                     self.recover_until(&[TokenKind::Comma, TokenKind::Gt]);
                 }
+            } else if let Some(ty) = self.ty() {
+                args.push(TypeArg::Type(ty));
+            } else {
+                self.recover_until(&[TokenKind::Comma, TokenKind::Gt]);
             }
             if self.eat(TokenKind::Comma).is_none() {
                 break;
@@ -2189,6 +2194,63 @@ mod tests {
             })
             .collect();
         assert_eq!(names, ["Convert", "Loggable", "Bounded"]);
+    }
+
+    #[test]
+    fn non_ident_headed_type_args_parse() {
+        // Issue #78: the assoc-binding probe left a stale "expected
+        // identifier" error behind, wrongly rejecting any type arg that does
+        // not start with an identifier.
+        for source in [
+            "fn f(v: Vec<&str>) {}",
+            "fn f(v: Vec<(i64, i64)>) {}",
+            "fn f(v: Vec<[u8; 4]>) {}",
+            "fn f(v: Map<String, Vec<&str>>) {}",
+        ] {
+            let result = parse_program(source);
+            assert!(result.is_ok(), "{source}: {result:?}");
+        }
+        // The reference type arg survives structurally, not just error-free.
+        let program = parse_program("fn f(v: Vec<&str>) {}").unwrap();
+        let ItemKind::Function(func) = &program.items[0].kind else {
+            panic!("expected function");
+        };
+        let Param::Named { ty, .. } = &func.params[0] else {
+            panic!("expected named param");
+        };
+        let Type::Path { args, .. } = ty else {
+            panic!("expected generic path type");
+        };
+        let TypeArg::Type(Type::Reference { mutable, inner }) = &args[0] else {
+            panic!("expected reference type arg, got {args:?}");
+        };
+        assert!(!mutable);
+        assert!(matches!(inner.as_ref(), Type::Primitive(name) if name == "str"));
+    }
+
+    #[test]
+    fn assoc_binding_with_non_ident_headed_value_parses() {
+        // The binding side of `type_arg` still works when its value type is
+        // itself non-ident-headed.
+        let program = parse_program("fn f(it: &dyn Iter<Item = Vec<&str>>) {}").unwrap();
+        let ItemKind::Function(func) = &program.items[0].kind else {
+            panic!("expected function");
+        };
+        let Param::Named {
+            ty: Type::Reference { inner, .. },
+            ..
+        } = &func.params[0]
+        else {
+            panic!("expected reference param");
+        };
+        let Type::Dyn(trait_ref) = inner.as_ref() else {
+            panic!("expected dyn type");
+        };
+        let TypeArg::Assoc { name, ty } = &trait_ref.args[0] else {
+            panic!("expected assoc binding, got {:?}", trait_ref.args[0]);
+        };
+        assert_eq!(name.name, "Item");
+        assert!(matches!(ty, Type::Path { .. }));
     }
 
     #[test]
