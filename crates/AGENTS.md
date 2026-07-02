@@ -25,10 +25,13 @@ the accepted list as **not yet implemented** — add a corpus fixture when it la
   variants, `actor`, `mod`, `use`, `const`, `type`, `trait` incl. generics,
   supertrait bounds, and `where` clauses (bounds parsed but not stored),
   `impl Type` and `impl Trait for Type` (trait ref recorded in the AST),
-  `onchain mod`, `extern`); types incl. generics, references, arrays/slices,
-  tuples, `fn`, and `dyn Trait<Args>` incl. associated-type bindings;
-  expressions incl. calls, turbofish, field/index,
-  unary/binary (incl. `/`), assignment (targets validated per §16
+  `onchain mod`, `extern`), with §16 modifier placement enforced —
+  `offchain`/`async` only on `fn` items, and `pub` rejected on `impl`,
+  `actor`, `onchain`, and `extern` items; types incl. generics, references,
+  arrays/slices, tuples, `fn`, and `dyn Trait<Args>` incl. associated-type
+  bindings; expressions incl. calls, turbofish, field/index,
+  unary/binary (incl. `/`; `..`/`..=` are non-associative — chained ranges
+  are a parse error), assignment (targets validated per §16
   `assign_target`), `?`, `.await`, `as`, struct literals (with the
   §5.1 block-head restriction), `vec!` (square brackets required —
   `vec!(...)` is a parse error), and `if`/`else`; `|>` with §16
