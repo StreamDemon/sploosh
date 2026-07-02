@@ -1,0 +1,19 @@
+crates/sploosh-lexer/src/lib.rs
+  s_d4dd1fa21e9b88::t_834ed1219e978f 151-157,349,351,354,362,630-646
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.8",
+  "base_commit_sha": "e31a214bec69d29f28e1d399fac3f17b919c8b95",
+  "prompts": {},
+  "sessions": {
+    "s_d4dd1fa21e9b88": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4452e644-3cc7-4655-ad1d-4473bf019857",
+        "model": "unknown"
+      },
+      "human_author": "StreamDemon <revenantpulse@gmail.com>"
+    }
+  }
+}
