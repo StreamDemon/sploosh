@@ -73,6 +73,26 @@ pub enum ItemKind {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Attribute {
     pub name: Ident,
+    pub args: Vec<AttrArg>,
+    /// Covers `@` through the closing `)` (or the name, when there are no args).
+    pub span: Span,
+}
+
+/// `attr_arg = IDENT [ ":" expr | "=" expr | "(" expr ")" ] | expr` (§16).
+/// The `IDENT`-headed alternatives overlap with `expr`; the parser stores the
+/// most specific form that matches.
+#[derive(Debug, Clone, PartialEq)]
+pub enum AttrArg {
+    /// Bare `IDENT` — `@derive(Debug)`, `@overflow(wrapping)`.
+    Ident(Ident),
+    /// `IDENT ":" expr` — `@mailbox(capacity: 2048)`.
+    Named { name: Ident, value: Expr },
+    /// `IDENT "=" expr`.
+    Assigned { name: Ident, value: Expr },
+    /// `IDENT "(" expr ")"`.
+    Call { name: Ident, arg: Expr },
+    /// Any other bare expression.
+    Expr(Expr),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -136,7 +156,16 @@ pub enum VariantKind {
 pub struct Actor {
     pub name: Ident,
     pub fields: Vec<Field>,
-    pub handlers: Vec<Function>,
+    pub handlers: Vec<Handler>,
+}
+
+/// A handler is a `fn_def` inside an `actor` body (§16), so it carries its
+/// own attributes (`@mailbox(capacity: N)`, ...). Item-position `fn` attrs
+/// stay hoisted on `Item.attrs` during bootstrap.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Handler {
+    pub attrs: Vec<Attribute>,
+    pub function: Function,
 }
 
 #[derive(Debug, Clone, PartialEq)]

@@ -147,18 +147,54 @@ impl<'src> Parser<'src> {
 
     fn attrs(&mut self) -> Vec<Attribute> {
         let mut attrs = Vec::new();
-        loop {
-            if self.eat(TokenKind::At).is_none() {
-                break;
-            }
+        while let Some(at) = self.eat(TokenKind::At) {
             if let Some(name) = self.ident() {
+                let mut args = Vec::new();
+                let mut end = name.span.end;
                 if self.eat(TokenKind::LParen).is_some() {
-                    self.skip_balanced_after_open(TokenKind::LParen, TokenKind::RParen);
+                    args = self.attr_args();
+                    end = match self.expect(TokenKind::RParen) {
+                        Some(close) => close.span.end,
+                        None => self.prev_span().end,
+                    };
                 }
-                attrs.push(Attribute { name });
+                attrs.push(Attribute {
+                    name,
+                    args,
+                    span: Span::new(at.span.start, end),
+                });
             }
         }
         attrs
+    }
+
+    /// `attr_args = attr_arg { "," attr_arg }` (§16).
+    fn attr_args(&mut self) -> Vec<AttrArg> {
+        let mut args = Vec::new();
+        while !self.at(TokenKind::RParen) && !self.eof() {
+            match self.attr_arg() {
+                Some(arg) => args.push(arg),
+                None => self.recover_until(&[TokenKind::Comma, TokenKind::RParen]),
+            }
+            if self.eat(TokenKind::Comma).is_none() {
+                break;
+            }
+        }
+        args
+    }
+
+    /// `attr_arg = IDENT [ ":" expr | "=" expr | "(" expr ")" ] | expr` (§16).
+    /// Only `IDENT ":"` needs lookahead — `:` cannot continue an expression.
+    /// The `=` and `(...)` alternatives are canonicalized out of the parsed
+    /// expression, since both are valid expression shapes themselves.
+    fn attr_arg(&mut self) -> Option<AttrArg> {
+        if self.at(TokenKind::Ident) && self.peek_kind_at(1) == Some(TokenKind::Colon) {
+            let name = self.ident()?;
+            self.bump();
+            let value = self.delimited_expr()?;
+            return Some(AttrArg::Named { name, value });
+        }
+        Some(classify_attr_expr(self.delimited_expr()?))
     }
 
     fn function_after_mods(
@@ -319,7 +355,11 @@ impl<'src> Parser<'src> {
         let mut handlers = Vec::new();
         while !self.at(TokenKind::RBrace) && !self.eof() {
             self.skip_doc_comments();
-            let _attrs = self.attrs();
+            // A handler is a `fn_def`, so its attrs (`@mailbox(...)`, ...) are
+            // preserved. Fields take no attrs in §16; anything parsed before a
+            // field is currently discarded, matching the item-position
+            // tolerance for attrs on kinds the grammar leaves bare.
+            let attrs = self.attrs();
             let visibility = if self.eat_keyword(Keyword::Pub).is_some() {
                 Visibility::Public
             } else {
@@ -327,7 +367,8 @@ impl<'src> Parser<'src> {
             };
             let is_async = self.eat_keyword(Keyword::Async).is_some();
             if self.at_keyword(Keyword::Fn) {
-                handlers.push(self.function_after_mods(visibility, is_async, false, true)?);
+                let function = self.function_after_mods(visibility, is_async, false, true)?;
+                handlers.push(Handler { attrs, function });
             } else {
                 let name = self.ident()?;
                 self.expect(TokenKind::Colon)?;
@@ -1221,23 +1262,6 @@ impl<'src> Parser<'src> {
         }
     }
 
-    fn skip_balanced_after_open(&mut self, open: TokenKind, close: TokenKind) {
-        let mut depth = 1usize;
-        while !self.eof() {
-            if self.at(open) {
-                depth += 1;
-            } else if self.at(close) {
-                depth -= 1;
-                self.bump();
-                if depth == 0 {
-                    break;
-                }
-                continue;
-            }
-            self.bump();
-        }
-    }
-
     fn skip_doc_comments(&mut self) {
         while self.at(TokenKind::DocComment) {
             self.bump();
@@ -1389,6 +1413,63 @@ impl<'src> Parser<'src> {
     }
 }
 
+/// Canonicalizes the overlapping `attr_arg` alternatives (§16): a bare
+/// `IDENT`, `IDENT "=" expr`, and `IDENT "(" expr ")"` are all valid
+/// expressions too, so they parse as expressions and the most specific attr
+/// form is recovered from the shape afterwards.
+fn classify_attr_expr(expr: Expr) -> AttrArg {
+    let span = expr.span;
+    match expr.kind {
+        ExprKind::Path(path) if is_attr_ident(&path) => {
+            let name = path.segments.into_iter().next().unwrap();
+            AttrArg::Ident(Ident::new(name, path.span))
+        }
+        ExprKind::Assign { target, value } => match target.kind {
+            ExprKind::Path(path) if is_attr_ident(&path) => {
+                let name = path.segments.into_iter().next().unwrap();
+                AttrArg::Assigned {
+                    name: Ident::new(name, path.span),
+                    value: *value,
+                }
+            }
+            kind => AttrArg::Expr(Expr {
+                kind: ExprKind::Assign {
+                    target: Box::new(Expr {
+                        kind,
+                        span: target.span,
+                    }),
+                    value,
+                },
+                span,
+            }),
+        },
+        ExprKind::Call {
+            callee,
+            type_args,
+            mut args,
+        } if type_args.is_empty() && args.len() == 1 && is_attr_ident_expr(&callee) => {
+            let ExprKind::Path(path) = callee.kind else {
+                unreachable!();
+            };
+            let name = path.segments.into_iter().next().unwrap();
+            AttrArg::Call {
+                name: Ident::new(name, path.span),
+                arg: args.pop().unwrap(),
+            }
+        }
+        kind => AttrArg::Expr(Expr { kind, span }),
+    }
+}
+
+/// A single plain identifier — `self`/`Self` are keywords, not `IDENT` (§16.1).
+fn is_attr_ident(path: &Path) -> bool {
+    path.segments.len() == 1 && path.segments[0] != "self" && path.segments[0] != "Self"
+}
+
+fn is_attr_ident_expr(expr: &Expr) -> bool {
+    matches!(&expr.kind, ExprKind::Path(path) if is_attr_ident(path))
+}
+
 /// The §2.7 send-statement operand shape: `handle.method(args)` — a call whose
 /// callee is a field access.
 fn is_method_call(expr: &Expr) -> bool {
@@ -1498,6 +1579,122 @@ mod tests {
     }
 
     #[test]
+    fn attribute_arguments_are_preserved() {
+        let source = "@derive(Debug, Eq)\nstruct User { id: u64 }";
+        let program = parse_program(source).unwrap();
+        let attr = &program.items[0].attrs[0];
+        assert_eq!(attr.name.name, "derive");
+        // Attribute span covers `@derive(Debug, Eq)`.
+        assert_eq!(attr.span, Span::new(0, source.find('\n').unwrap()));
+        let names: Vec<_> = attr
+            .args
+            .iter()
+            .map(|arg| {
+                let AttrArg::Ident(ident) = arg else {
+                    panic!("expected bare ident arg, got {arg:?}");
+                };
+                ident.name.as_str()
+            })
+            .collect();
+        assert_eq!(names, ["Debug", "Eq"]);
+    }
+
+    #[test]
+    fn attribute_named_args_are_preserved() {
+        let source = r#"
+            @supervisor(strategy: "one_for_one", max_restarts: 5)
+            struct Sup { x: i64 }
+        "#;
+        let program = parse_program(source).unwrap();
+        let attr = &program.items[0].attrs[0];
+        assert_eq!(attr.name.name, "supervisor");
+        assert_eq!(attr.args.len(), 2);
+        let AttrArg::Named { name, value } = &attr.args[0] else {
+            panic!("expected named arg, got {:?}", attr.args[0]);
+        };
+        assert_eq!(name.name, "strategy");
+        assert!(matches!(
+            &value.kind,
+            ExprKind::Literal(Literal::String(text)) if text == "\"one_for_one\""
+        ));
+        let AttrArg::Named { name, value } = &attr.args[1] else {
+            panic!("expected named arg, got {:?}", attr.args[1]);
+        };
+        assert_eq!(name.name, "max_restarts");
+        assert!(matches!(
+            &value.kind,
+            ExprKind::Literal(Literal::Int(text)) if text == "5"
+        ));
+    }
+
+    #[test]
+    fn attribute_assigned_call_and_expr_args_are_preserved() {
+        let source = "@cfg(target = evm, feature(fast), CAP + 1)\nstruct S { x: i64 }";
+        let program = parse_program(source).unwrap();
+        let attr = &program.items[0].attrs[0];
+        assert_eq!(attr.args.len(), 3);
+        let AttrArg::Assigned { name, value } = &attr.args[0] else {
+            panic!("expected assigned arg, got {:?}", attr.args[0]);
+        };
+        assert_eq!(name.name, "target");
+        assert!(matches!(&value.kind, ExprKind::Path(path) if path.segments == ["evm"]));
+        let AttrArg::Call { name, arg } = &attr.args[1] else {
+            panic!("expected call arg, got {:?}", attr.args[1]);
+        };
+        assert_eq!(name.name, "feature");
+        assert!(matches!(&arg.kind, ExprKind::Path(path) if path.segments == ["fast"]));
+        let AttrArg::Expr(expr) = &attr.args[2] else {
+            panic!("expected expr arg, got {:?}", attr.args[2]);
+        };
+        assert!(matches!(
+            &expr.kind,
+            ExprKind::Binary {
+                op: BinaryOp::Add,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn bare_attribute_has_no_args_and_name_span() {
+        let program = parse_program("@test\nfn t() {}").unwrap();
+        let attr = &program.items[0].attrs[0];
+        assert_eq!(attr.name.name, "test");
+        assert!(attr.args.is_empty());
+        assert_eq!(attr.span, Span::new(0, 5));
+    }
+
+    #[test]
+    fn actor_handler_attributes_are_preserved() {
+        let source = r#"
+            actor Worker {
+                state: i64,
+                @mailbox(capacity: 2048)
+                pub fn run(&mut self, n: i64) {}
+            }
+        "#;
+        let program = parse_program(source).unwrap();
+        let ItemKind::Actor(actor) = &program.items[0].kind else {
+            panic!("expected actor");
+        };
+        let handler = &actor.handlers[0];
+        assert_eq!(handler.function.name.name, "run");
+        assert_eq!(handler.attrs.len(), 1);
+        let attr = &handler.attrs[0];
+        assert_eq!(attr.name.name, "mailbox");
+        // Span anchors to the `@` in the original source.
+        assert_eq!(attr.span.start, source.find('@').unwrap());
+        let AttrArg::Named { name, value } = &attr.args[0] else {
+            panic!("expected named arg, got {:?}", attr.args[0]);
+        };
+        assert_eq!(name.name, "capacity");
+        assert!(matches!(
+            &value.kind,
+            ExprKind::Literal(Literal::Int(text)) if text == "2048"
+        ));
+    }
+
+    #[test]
     fn declaration_names_cannot_be_reserved_keywords() {
         let errors = parse_program("fn self() {}").unwrap_err();
         assert!(errors.iter().any(|err| err.message.contains("identifier")));
@@ -1532,7 +1729,7 @@ mod tests {
         let ItemKind::Actor(actor) = &program.items[0].kind else {
             panic!("expected actor");
         };
-        assert_eq!(actor.handlers[0].visibility, Visibility::Public);
+        assert_eq!(actor.handlers[0].function.visibility, Visibility::Public);
         let ItemKind::ExternBlock(extern_block) = &program.items[1].kind else {
             panic!("expected extern block");
         };
