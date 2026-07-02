@@ -36,7 +36,9 @@ the accepted list as **not yet implemented** — add a corpus fixture when it la
   `let Some(x) = ...` are rejected); `#[...]` compiler directives are not parsed
   in any position (`#[cfg(test)]`, `#[target(...)]`, `#[indexed]` all fail);
   `storage { }` blocks inside `onchain mod` are consumed but discarded, not
-  stored in the AST; generic parameters and
+  stored in the AST; literal-overflow checking (a parse-time error per
+  `docs/reference/grammar.md`) is deferred to semantic analysis, where
+  literals gain types; generic parameters and
   `trait`/`impl` bodies are skipped, not stored in the AST; `let mut` / `&mut`
   mutability and the `send` keyword are parsed but not preserved; a block-like
   expression (`if`/block) used as a non-tail statement needs a trailing `;`.
