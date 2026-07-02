@@ -1,0 +1,29 @@
+tests/corpus/traits_impls.sp
+  s_bf7cb61b4276e5::t_6fe0162191432b 1-52
+tests/corpus/pipes.sp
+  s_bf7cb61b4276e5::t_1ba2e8514623dc 1-12
+crates/AGENTS.md
+  s_bf7cb61b4276e5::t_d1c0ebe5299623 25-27,29-34,44-45
+crates/sploosh-ast/src/lib.rs
+  s_bf7cb61b4276e5::t_a3575e2cddcedb 174-175,200-207
+crates/sploosh-parser/src/lib.rs
+  s_bf7cb61b4276e5::t_9f25aa427247f1 373-377,382-402,406-416,418,526,695-718,882-948,1462-1698
+crates/sploosh-parser/tests/corpus.rs
+  s_bf7cb61b4276e5::t_9294f996b3dfc6 9-10
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.8",
+  "base_commit_sha": "f6c139eda0b68264e5cf5b875536d3406df3871d",
+  "prompts": {},
+  "sessions": {
+    "s_bf7cb61b4276e5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "223fd7d8-6617-4861-8749-b41a931f4261",
+        "model": "claude-fable-5"
+      },
+      "human_author": "StreamDemon <revenantpulse@gmail.com>"
+    }
+  }
+}
