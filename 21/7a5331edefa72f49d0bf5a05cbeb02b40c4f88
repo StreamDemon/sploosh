@@ -1,0 +1,31 @@
+tests/corpus/async_await.sp
+  s_d4dd1fa21e9b88::t_f670ff8e82e6cc 1-18
+tests/corpus/extern_onchain.sp
+  s_d4dd1fa21e9b88::t_57d02f06c21038 1-34
+crates/sploosh-parser/tests/corpus.rs
+  s_d4dd1fa21e9b88::t_e2c9a4f902ad2d 3-5,8-22
+tests/corpus/expressions.sp
+  s_d4dd1fa21e9b88::t_65226ae9ffc64d 1-34
+tests/corpus/modules_use.sp
+  s_d4dd1fa21e9b88::t_1572ece422b808 1-23
+tests/corpus/attributes.sp
+  s_d4dd1fa21e9b88::t_dbb5772ed50296 1-41
+tests/corpus/casts_literals.sp
+  s_d4dd1fa21e9b88::t_1d0cf22de93815 1-35
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.9",
+  "base_commit_sha": "217a5331edefa72f49d0bf5a05cbeb02b40c4f88",
+  "prompts": {},
+  "sessions": {
+    "s_d4dd1fa21e9b88": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4452e644-3cc7-4655-ad1d-4473bf019857",
+        "model": "claude-fable-5"
+      },
+      "human_author": "StreamDemon <revenantpulse@gmail.com>"
+    }
+  }
+}
