@@ -11,7 +11,7 @@ pub struct ParseError {
 
 pub fn parse_program(source: &str) -> Result<Program, Vec<ParseError>> {
     let tokens = lex(source).map_err(lex_errors)?;
-    Parser::new(tokens).parse_program()
+    Parser::new(tokens, source).parse_program()
 }
 
 fn lex_errors(errors: Vec<LexError>) -> Vec<ParseError> {
@@ -24,8 +24,9 @@ fn lex_errors(errors: Vec<LexError>) -> Vec<ParseError> {
         .collect()
 }
 
-struct Parser {
+struct Parser<'src> {
     tokens: Vec<Token>,
+    source: &'src str,
     pos: usize,
     errors: Vec<ParseError>,
     /// When set, a `struct_literal` may not be the outermost expression — the
@@ -33,14 +34,20 @@ struct Parser {
     no_struct_literal: bool,
 }
 
-impl Parser {
-    fn new(tokens: Vec<Token>) -> Self {
+impl<'src> Parser<'src> {
+    fn new(tokens: Vec<Token>, source: &'src str) -> Self {
         Self {
             tokens,
+            source,
             pos: 0,
             errors: Vec::new(),
             no_struct_literal: false,
         }
+    }
+
+    /// Source text for a token; tokens carry only spans (see `Token::text`).
+    fn text(&self, token: &Token) -> &'src str {
+        token.text(self.source)
     }
 
     fn parse_program(mut self) -> Result<Program, Vec<ParseError>> {
@@ -477,7 +484,8 @@ impl Parser {
     fn extern_block(&mut self) -> Option<ExternBlock> {
         self.expect_keyword(Keyword::Extern)?;
         let target = if self.at(TokenKind::StringLit) {
-            self.bump().lexeme
+            let token = self.bump();
+            self.text(&token).to_string()
         } else {
             self.expect_keyword(Keyword::Onchain)?;
             self.expect_keyword(Keyword::Mod)?;
@@ -734,7 +742,7 @@ impl Parser {
             if left_bp < min_bp {
                 break;
             }
-            let op_text = self.bump().lexeme;
+            self.bump();
             if op == "|>" {
                 // §16: the RHS of `|>` is a `pipe_stage`, not a precedence-climbed
                 // expression.
@@ -742,7 +750,7 @@ impl Parser {
                 let span = lhs.span.join(stage.span);
                 lhs = Expr {
                     kind: ExprKind::Binary {
-                        op: op_text,
+                        op: op.to_string(),
                         left: Box::new(lhs),
                         right: Box::new(stage),
                     },
@@ -776,7 +784,7 @@ impl Parser {
             } else {
                 Expr {
                     kind: ExprKind::Binary {
-                        op: op_text,
+                        op: op.to_string(),
                         left: Box::new(lhs),
                         right: Box::new(rhs),
                     },
@@ -826,11 +834,12 @@ impl Parser {
         match token.kind {
             TokenKind::IntLit | TokenKind::FloatLit | TokenKind::StringLit | TokenKind::CharLit => {
                 self.bump();
+                let text = self.text(&token).to_string();
                 let lit = match token.kind {
-                    TokenKind::IntLit => Literal::Int(token.lexeme),
-                    TokenKind::FloatLit => Literal::Float(token.lexeme),
-                    TokenKind::StringLit => Literal::String(token.lexeme),
-                    TokenKind::CharLit => Literal::Char(token.lexeme),
+                    TokenKind::IntLit => Literal::Int(text),
+                    TokenKind::FloatLit => Literal::Float(text),
+                    TokenKind::StringLit => Literal::String(text),
+                    TokenKind::CharLit => Literal::Char(text),
                     _ => unreachable!(),
                 };
                 Some(Expr {
@@ -841,11 +850,14 @@ impl Parser {
             TokenKind::Keyword(Keyword::True | Keyword::False) => {
                 self.bump();
                 Some(Expr {
-                    kind: ExprKind::Literal(Literal::Bool(token.lexeme == "true")),
+                    kind: ExprKind::Literal(Literal::Bool(matches!(
+                        token.kind,
+                        TokenKind::Keyword(Keyword::True)
+                    ))),
                     span: token.span,
                 })
             }
-            TokenKind::Ident if token.lexeme == "vec" => {
+            TokenKind::Ident if self.text(&token) == "vec" => {
                 self.bump();
                 if self.eat(TokenKind::Bang).is_some() {
                     // §16 `vec_literal`: `vec` "!" only ever binds to square
@@ -885,7 +897,7 @@ impl Parser {
                 }
                 Some(Expr {
                     kind: ExprKind::Path(Path {
-                        segments: vec![token.lexeme],
+                        segments: vec![self.text(&token).to_string()],
                         span: token.span,
                     }),
                     span: token.span,
@@ -908,7 +920,14 @@ impl Parser {
                 })
             }
             TokenKind::Bang | TokenKind::Minus | TokenKind::Star | TokenKind::Amp => {
-                let op = self.bump().lexeme;
+                let op = match token.kind {
+                    TokenKind::Bang => "!",
+                    TokenKind::Minus => "-",
+                    TokenKind::Star => "*",
+                    TokenKind::Amp => "&",
+                    _ => unreachable!(),
+                };
+                self.bump();
                 if op == "&" {
                     let _mutable = self.eat_ident_text("mut");
                 }
@@ -916,7 +935,7 @@ impl Parser {
                 let span = token.span.join(expr.span);
                 Some(Expr {
                     kind: ExprKind::Unary {
-                        op,
+                        op: op.to_string(),
                         expr: Box::new(expr),
                     },
                     span,
@@ -1091,7 +1110,7 @@ impl Parser {
             | TokenKind::Keyword(Keyword::SelfType)
             | TokenKind::Keyword(Keyword::SelfValue) => {
                 let token = self.bump();
-                Some(Ident::new(token.lexeme, token.span))
+                Some(Ident::new(self.text(&token), token.span))
             }
             _ => {
                 self.error_here("expected path segment");
@@ -1105,7 +1124,7 @@ impl Parser {
         match token.kind {
             TokenKind::Ident => {
                 self.bump();
-                Some(Ident::new(token.lexeme, token.span))
+                Some(Ident::new(self.text(&token), token.span))
             }
             _ => {
                 self.error_here("expected identifier");
@@ -1276,7 +1295,7 @@ impl Parser {
 
     fn at_ident_text(&self, text: &str) -> bool {
         self.peek()
-            .is_some_and(|token| token.kind == TokenKind::Ident && token.lexeme == text)
+            .is_some_and(|token| token.kind == TokenKind::Ident && token.text(self.source) == text)
     }
 
     fn eat_ident_text(&mut self, text: &str) -> Option<Token> {

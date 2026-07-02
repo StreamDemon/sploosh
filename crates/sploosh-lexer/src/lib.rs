@@ -5,8 +5,15 @@ use sploosh_ast::Span;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Token {
     pub kind: TokenKind,
-    pub lexeme: String,
     pub span: Span,
+}
+
+impl Token {
+    /// The token's source text, sliced from the file it was lexed from.
+    /// Tokens carry only spans; slicing on demand keeps lexing allocation-free.
+    pub fn text<'src>(&self, source: &'src str) -> &'src str {
+        &source[self.span.start..self.span.end]
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -559,7 +566,6 @@ impl Lexer<'_> {
     fn push(&mut self, kind: TokenKind, start: usize, end: usize) {
         self.tokens.push(Token {
             kind,
-            lexeme: self.source[start..end].to_string(),
             span: Span::new(start, end),
         });
     }
@@ -639,7 +645,7 @@ mod tests {
                 TokenKind::IntLit
             };
             assert_eq!(tokens[0].kind, expected, "{source}");
-            assert_eq!(tokens[0].lexeme, source);
+            assert_eq!(tokens[0].text(&source), source);
             assert_eq!(tokens[0].span, Span::new(0, source.len()));
         }
     }
