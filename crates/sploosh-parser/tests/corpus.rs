@@ -8,6 +8,7 @@ fn parses_corpus_files() {
         "tests/corpus/control_flow.sp",
         "tests/corpus/traits_impls.sp",
         "tests/corpus/pipes.sp",
+        "tests/corpus/send_assign.sp",
     ] {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../..")
