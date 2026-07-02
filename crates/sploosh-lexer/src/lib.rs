@@ -276,7 +276,20 @@ impl Lexer<'_> {
             self.pos += 2;
         }
 
+        let digits_start = self.pos;
         self.digits(base);
+        if base != 10 && self.pos == digits_start {
+            let name = match base {
+                16 => "hexadecimal",
+                8 => "octal",
+                _ => "binary",
+            };
+            self.error(
+                format!("{name} literal needs at least one digit"),
+                start,
+                self.pos,
+            );
+        }
         let mut kind = TokenKind::IntLit;
         if base == 10 && self.peek() == Some('.') && self.peek_next() != Some('.') {
             kind = TokenKind::FloatLit;
@@ -300,13 +313,23 @@ impl Lexer<'_> {
             }
         }
         if let Some(suffix) = self.numeric_suffix() {
-            kind = if suffix.starts_with('f') {
-                TokenKind::FloatLit
-            } else {
-                kind
-            };
+            if suffix.starts_with('f') {
+                // §16.1 FLOAT_LIT: a float suffix only combines with `dec_lit`.
+                if base != 10 {
+                    self.error("float suffixes require a decimal literal", start, self.pos);
+                }
+                kind = TokenKind::FloatLit;
+            } else if kind == TokenKind::FloatLit {
+                // §16.1: float_suffix = "f32" | "f64" — integer suffixes on a
+                // literal with a `.` or exponent are a compile error.
+                self.error(
+                    "float literals only accept `f32`/`f64` suffixes",
+                    start,
+                    self.pos,
+                );
+            }
         }
-        self.validate_numeric_body(start);
+        self.validate_numeric_body(start, base);
         self.push(kind, start, self.pos);
     }
 
@@ -331,7 +354,7 @@ impl Lexer<'_> {
         None
     }
 
-    fn validate_numeric_body(&mut self, start: usize) {
+    fn validate_numeric_body(&mut self, start: usize, base: u8) {
         let text = &self.source[start..self.pos];
         let suffixes = [
             "i128", "u128", "u256", "i64", "u64", "f64", "i32", "u32", "f32", "i16", "u16", "i8",
@@ -346,10 +369,13 @@ impl Lexer<'_> {
             if *ch != '_' {
                 continue;
             }
-            let valid_prev = index > 0 && chars[index - 1].is_ascii_hexdigit();
+            // Neighbors must be digits *of this base* — `is_ascii_hexdigit`
+            // would wrongly accept `1_e5` in a decimal literal because `e` is
+            // a hex digit character.
+            let valid_prev = index > 0 && valid_digit(chars[index - 1], base);
             let valid_next = chars
                 .get(index + 1)
-                .is_some_and(|next| next.is_ascii_hexdigit());
+                .is_some_and(|next| valid_digit(*next, base));
             if !valid_prev || !valid_next {
                 self.error(
                     "numeric separators must appear between digits",
@@ -404,6 +430,7 @@ impl Lexer<'_> {
             self.push(TokenKind::CharLit, start, self.pos);
             return;
         }
+        let mut has_scalar = true;
         if self.peek() == Some('\\') {
             self.escape(start);
         } else if self
@@ -411,9 +438,15 @@ impl Lexer<'_> {
             .is_some_and(|c| c != '\'' && c != '\n' && c != '\r')
         {
             self.bump();
+        } else {
+            has_scalar = false;
         }
         if self.peek() == Some('\'') {
             self.bump();
+            if !has_scalar {
+                // §16.1 CHAR_LIT: exactly one Unicode scalar value.
+                self.error("empty character literal", start, self.pos);
+            }
             self.push(TokenKind::CharLit, start, self.pos);
         } else {
             self.error("unterminated character literal", start, self.pos);
@@ -608,5 +641,55 @@ mod tests {
         assert!(lex(r#""\u{10FFFF}""#).is_ok());
         assert!(lex(r#""\u{D800}""#).is_err());
         assert!(lex(r#""\u{110000}""#).is_err());
+    }
+
+    #[test]
+    fn rejects_empty_char_literal() {
+        let err = lex("''").unwrap_err();
+        assert!(err[0].message.contains("empty character literal"));
+        assert!(lex("' '").is_ok());
+        assert!(lex(r"'\''").is_ok());
+    }
+
+    #[test]
+    fn rejects_bare_base_prefixes() {
+        for (source, name) in [("0x", "hexadecimal"), ("0o", "octal"), ("0b", "binary")] {
+            let err = lex(source).unwrap_err();
+            assert!(err[0].message.contains(name), "{source}: {err:?}");
+        }
+        // A prefix followed only by separators trips the separator rule instead.
+        assert!(lex("0x_").is_err());
+        assert!(lex("0xFF").is_ok());
+    }
+
+    #[test]
+    fn rejects_int_suffix_on_float_literals() {
+        let err = lex("3.14u32").unwrap_err();
+        assert!(err[0].message.contains("f32"));
+        assert!(lex("1e10u8").is_err());
+        assert!(lex("3.14f32").is_ok());
+        assert!(lex("1e10f64").is_ok());
+    }
+
+    #[test]
+    fn rejects_float_suffix_on_based_literals() {
+        let err = lex("0b1f32").unwrap_err();
+        assert!(err[0].message.contains("decimal"));
+        assert!(lex("0o7f64").is_err());
+        // Hex swallows `f` as a digit, so `0xFf32` stays a hex int literal.
+        let tokens = lex("0xFf32").unwrap();
+        assert_eq!(tokens[0].kind, TokenKind::IntLit);
+    }
+
+    #[test]
+    fn separator_validation_is_base_aware() {
+        // `e` is a hex digit character but not a decimal digit: a separator
+        // touching the exponent marker must be rejected.
+        assert!(lex("1_e5").is_err());
+        assert!(lex("1e_5").is_err());
+        assert!(lex("1.5_e3").is_err());
+        assert!(lex("1_000.5e10").is_ok());
+        assert!(lex("0xF_F").is_ok());
+        assert!(lex("0xd_e").is_ok());
     }
 }
