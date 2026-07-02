@@ -239,6 +239,100 @@ pub enum Stmt {
     Continue,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UnaryOp {
+    /// `!`
+    Not,
+    /// `-`
+    Neg,
+    /// `*`
+    Deref,
+    /// `&`
+    Ref,
+}
+
+impl UnaryOp {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Not => "!",
+            Self::Neg => "-",
+            Self::Deref => "*",
+            Self::Ref => "&",
+        }
+    }
+}
+
+impl std::fmt::Display for UnaryOp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BinaryOp {
+    /// `|>`
+    Pipe,
+    /// `+`
+    Add,
+    /// `-`
+    Sub,
+    /// `*`
+    Mul,
+    /// `/`
+    Div,
+    /// `%`
+    Rem,
+    /// `==`
+    Eq,
+    /// `!=`
+    Ne,
+    /// `<`
+    Lt,
+    /// `>`
+    Gt,
+    /// `<=`
+    Le,
+    /// `>=`
+    Ge,
+    /// `&&`
+    And,
+    /// `||`
+    Or,
+    /// `..`
+    Range,
+    /// `..=`
+    RangeInclusive,
+}
+
+impl BinaryOp {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Pipe => "|>",
+            Self::Add => "+",
+            Self::Sub => "-",
+            Self::Mul => "*",
+            Self::Div => "/",
+            Self::Rem => "%",
+            Self::Eq => "==",
+            Self::Ne => "!=",
+            Self::Lt => "<",
+            Self::Gt => ">",
+            Self::Le => "<=",
+            Self::Ge => ">=",
+            Self::And => "&&",
+            Self::Or => "||",
+            Self::Range => "..",
+            Self::RangeInclusive => "..=",
+        }
+    }
+}
+
+impl std::fmt::Display for BinaryOp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Expr {
     pub kind: ExprKind,
@@ -263,11 +357,11 @@ pub enum ExprKind {
         index: Box<Expr>,
     },
     Unary {
-        op: String,
+        op: UnaryOp,
         expr: Box<Expr>,
     },
     Binary {
-        op: String,
+        op: BinaryOp,
         left: Box<Expr>,
         right: Box<Expr>,
     },

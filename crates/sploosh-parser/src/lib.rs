@@ -24,6 +24,14 @@ fn lex_errors(errors: Vec<LexError>) -> Vec<ParseError> {
         .collect()
 }
 
+/// Parser-internal classification of infix operators: `=` builds an
+/// `ExprKind::Assign` node, everything else an `ExprKind::Binary`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Infix {
+    Assign,
+    Op(BinaryOp),
+}
+
 struct Parser<'src> {
     tokens: Vec<Token>,
     source: &'src str,
@@ -733,21 +741,21 @@ impl<'src> Parser<'src> {
                 };
                 continue;
             }
-            let Some((op, left_bp, right_bp)) = self.infix_binding_power() else {
+            let Some((infix, left_bp, right_bp)) = self.infix_binding_power() else {
                 break;
             };
             if left_bp < min_bp {
                 break;
             }
             self.bump();
-            if op == "|>" {
+            if infix == Infix::Op(BinaryOp::Pipe) {
                 // §16: the RHS of `|>` is a `pipe_stage`, not a precedence-climbed
                 // expression.
                 let stage = self.pipe_stage()?;
                 let span = lhs.span.join(stage.span);
                 lhs = Expr {
                     kind: ExprKind::Binary {
-                        op: op.to_string(),
+                        op: BinaryOp::Pipe,
                         left: Box::new(lhs),
                         right: Box::new(stage),
                     },
@@ -766,31 +774,32 @@ impl<'src> Parser<'src> {
             }
             let rhs = self.expr(right_bp)?;
             let span = lhs.span.join(rhs.span);
-            lhs = if op == "=" {
-                // §16: only an `assign_target` may appear on the left side.
-                if !is_assign_target(&lhs) {
-                    self.error_at(lhs.span, "invalid assignment target");
+            lhs = match infix {
+                Infix::Assign => {
+                    // §16: only an `assign_target` may appear on the left side.
+                    if !is_assign_target(&lhs) {
+                        self.error_at(lhs.span, "invalid assignment target");
+                    }
+                    Expr {
+                        kind: ExprKind::Assign {
+                            target: Box::new(lhs),
+                            value: Box::new(rhs),
+                        },
+                        span,
+                    }
                 }
-                Expr {
-                    kind: ExprKind::Assign {
-                        target: Box::new(lhs),
-                        value: Box::new(rhs),
-                    },
-                    span,
-                }
-            } else {
-                Expr {
+                Infix::Op(op) => Expr {
                     kind: ExprKind::Binary {
-                        op: op.to_string(),
+                        op,
                         left: Box::new(lhs),
                         right: Box::new(rhs),
                     },
                     span,
-                }
+                },
             };
             // The precedence table marks `..`/`..=` non-associative: a range
             // operand may not itself be an unparenthesized range.
-            if matches!(op, ".." | "..=")
+            if matches!(infix, Infix::Op(BinaryOp::Range | BinaryOp::RangeInclusive))
                 && matches!(
                     self.peek_kind(),
                     Some(TokenKind::DotDot | TokenKind::DotDotEq)
@@ -918,21 +927,21 @@ impl<'src> Parser<'src> {
             }
             TokenKind::Bang | TokenKind::Minus | TokenKind::Star | TokenKind::Amp => {
                 let op = match token.kind {
-                    TokenKind::Bang => "!",
-                    TokenKind::Minus => "-",
-                    TokenKind::Star => "*",
-                    TokenKind::Amp => "&",
+                    TokenKind::Bang => UnaryOp::Not,
+                    TokenKind::Minus => UnaryOp::Neg,
+                    TokenKind::Star => UnaryOp::Deref,
+                    TokenKind::Amp => UnaryOp::Ref,
                     _ => unreachable!(),
                 };
                 self.bump();
-                if op == "&" {
+                if op == UnaryOp::Ref {
                     let _mutable = self.eat_ident_text("mut");
                 }
                 let expr = self.expr(11)?;
                 let span = token.span.join(expr.span);
                 Some(Expr {
                     kind: ExprKind::Unary {
-                        op: op.to_string(),
+                        op,
                         expr: Box::new(expr),
                     },
                     span,
@@ -1235,25 +1244,25 @@ impl<'src> Parser<'src> {
         }
     }
 
-    fn infix_binding_power(&self) -> Option<(&'static str, u8, u8)> {
+    fn infix_binding_power(&self) -> Option<(Infix, u8, u8)> {
         Some(match self.peek_kind()? {
-            TokenKind::Eq => ("=", 2, 1),
-            TokenKind::PipeGt => ("|>", 8, 9),
-            TokenKind::Plus => ("+", 9, 10),
-            TokenKind::Minus => ("-", 9, 10),
-            TokenKind::Star => ("*", 10, 11),
-            TokenKind::Slash => ("/", 10, 11),
-            TokenKind::Percent => ("%", 10, 11),
-            TokenKind::EqEq => ("==", 6, 7),
-            TokenKind::Ne => ("!=", 6, 7),
-            TokenKind::Lt => ("<", 7, 8),
-            TokenKind::Gt => (">", 7, 8),
-            TokenKind::Le => ("<=", 7, 8),
-            TokenKind::Ge => (">=", 7, 8),
-            TokenKind::AmpAmp => ("&&", 5, 6),
-            TokenKind::PipePipe => ("||", 4, 5),
-            TokenKind::DotDot => ("..", 3, 4),
-            TokenKind::DotDotEq => ("..=", 3, 4),
+            TokenKind::Eq => (Infix::Assign, 2, 1),
+            TokenKind::PipeGt => (Infix::Op(BinaryOp::Pipe), 8, 9),
+            TokenKind::Plus => (Infix::Op(BinaryOp::Add), 9, 10),
+            TokenKind::Minus => (Infix::Op(BinaryOp::Sub), 9, 10),
+            TokenKind::Star => (Infix::Op(BinaryOp::Mul), 10, 11),
+            TokenKind::Slash => (Infix::Op(BinaryOp::Div), 10, 11),
+            TokenKind::Percent => (Infix::Op(BinaryOp::Rem), 10, 11),
+            TokenKind::EqEq => (Infix::Op(BinaryOp::Eq), 6, 7),
+            TokenKind::Ne => (Infix::Op(BinaryOp::Ne), 6, 7),
+            TokenKind::Lt => (Infix::Op(BinaryOp::Lt), 7, 8),
+            TokenKind::Gt => (Infix::Op(BinaryOp::Gt), 7, 8),
+            TokenKind::Le => (Infix::Op(BinaryOp::Le), 7, 8),
+            TokenKind::Ge => (Infix::Op(BinaryOp::Ge), 7, 8),
+            TokenKind::AmpAmp => (Infix::Op(BinaryOp::And), 5, 6),
+            TokenKind::PipePipe => (Infix::Op(BinaryOp::Or), 4, 5),
+            TokenKind::DotDot => (Infix::Op(BinaryOp::Range), 3, 4),
+            TokenKind::DotDotEq => (Infix::Op(BinaryOp::RangeInclusive), 3, 4),
             _ => return None,
         })
     }
@@ -1398,7 +1407,7 @@ fn is_assign_target(expr: &Expr) -> bool {
             path.segments.len() == 1 && path.segments[0] != "self" && path.segments[0] != "Self"
         }
         ExprKind::Field { .. } | ExprKind::Index { .. } => true,
-        ExprKind::Unary { op, .. } => op == "*",
+        ExprKind::Unary { op, .. } => *op == UnaryOp::Deref,
         _ => false,
     }
 }
@@ -1571,7 +1580,7 @@ mod tests {
         let ExprKind::Binary { op, .. } = &tail.kind else {
             panic!("expected binary expression");
         };
-        assert_eq!(op, "/");
+        assert_eq!(*op, BinaryOp::Div);
     }
 
     #[test]
@@ -1794,7 +1803,7 @@ mod tests {
         let ExprKind::Binary { op, left, right } = &inner.kind else {
             panic!("expected pipe binary inside ErrorProp");
         };
-        assert_eq!(op, "|>");
+        assert_eq!(*op, BinaryOp::Pipe);
         assert!(path_named(left, "input"));
         assert!(path_named(right, "parse"));
     }
@@ -1809,7 +1818,7 @@ mod tests {
         let ExprKind::Binary { op, left, right } = &outer.kind else {
             panic!("expected outer pipe binary");
         };
-        assert_eq!(op, "|>");
+        assert_eq!(*op, BinaryOp::Pipe);
         assert!(path_named(right, "g"));
         let ExprKind::ErrorProp(mid) = &left.kind else {
             panic!("expected inner ErrorProp");
@@ -1817,7 +1826,7 @@ mod tests {
         let ExprKind::Binary { op, left, right } = &mid.kind else {
             panic!("expected inner pipe binary");
         };
-        assert_eq!(op, "|>");
+        assert_eq!(*op, BinaryOp::Pipe);
         assert!(path_named(left, "a"));
         assert!(path_named(right, "f"));
     }
@@ -1831,7 +1840,7 @@ mod tests {
         let ExprKind::Binary { op, right, .. } = &inner.kind else {
             panic!("expected pipe binary");
         };
-        assert_eq!(op, "|>");
+        assert_eq!(*op, BinaryOp::Pipe);
         let ExprKind::Call { callee, args, .. } = &right.kind else {
             panic!("expected call stage");
         };
@@ -1849,7 +1858,7 @@ mod tests {
         let ExprKind::Binary { op, right, .. } = &inner.kind else {
             panic!("expected pipe binary");
         };
-        assert_eq!(op, "|>");
+        assert_eq!(*op, BinaryOp::Pipe);
         let ExprKind::Field { base, name } = &right.kind else {
             panic!("expected field-chain stage");
         };
@@ -1887,12 +1896,12 @@ mod tests {
         let ExprKind::Binary { op, left, right } = &value.kind else {
             panic!("expected `+` at the top");
         };
-        assert_eq!(op, "+");
+        assert_eq!(*op, BinaryOp::Add);
         assert!(path_named(right, "b"));
         let ExprKind::Binary { op, left, right } = &left.kind else {
             panic!("expected pipe binary on the left");
         };
-        assert_eq!(op, "|>");
+        assert_eq!(*op, BinaryOp::Pipe);
         assert!(path_named(left, "x"));
         assert!(path_named(right, "a"));
     }
