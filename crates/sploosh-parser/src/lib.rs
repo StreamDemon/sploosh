@@ -1383,9 +1383,14 @@ mod tests {
             "fn f() { let r = a..b..=c; }",
         ] {
             let errors = parse_program(source).unwrap_err();
+            // The diagnostic must anchor to the second range operator
+            // (`..=` starts with `..`, so the second `..` match is its start).
+            let second_op = source.match_indices("..").nth(1).unwrap().0;
             assert!(
-                errors.iter().any(|err| err.message.contains("chained")),
-                "{source}: expected a range-chaining error, got {errors:?}"
+                errors
+                    .iter()
+                    .any(|err| err.message.contains("chained") && err.span.start == second_op),
+                "{source}: expected a range-chaining error at {second_op}, got {errors:?}"
             );
         }
     }
@@ -1399,19 +1404,23 @@ mod tests {
 
     #[test]
     fn offchain_and_async_apply_only_to_fn_items() {
-        for source in [
-            "offchain struct S { x: i64 }",
-            "async struct S { x: i64 }",
-            "pub async struct S { x: i64 }",
-            "async trait T {}",
-            "offchain mod m;",
+        for (source, modifier) in [
+            ("offchain struct S { x: i64 }", "offchain"),
+            ("async struct S { x: i64 }", "async"),
+            ("pub async struct S { x: i64 }", "async"),
+            ("async trait T {}", "async"),
+            ("offchain mod m;", "offchain"),
         ] {
             let errors = parse_program(source).unwrap_err();
+            // The diagnostic must anchor to the misplaced modifier's own span.
+            let start = source.find(modifier).unwrap();
+            let span = Span::new(start, start + modifier.len());
             assert!(
                 errors
                     .iter()
-                    .any(|err| err.message.contains("applies only to `fn` items")),
-                "{source}: expected a modifier error, got {errors:?}"
+                    .any(|err| err.message.contains("applies only to `fn` items")
+                        && err.span == span),
+                "{source}: expected a modifier error at {span:?}, got {errors:?}"
             );
         }
         assert!(parse_program("pub offchain async fn f() {}").is_ok());
@@ -1427,11 +1436,13 @@ mod tests {
             "pub extern \"C\" { fn f(); }",
         ] {
             let errors = parse_program(source).unwrap_err();
+            // `pub` heads each source, so the diagnostic must anchor to 0..3.
             assert!(
                 errors
                     .iter()
-                    .any(|err| err.message.contains("`pub` is not allowed")),
-                "{source}: expected a pub-placement error, got {errors:?}"
+                    .any(|err| err.message.contains("`pub` is not allowed")
+                        && err.span == Span::new(0, 3)),
+                "{source}: expected a pub-placement error at 0..3, got {errors:?}"
             );
         }
         for source in [
