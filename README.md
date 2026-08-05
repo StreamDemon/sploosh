@@ -145,6 +145,18 @@ cargo test --workspace
 
 Sploosh is an independent open-source project exploring a question the whole industry is circling: **what does a programming language look like when AI agents are first-class authors?** Sponsorship funds compiler development toward the four-target build matrix and the first end-to-end "prompt → deployed program" milestone. If your work touches AI coding agents, developer tooling, or on-chain infrastructure, [sponsoring Sploosh](https://github.com/sponsors/StreamDemon) directly accelerates a public testbed for LLM-native language design.
 
+## Sponsors
+
+Sploosh is funded by people who believe an AI-native language is worth building in the open. There are no sponsors yet — [become the first](https://github.com/sponsors/StreamDemon).
+
+**Ecosystem partner** sponsors (**$500/mo**) are featured in this section with their name and logo, and receive a quarterly roadmap sync. To be listed, sponsor at that tier and reply to the welcome email with your preferred attribution (company name, logo, and link). All tiers are described under [Sponsoring](#sponsoring).
+
+| Sponsor | Link |
+|---------|------|
+| _Be the first_ | [Sponsor Sploosh](https://github.com/sponsors/StreamDemon) |
+
+<!-- Sponsor logos are added here as they join. Format: [![Name](logo-url)](link) -->
+
 ## License
 
 [MIT](LICENSE)
