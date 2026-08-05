@@ -27,7 +27,7 @@ dashboard) plus the README recognition flow for the **Ecosystem partner ($500/mo
 
 When a $500/mo sponsor replies with attribution:
 
-1. Add a row to the `## Sponsors` table in `README.md`:
+1. Replace the `_Be the first_` placeholder row in the `## Sponsors` table in `README.md` with the sponsor's row:
    ```md
    | [![Name](https://logo-url)](https://link) | [Name](https://link) |
    ```

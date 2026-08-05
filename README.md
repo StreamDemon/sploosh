@@ -149,7 +149,7 @@ Sploosh is an independent open-source project exploring a question the whole ind
 
 Sploosh is funded by people who believe an AI-native language is worth building in the open. There are no sponsors yet — [become the first](https://github.com/sponsors/StreamDemon).
 
-**Ecosystem partner** sponsors (**$500/mo**) are featured in this section with their name and logo, and receive a quarterly roadmap sync. To be listed, sponsor at that tier and reply to the welcome email with your preferred attribution (company name, logo, and link). All tiers are described under [Sponsoring](#sponsoring).
+**Ecosystem partner** sponsors (**$500/mo**) are featured in this section with their name and logo, and receive a quarterly roadmap sync. To be listed, sponsor at that tier and reply to the welcome email with your preferred attribution (company name, logo, and link). All tiers and their welcome copy are described in [`.github/SPONSOR_WELCOME.md`](.github/SPONSOR_WELCOME.md).
 
 | Sponsor | Link |
 |---------|------|
