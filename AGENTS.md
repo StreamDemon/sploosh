@@ -51,7 +51,7 @@ brv query "..."    # query curated knowledge
 - **Never commit to `main`.** It is branch-protected. All work goes through PRs.
 - **Never `--force-push main`**, never `--no-verify`, never `--no-gpg-sign`.
 - **Branch naming:** `spec/<topic>`, `docs/<topic>`, `feature/<topic>`, `fix/<topic>`.
-- **Commit messages:** short descriptive title (no `feat:` / `fix:` prefixes), body explains *why*, sign with `Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>` when authored by Claude Code.
+- **Commit messages:** short descriptive title (no `feat:` / `fix:` prefixes), body explains *why*. **No AI footers anywhere** (maintainer rule, 2026-07-02): no `Co-Authored-By` trailers, no `Claude-Session:` lines, no "Generated with" lines — in commits, PR bodies, or issues.
 - **No `--amend` on published commits.** Make new commits if a hook fails.
 - **PR template:** `.github/pull_request_template.md` — fill `Summary`, `Spec Sections Affected`, `Build Targets Tested`, `Test Plan`.
 - **Reviewer:** `cubic-dev-ai` bot. Validate every comment against the spec before acting; reply with the fix SHA or an explanation if invalid.
