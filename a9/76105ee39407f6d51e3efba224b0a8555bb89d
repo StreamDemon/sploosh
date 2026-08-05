@@ -1,0 +1,19 @@
+README.md
+  s_b836d406f38dd2::t_117e0fe33d4c7b 93
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.21",
+  "base_commit_sha": "a976105ee39407f6d51e3efba224b0a8555bb89d",
+  "prompts": {},
+  "sessions": {
+    "s_b836d406f38dd2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2472e2ef-ef1a-4b12-966a-08b9b9187f0f",
+        "model": "claude-fable-5"
+      },
+      "human_author": "StreamDemon <revenantpulse@gmail.com>"
+    }
+  }
+}
