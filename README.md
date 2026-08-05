@@ -125,9 +125,13 @@ The `docs/` tree is the language — a complete, internally consistent definitio
 
 The spec is authoritative: when compiler behavior and the spec disagree, the compiler is wrong — or a spec amendment lands first. Every behavioral change updates the spec and its mirrors in the same PR.
 
-- Start with [AGENTS.md](AGENTS.md) for conventions (it's written for AI agents and humans alike — this repo practices what the language preaches).
-- Open parser work is tracked in [milestone 1](https://github.com/StreamDemon/sploosh/milestone/1); issues are scoped and labeled by effort.
-- Language change proposals go through the [spec-change issue template](.github/ISSUE_TEMPLATE/spec_change.md).
+- **[CONTRIBUTING.md](CONTRIBUTING.md)** — setup, PR process, and definition of done
+- **[AGENTS.md](AGENTS.md)** — conventions for humans and coding agents (nearest-wins under `docs/` and `crates/`)
+- **[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)** — community standards
+- **[SECURITY.md](SECURITY.md)** — how to report vulnerabilities privately
+- Open parser work: [milestone 1](https://github.com/StreamDemon/sploosh/milestone/1)
+- Language change proposals: [spec-change issue template](.github/ISSUE_TEMPLATE/spec_change.md)
+- Questions: [GitHub Discussions](https://github.com/StreamDemon/sploosh/discussions)
 
 Building for the toolchain requires stable Rust 1.91+:
 
