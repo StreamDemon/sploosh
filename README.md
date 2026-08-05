@@ -90,7 +90,7 @@ Sploosh is **spec-first and pre-1.0**. The language definition is complete throu
 
 | Crate | What it does |
 |---|---|
-| [`sploosh-lexer`](crates/sploosh-lexer) | Tokenizer for the full §2 surface (44 keywords: 36 reserved + 8 contextual) |
+| [`sploosh-lexer`](crates/sploosh-lexer) | Tokenizer for the full §2 surface (45 keywords: 36 reserved + 9 contextual) |
 | [`sploosh-parser`](crates/sploosh-parser) | Recursive-descent parser targeting the §16 EBNF, corpus-tested against `tests/corpus/*.sp` |
 | [`sploosh-ast`](crates/sploosh-ast) | Typed AST with attribute preservation and operator enums |
 
