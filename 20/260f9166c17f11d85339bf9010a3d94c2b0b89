@@ -1,0 +1,20 @@
+CODE_OF_CONDUCT.md
+  h_d138e861582f64 1-134
+CONTRIBUTING.md
+  h_d138e861582f64 1-103
+README.md
+  h_d138e861582f64 128-134
+SECURITY.md
+  h_d138e861582f64 1-99
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.21",
+  "base_commit_sha": "20260f9166c17f11d85339bf9010a3d94c2b0b89",
+  "prompts": {},
+  "humans": {
+    "h_d138e861582f64": {
+      "author": "StreamDemon <revenantpulse@gmail.com>"
+    }
+  }
+}
