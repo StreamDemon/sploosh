@@ -1,0 +1,25 @@
+LICENSE
+  s_b836d406f38dd2::t_a96ce3568e019e 1-21
+AGENTS.md
+  s_b836d406f38dd2::t_044939b5296552 54
+README.md
+  s_b836d406f38dd2::t_6ed40b870d3fd2 1-146
+.github/FUNDING.yml
+  s_b836d406f38dd2::t_b2ff2cd5208c1d 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.20",
+  "base_commit_sha": "4624edee7253ae35a2e1680f1c329e81664acd2d",
+  "prompts": {},
+  "sessions": {
+    "s_b836d406f38dd2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2472e2ef-ef1a-4b12-966a-08b9b9187f0f",
+        "model": "claude-fable-5"
+      },
+      "human_author": "StreamDemon <revenantpulse@gmail.com>"
+    }
+  }
+}
