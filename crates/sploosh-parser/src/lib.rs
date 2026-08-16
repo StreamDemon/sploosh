@@ -1032,8 +1032,8 @@ impl<'src> Parser<'src> {
     fn pipe_stage(&mut self) -> Option<Expr> {
         let mut callee = if self.at(TokenKind::LParen) {
             // §16 stage_callee: parens in a pipe stage exist only to wrap a
-            // closure — `x |> (|v| ...)`.
-            self.bump();
+            // closure — `x |> (|v| ...)`. The stage span covers the parens.
+            let open = self.bump();
             if !matches!(
                 self.peek_kind(),
                 Some(TokenKind::Pipe | TokenKind::PipePipe)
@@ -1042,10 +1042,10 @@ impl<'src> Parser<'src> {
                 self.error_here("a parenthesized pipe stage must contain a closure");
                 return None;
             }
-            let closure = self.closure_expr()?;
+            let mut closure = self.closure_expr()?;
             let end = self.expect(TokenKind::RParen)?.span.end;
-            let span = Span::new(closure.span.start, end);
-            Expr { span, ..closure }
+            closure.span = Span::new(open.span.start, end);
+            closure
         } else {
             if !matches!(
                 self.peek_kind(),
@@ -1240,8 +1240,10 @@ impl<'src> Parser<'src> {
     /// loop), so it opens a zero-param closure; §16 gives closures no
     /// return-type annotation.
     fn closure_expr(&mut self) -> Option<Expr> {
+        // Snapshot before consuming anything: `prev_span()` here would
+        // anchor non-`move` closures to whatever precedes the opener.
+        let start = self.peek()?.span.start;
         let is_move = self.eat_keyword(Keyword::Move).is_some();
-        let start = self.prev_span().start;
         if self.eat(TokenKind::Pipe).is_some() {
             self.closure_rest(start, is_move, true)
         } else if self.eat(TokenKind::PipePipe).is_some() {
@@ -3440,5 +3442,26 @@ mod tests {
                 "{source}: expected an error containing {needle:?}, got {errors:?}"
             );
         }
+    }
+
+    #[test]
+    fn closure_spans_anchor_correctly() {
+        // Review follow-up on #92: spans anchor at the closure's own opener
+        // (never the preceding token), `move` included, and a parenthesized
+        // closure stage covers its parens.
+        let value = let_value("| | 5");
+        let wrapped_start = "fn f() { let r = ".len();
+        assert_eq!(value.span.start, wrapped_start);
+
+        let value = let_value("move |v| v + 1");
+        let wrapped_start = "fn f() { let r = ".len();
+        assert_eq!(value.span.start, wrapped_start);
+
+        let value = let_value("10 |> (|v| multiply(3, v))");
+        let ExprKind::Binary { right, .. } = &value.kind else {
+            panic!("expected pipe, got {value:?}");
+        };
+        let paren = "fn f() { let r = 10 |> ".len();
+        assert_eq!(right.span.start, paren);
     }
 }
