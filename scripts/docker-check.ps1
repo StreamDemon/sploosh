@@ -6,7 +6,7 @@ param(
 $ErrorActionPreference = "Stop"
 
 if ($Build) {
-    docker build -t $Image .
+    docker build --pull -t $Image .
     if ($LASTEXITCODE -ne 0) {
         exit $LASTEXITCODE
     }
@@ -15,7 +15,7 @@ if ($Build) {
 $workspace = (Get-Location).ProviderPath
 $check = "cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace"
 
-$args = @(
+$dockerArgs = @(
     "run",
     "--rm",
     "-v", "${workspace}:/workspace",
@@ -27,7 +27,7 @@ $args = @(
     $check
 )
 
-& docker @args
+& docker @dockerArgs
 if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }
