@@ -458,9 +458,38 @@ pub enum ExprKind {
         then_block: Block,
         else_branch: Option<Box<Expr>>,
     },
+    /// `if_let_expr = "if" "let" pattern "=" expr block [ "else" block ]`
+    /// (§16) — the else is a plain block only, no `else if` chains.
+    IfLet {
+        pattern: Pattern,
+        scrutinee: Box<Expr>,
+        then_block: Block,
+        else_block: Option<Block>,
+    },
     Match {
         scrutinee: Box<Expr>,
         arms: Vec<MatchArm>,
+    },
+    /// `"while" expr block` (§16).
+    While {
+        condition: Box<Expr>,
+        body: Block,
+    },
+    /// `while_let_expr = "while" "let" pattern "=" expr block` (§16).
+    WhileLet {
+        pattern: Pattern,
+        scrutinee: Box<Expr>,
+        body: Block,
+    },
+    /// `"for" pattern "in" expr block` (§16).
+    For {
+        pattern: Pattern,
+        iterable: Box<Expr>,
+        body: Block,
+    },
+    /// `"loop" block` (§16) — infinite loop; exits via `break` (no value).
+    Loop {
+        body: Block,
     },
     StructLiteral {
         path: Path,

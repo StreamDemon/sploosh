@@ -987,8 +987,17 @@ impl<'src> Parser<'src> {
                 span: block.span,
                 kind: ExprKind::Block(block),
             }),
-            TokenKind::Keyword(Keyword::If) => self.if_expr(),
+            TokenKind::Keyword(Keyword::If) => {
+                if self.peek_kind_at(1) == Some(TokenKind::Keyword(Keyword::Let)) {
+                    self.if_let_expr()
+                } else {
+                    self.if_expr()
+                }
+            }
             TokenKind::Keyword(Keyword::Match) => self.match_expr(),
+            TokenKind::Keyword(Keyword::While) => self.while_expr(),
+            TokenKind::Keyword(Keyword::For) => self.for_expr(),
+            TokenKind::Keyword(Keyword::Loop) => self.loop_expr(),
             _ => {
                 self.error_here("expected expression");
                 None
@@ -1084,7 +1093,13 @@ impl<'src> Parser<'src> {
         let then_block = self.block()?;
         let else_branch = if self.eat_keyword(Keyword::Else).is_some() {
             Some(Box::new(if self.at_keyword(Keyword::If) {
-                self.if_expr()?
+                // §16: the else of an `if_expr` may chain into another
+                // `if_expr` or an `if_let_expr`.
+                if self.peek_kind_at(1) == Some(TokenKind::Keyword(Keyword::Let)) {
+                    self.if_let_expr()?
+                } else {
+                    self.if_expr()?
+                }
             } else {
                 let block = self.block()?;
                 Expr {
@@ -1104,6 +1119,98 @@ impl<'src> Parser<'src> {
                 then_block,
                 else_branch,
             },
+            span: Span::new(start, end),
+        })
+    }
+
+    /// `if_let_expr = "if" "let" pattern "=" expr block [ "else" block ]`
+    /// (§16). The else is a plain block only — no `else if` chains. Like the
+    /// other condition-like positions, the scrutinee parses under the
+    /// block-head struct-literal restriction (see #89, item 3).
+    fn if_let_expr(&mut self) -> Option<Expr> {
+        let start = self.expect_keyword(Keyword::If)?.span.start;
+        self.expect_keyword(Keyword::Let)?;
+        let pattern = self.pattern();
+        self.expect(TokenKind::Eq)?;
+        let scrutinee = self.cond_expr()?;
+        let then_block = self.block()?;
+        let else_block = if self.eat_keyword(Keyword::Else).is_some() {
+            Some(self.block()?)
+        } else {
+            None
+        };
+        let end = else_block
+            .as_ref()
+            .map_or(then_block.span.end, |b| b.span.end);
+        Some(Expr {
+            kind: ExprKind::IfLet {
+                pattern: pattern?,
+                scrutinee: Box::new(scrutinee),
+                then_block,
+                else_block,
+            },
+            span: Span::new(start, end),
+        })
+    }
+
+    /// `"while" expr block | while_let_expr = "while" "let" pattern "=" expr
+    /// block` (§16). The condition and the while-let scrutinee both parse
+    /// under the block-head struct-literal restriction (§5.1; #89 item 3).
+    fn while_expr(&mut self) -> Option<Expr> {
+        let start = self.expect_keyword(Keyword::While)?.span.start;
+        if self.eat_keyword(Keyword::Let).is_some() {
+            let pattern = self.pattern();
+            self.expect(TokenKind::Eq)?;
+            let scrutinee = self.cond_expr()?;
+            let body = self.block()?;
+            let end = body.span.end;
+            return Some(Expr {
+                kind: ExprKind::WhileLet {
+                    pattern: pattern?,
+                    scrutinee: Box::new(scrutinee),
+                    body,
+                },
+                span: Span::new(start, end),
+            });
+        }
+        let condition = self.cond_expr()?;
+        let body = self.block()?;
+        let end = body.span.end;
+        Some(Expr {
+            kind: ExprKind::While {
+                condition: Box::new(condition),
+                body,
+            },
+            span: Span::new(start, end),
+        })
+    }
+
+    /// `"for" pattern "in" expr block` (§16). The iterable is a block-head
+    /// position (§5.2, §16 `struct_literal` side condition).
+    fn for_expr(&mut self) -> Option<Expr> {
+        let start = self.expect_keyword(Keyword::For)?.span.start;
+        let pattern = self.pattern();
+        self.expect_keyword(Keyword::In)?;
+        let iterable = self.cond_expr()?;
+        let body = self.block()?;
+        let end = body.span.end;
+        Some(Expr {
+            kind: ExprKind::For {
+                pattern: pattern?,
+                iterable: Box::new(iterable),
+                body,
+            },
+            span: Span::new(start, end),
+        })
+    }
+
+    /// `"loop" block` (§16) — infinite loop, exits via `break` (no value).
+    fn loop_expr(&mut self) -> Option<Expr> {
+        let start = self.expect_keyword(Keyword::Loop)?.span.start;
+        let body = self.block()?;
+        let end = body.span.end;
+        Some(Expr {
+            kind: ExprKind::Loop { body },
             span: Span::new(start, end),
         })
     }
@@ -1719,6 +1826,9 @@ fn can_begin_expr(kind: TokenKind) -> bool {
                     | Keyword::SelfType
                     | Keyword::If
                     | Keyword::Match
+                    | Keyword::While
+                    | Keyword::For
+                    | Keyword::Loop
             )
             | TokenKind::Bang
             | TokenKind::Minus
@@ -2779,5 +2889,274 @@ mod tests {
             parse_program("fn f(x: i64) -> i64 { match x { 1 => , 2 => 3, } }").unwrap_err();
         assert_eq!(errors.len(), 1, "{errors:?}");
         assert!(errors[0].message.contains("expected expression"));
+    }
+
+    #[test]
+    fn parses_while_and_while_let() {
+        // §5.5 / §5.4 shapes.
+        let value = tail_expr("while connection.is_alive() { handle(poll()); }");
+        let ExprKind::While { condition, body } = value.kind else {
+            panic!("expected while, got {value:?}");
+        };
+        assert!(matches!(&condition.kind, ExprKind::Call { .. }));
+        assert_eq!(body.statements.len(), 1);
+
+        let value = tail_expr("while let Ok(msg) = connection.read() { handle(msg); }");
+        let ExprKind::WhileLet {
+            pattern, scrutinee, ..
+        } = value.kind
+        else {
+            panic!("expected while let, got {value:?}");
+        };
+        assert!(matches!(
+            &pattern.kind,
+            PatternKind::Call { path, .. } if path.segments == ["Ok"]
+        ));
+        assert!(matches!(&scrutinee.kind, ExprKind::Call { .. }));
+    }
+
+    #[test]
+    fn parses_for_destructuring_and_ranges() {
+        let value =
+            tail_expr("for (index, value) in items.iter() |> enumerate() { print(index); }");
+        let ExprKind::For {
+            pattern, iterable, ..
+        } = value.kind
+        else {
+            panic!("expected for, got {value:?}");
+        };
+        assert!(matches!(
+            &pattern.kind,
+            PatternKind::Tuple(elems) if elems.len() == 2
+        ));
+        // §5.6: a pipe chain is a valid iterable.
+        assert!(matches!(
+            &iterable.kind,
+            ExprKind::Binary {
+                op: BinaryOp::Pipe,
+                ..
+            }
+        ));
+
+        let value = tail_expr("for User { name, age, .. } in users { print(name); }");
+        let ExprKind::For { pattern, .. } = value.kind else {
+            panic!("expected for, got {value:?}");
+        };
+        let PatternKind::Struct { fields, rest, .. } = pattern.kind else {
+            panic!("expected struct pattern");
+        };
+        assert_eq!(fields.len(), 2);
+        assert!(rest);
+
+        let value = tail_expr("for i in 0..10 { log(i); }");
+        let ExprKind::For { iterable, .. } = value.kind else {
+            panic!("expected for, got {value:?}");
+        };
+        assert!(matches!(
+            &iterable.kind,
+            ExprKind::Binary {
+                op: BinaryOp::Range,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn parses_loop_with_break_and_continue() {
+        // §5.5: infinite loop exits via break; a nested while coexists.
+        // Non-tail block-like statements carry their `;` per `expr_stmt`
+        // (loosening that is #62's call, not this parser's).
+        let source = r#"
+            loop {
+                let event = poll();
+                if event.is_shutdown() {
+                    break;
+                };
+                if event.is_skip() {
+                    continue;
+                };
+                while queue.has_work() {
+                    process(queue.next());
+                };
+            }
+        "#;
+        let value = tail_expr(source);
+        let ExprKind::Loop { body } = value.kind else {
+            panic!("expected loop, got {value:?}");
+        };
+        assert_eq!(body.statements.len(), 4);
+        let Stmt::Expr(Expr {
+            kind: ExprKind::If { then_block, .. },
+            ..
+        }) = &body.statements[1]
+        else {
+            panic!("expected if statement");
+        };
+        assert!(matches!(then_block.statements[0], Stmt::Break));
+        let Stmt::Expr(Expr {
+            kind: ExprKind::If { then_block, .. },
+            ..
+        }) = &body.statements[2]
+        else {
+            panic!("expected if statement");
+        };
+        assert!(matches!(then_block.statements[0], Stmt::Continue));
+        assert!(matches!(
+            &body.statements[3],
+            Stmt::Expr(Expr {
+                kind: ExprKind::While { .. },
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn parses_if_let_with_else_and_nesting() {
+        // §5.4: single-pattern matching without a full match.
+        let value = tail_expr(
+            "if let Some(user) = find_user(42) { process(user); } else { log(\"miss\"); }",
+        );
+        let ExprKind::IfLet {
+            pattern,
+            scrutinee,
+            then_block,
+            else_block,
+        } = value.kind
+        else {
+            panic!("expected if let, got {value:?}");
+        };
+        assert!(matches!(
+            &pattern.kind,
+            PatternKind::Call { path, .. } if path.segments == ["Some"]
+        ));
+        assert!(matches!(&scrutinee.kind, ExprKind::Call { .. }));
+        assert_eq!(then_block.statements.len(), 1);
+        assert!(else_block.is_some());
+
+        let value = tail_expr("if let Role::Admin = user.role { grant_access(); }");
+        let ExprKind::IfLet {
+            pattern,
+            else_block,
+            ..
+        } = value.kind
+        else {
+            panic!("expected if let, got {value:?}");
+        };
+        assert!(matches!(
+            &pattern.kind,
+            PatternKind::Path(path) if path.segments == ["Role", "Admin"]
+        ));
+        assert!(else_block.is_none());
+    }
+
+    #[test]
+    fn else_chains_reach_if_let() {
+        // §16: an if's else may chain into another if_expr or an if_let_expr.
+        let source = "if a { 1 } else if b { 2 } else if let Some(x) = y { 3 } else { 4 }";
+        let value = tail_expr(source);
+        let ExprKind::If {
+            else_branch: Some(outer_else),
+            ..
+        } = &value.kind
+        else {
+            panic!("expected if with else, got {value:?}");
+        };
+        let ExprKind::If {
+            else_branch: Some(inner_else),
+            ..
+        } = &outer_else.kind
+        else {
+            panic!("expected else if, got {outer_else:?}");
+        };
+        assert!(
+            matches!(&inner_else.kind, ExprKind::IfLet { .. }),
+            "expected else if let, got {inner_else:?}"
+        );
+    }
+
+    #[test]
+    fn loop_condition_and_iterable_struct_literal_restriction() {
+        // §5.1/§16: while conditions and for iterables are block-head
+        // positions — outermost struct literals rejected, parenthesized ok.
+        assert!(parse_program("fn f() -> bool { while x { on: true } { } }").is_err());
+        assert!(parse_program("fn f() -> bool { while (x { on: true }) { } }").is_ok());
+        assert!(parse_program("fn f() { for x in cfg { on: true } { } }").is_err());
+        assert!(parse_program("fn f() { for x in (cfg { on: true }) { } }").is_ok());
+    }
+
+    #[test]
+    fn let_scrutinee_struct_literal_restriction() {
+        // The §16 side condition omits if-let/while-let scrutinees, but the
+        // block-head ambiguity is identical (§5.1 rationale), so the parser
+        // applies the restriction there too — spec gap tracked as #89 item 3.
+        assert!(parse_program("fn f() -> bool { if let Some(y) = x { on: true } { } }").is_err());
+        assert!(parse_program("fn f() -> bool { if let Some(y) = (x { on: true }) { } }").is_ok());
+        assert!(parse_program("fn f() { while let Some(y) = x { on: true } { } }").is_err());
+        assert!(parse_program("fn f() { while let Some(y) = (x { on: true }) { } }").is_ok());
+    }
+
+    #[test]
+    fn break_and_continue_follow_stmt_grammar() {
+        // `break_stmt = "break" ";"` — no value, no labels (§16, Appendix D).
+        for source in [
+            "fn f() { loop { break 1; } }",
+            "fn f() { loop { continue 2; } }",
+        ] {
+            let errors = parse_program(source).unwrap_err();
+            assert!(
+                errors
+                    .iter()
+                    .any(|err| err.message.contains("expected `Semi`")),
+                "{source}: expected a no-value error, got {errors:?}"
+            );
+        }
+        // break/continue are ordinary statements per §16 — the loop-context
+        // check is semantic (no §18 code exists yet); the parser accepts them
+        // anywhere a statement goes.
+        assert!(parse_program("fn f() { break; }").is_ok());
+        assert!(parse_program("fn f() { continue; }").is_ok());
+    }
+
+    #[test]
+    fn if_let_else_is_block_only() {
+        // §16: if_let_expr's else is `[ "else" block ]` — no `else if` chains
+        // after an if let.
+        let errors =
+            parse_program("fn f() -> i64 { if let Some(x) = y { 1 } else if z { 2 } else { 3 } }")
+                .unwrap_err();
+        assert!(
+            errors.iter().any(|err| err.message.contains("LBrace")),
+            "expected a block-required error, got {errors:?}"
+        );
+    }
+
+    #[test]
+    fn loops_as_tail_and_non_tail_statements() {
+        assert!(parse_program("fn f(x: i64) { while x < 3 { x = x + 1; } }").is_ok());
+        assert!(parse_program("fn f() { loop { break; }; let y = 2; }").is_ok());
+        assert!(parse_program("fn f(items: Vec<i64>) { for x in items { }; let y = 2; }").is_ok());
+        let errors = parse_program("fn f() { loop { break; } let y = 2; }").unwrap_err();
+        assert!(
+            errors
+                .iter()
+                .any(|err| err.message.contains("expected `RBrace`")),
+            "expected a missing-terminator error, got {errors:?}"
+        );
+    }
+
+    #[test]
+    fn loop_construct_grammar_violations() {
+        for (source, needle) in [
+            ("fn f(x: i64) { for x y { } }", "expected keyword `In`"),
+            ("fn f() { while x < 3 }", "LBrace"),
+            ("fn f(x: i64) { while let Some(x) x { } }", "Eq"),
+            ("fn f() { loop }", "LBrace"),
+        ] {
+            let errors = parse_program(source).unwrap_err();
+            assert!(
+                errors.iter().any(|err| err.message.contains(needle)),
+                "{source}: expected an error containing {needle:?}, got {errors:?}"
+            );
+        }
     }
 }
