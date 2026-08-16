@@ -879,28 +879,14 @@ impl<'src> Parser<'src> {
     fn prefix(&mut self) -> Option<Expr> {
         let token = *self.peek()?;
         match token.kind {
-            TokenKind::IntLit | TokenKind::FloatLit | TokenKind::StringLit | TokenKind::CharLit => {
-                self.bump();
-                let text = self.text(&token).to_string();
-                let lit = match token.kind {
-                    TokenKind::IntLit => Literal::Int(text),
-                    TokenKind::FloatLit => Literal::Float(text),
-                    TokenKind::StringLit => Literal::String(text),
-                    TokenKind::CharLit => Literal::Char(text),
-                    _ => unreachable!(),
-                };
-                Some(Expr {
-                    kind: ExprKind::Literal(lit),
-                    span: token.span,
-                })
-            }
-            TokenKind::Keyword(Keyword::True | Keyword::False) => {
+            TokenKind::IntLit
+            | TokenKind::FloatLit
+            | TokenKind::StringLit
+            | TokenKind::CharLit
+            | TokenKind::Keyword(Keyword::True | Keyword::False) => {
                 self.bump();
                 Some(Expr {
-                    kind: ExprKind::Literal(Literal::Bool(matches!(
-                        token.kind,
-                        TokenKind::Keyword(Keyword::True)
-                    ))),
+                    kind: ExprKind::Literal(self.literal_from_token(&token)),
                     span: token.span,
                 })
             }
@@ -1002,10 +988,26 @@ impl<'src> Parser<'src> {
                 kind: ExprKind::Block(block),
             }),
             TokenKind::Keyword(Keyword::If) => self.if_expr(),
+            TokenKind::Keyword(Keyword::Match) => self.match_expr(),
             _ => {
                 self.error_here("expected expression");
                 None
             }
+        }
+    }
+
+    /// Canonicalizes a literal token (`IntLit`/`FloatLit`/`StringLit`/
+    /// `CharLit`, `true`/`false`) to its `Literal` node (§16 `literal`) —
+    /// shared by the expression and pattern grammars so both stay aligned.
+    fn literal_from_token(&self, token: &Token) -> Literal {
+        match token.kind {
+            TokenKind::IntLit => Literal::Int(self.text(token).to_string()),
+            TokenKind::FloatLit => Literal::Float(self.text(token).to_string()),
+            TokenKind::StringLit => Literal::String(self.text(token).to_string()),
+            TokenKind::CharLit => Literal::Char(self.text(token).to_string()),
+            TokenKind::Keyword(Keyword::True) => Literal::Bool(true),
+            TokenKind::Keyword(Keyword::False) => Literal::Bool(false),
+            _ => unreachable!("literal_from_token on a non-literal token"),
         }
     }
 
@@ -1104,6 +1106,209 @@ impl<'src> Parser<'src> {
             },
             span: Span::new(start, end),
         })
+    }
+
+    /// `match_expr = "match" expr "{" { match_arm } "}"` (§16). The scrutinee
+    /// is a condition-like position: the block-head struct-literal restriction
+    /// applies (§5.2).
+    fn match_expr(&mut self) -> Option<Expr> {
+        let start = self.expect_keyword(Keyword::Match)?.span.start;
+        let scrutinee = self.cond_expr()?;
+        self.expect(TokenKind::LBrace)?;
+        let mut arms = Vec::new();
+        while !self.at(TokenKind::RBrace) && !self.eof() {
+            match self.match_arm() {
+                Some(arm) => arms.push(arm),
+                None => self.recover_until(&[TokenKind::Comma, TokenKind::RBrace]),
+            }
+            // Expression arms consume their own required trailing comma inside
+            // `match_arm`; block arms take none, so the next arm (or `}`) may
+            // follow directly. Eating a stray separator here keeps the loop
+            // advancing after a failed arm.
+            let _ = self.eat(TokenKind::Comma);
+        }
+        let end = self.expect(TokenKind::RBrace)?.span.end;
+        Some(Expr {
+            kind: ExprKind::Match {
+                scrutinee: Box::new(scrutinee),
+                arms,
+            },
+            span: Span::new(start, end),
+        })
+    }
+
+    /// `match_arm = pattern [ "if" expr ] "=>" ( expr "," | block )` (§16).
+    fn match_arm(&mut self) -> Option<MatchArm> {
+        let pattern = self.pattern();
+        let guard = if self.eat_keyword(Keyword::If).is_some() {
+            Some(self.expr(0)?)
+        } else {
+            None
+        };
+        self.expect(TokenKind::FatArrow)?;
+        let body = if self.at(TokenKind::LBrace) {
+            let block = self.block()?;
+            Expr {
+                span: block.span,
+                kind: ExprKind::Block(block),
+            }
+        } else {
+            let body = self.expr(0)?;
+            self.expect(TokenKind::Comma)?;
+            body
+        };
+        Some(MatchArm {
+            pattern: pattern?,
+            guard,
+            body,
+        })
+    }
+
+    /// `pattern = ... | pattern "|" pattern` (§16) — the or-alternative is
+    /// right-associative, matching the production's right-recursing
+    /// derivation: `A | B | C` is `A | (B | C)`.
+    fn pattern(&mut self) -> Option<Pattern> {
+        let mut pattern = self.pattern_atom()?;
+        if self.eat(TokenKind::Pipe).is_some() {
+            let right = self.pattern()?;
+            let span = pattern.span.join(right.span);
+            pattern = Pattern {
+                kind: PatternKind::Or {
+                    left: Box::new(pattern),
+                    right: Box::new(right),
+                },
+                span,
+            };
+        }
+        Some(pattern)
+    }
+
+    /// The `pattern` production without the or-alternative: `_`, literals,
+    /// bindings, paths, and the `(...)`, `path(...)`, and `path { ... }`
+    /// destructuring forms (§16). A single bare identifier is a `Binding`;
+    /// `path_expr` patterns are multi-segment paths (`Role::Admin`).
+    fn pattern_atom(&mut self) -> Option<Pattern> {
+        let token = *self.peek()?;
+        match token.kind {
+            TokenKind::Ident if self.text(&token) == "_" => {
+                self.bump();
+                Some(Pattern {
+                    kind: PatternKind::Wildcard,
+                    span: token.span,
+                })
+            }
+            TokenKind::IntLit
+            | TokenKind::FloatLit
+            | TokenKind::StringLit
+            | TokenKind::CharLit
+            | TokenKind::Keyword(Keyword::True | Keyword::False) => {
+                self.bump();
+                Some(Pattern {
+                    kind: PatternKind::Literal(self.literal_from_token(&token)),
+                    span: token.span,
+                })
+            }
+            TokenKind::Ident if self.text(&token) == "ref" => {
+                // `[ "ref" ] IDENT` — `ref` prefixes a bare binding only.
+                self.bump();
+                let name = self.ident()?;
+                let span = token.span.join(name.span);
+                Some(Pattern {
+                    kind: PatternKind::Binding {
+                        name: name.name,
+                        is_ref: true,
+                    },
+                    span,
+                })
+            }
+            TokenKind::Ident | TokenKind::Keyword(Keyword::SelfType) => {
+                // `path_expr = ( "Self" | IDENT ) { "::" IDENT }` (§16).
+                let path = self.path()?;
+                if self.eat(TokenKind::LParen).is_some() {
+                    let args = self.patterns(TokenKind::RParen)?;
+                    let end = self.expect(TokenKind::RParen)?.span.end;
+                    Some(Pattern {
+                        kind: PatternKind::Call { path, args },
+                        span: Span::new(token.span.start, end),
+                    })
+                } else if self.at(TokenKind::LBrace) {
+                    self.bump();
+                    let (fields, rest) = self.field_pats()?;
+                    let end = self.expect(TokenKind::RBrace)?.span.end;
+                    Some(Pattern {
+                        kind: PatternKind::Struct { path, fields, rest },
+                        span: Span::new(token.span.start, end),
+                    })
+                } else if path.segments.len() == 1 && token.kind == TokenKind::Ident {
+                    Some(Pattern {
+                        kind: PatternKind::Binding {
+                            name: path.segments[0].clone(),
+                            is_ref: false,
+                        },
+                        span: path.span,
+                    })
+                } else {
+                    let span = path.span;
+                    Some(Pattern {
+                        kind: PatternKind::Path(path),
+                        span,
+                    })
+                }
+            }
+            TokenKind::LParen => {
+                self.bump();
+                let elems = self.patterns(TokenKind::RParen)?;
+                let end = self.expect(TokenKind::RParen)?.span.end;
+                Some(Pattern {
+                    kind: PatternKind::Tuple(elems),
+                    span: Span::new(token.span.start, end),
+                })
+            }
+            _ => {
+                self.error_here("expected pattern");
+                None
+            }
+        }
+    }
+
+    /// `patterns = [ pattern { "," pattern } [ "," ] ]` (§16).
+    fn patterns(&mut self, close: TokenKind) -> Option<Vec<Pattern>> {
+        let mut patterns = Vec::new();
+        while !self.at(close) && !self.eof() {
+            patterns.push(self.pattern()?);
+            if self.eat(TokenKind::Comma).is_none() {
+                break;
+            }
+        }
+        Some(patterns)
+    }
+
+    /// `field_pats = [ field_pat { "," field_pat } [ "," ] ]` with
+    /// `field_pat = IDENT [ ":" pattern ]`; a trailing `".."` rest may follow
+    /// the list (§16). Shorthand fields bind their own name.
+    fn field_pats(&mut self) -> Option<(Vec<(String, Pattern)>, bool)> {
+        let mut fields = Vec::new();
+        while !self.at(TokenKind::RBrace) && !self.at(TokenKind::DotDot) && !self.eof() {
+            let name = self.ident()?.name;
+            let pattern = if self.eat(TokenKind::Colon).is_some() {
+                self.pattern()?
+            } else {
+                let span = self.prev_span();
+                Pattern {
+                    kind: PatternKind::Binding {
+                        name: name.clone(),
+                        is_ref: false,
+                    },
+                    span,
+                }
+            };
+            fields.push((name, pattern));
+            if self.eat(TokenKind::Comma).is_none() {
+                break;
+            }
+        }
+        let rest = self.eat(TokenKind::DotDot).is_some();
+        Some((fields, rest))
     }
 
     fn args(&mut self, close: TokenKind) -> Option<Vec<Expr>> {
@@ -1513,6 +1718,7 @@ fn can_begin_expr(kind: TokenKind) -> bool {
                     | Keyword::SelfValue
                     | Keyword::SelfType
                     | Keyword::If
+                    | Keyword::Match
             )
             | TokenKind::Bang
             | TokenKind::Minus
@@ -2270,5 +2476,308 @@ mod tests {
         };
         assert_eq!(trait_ref.path.segments, ["Iter"]);
         assert!(matches!(&trait_ref.args[0], TypeArg::Assoc { name, .. } if name.name == "Item"));
+    }
+
+    /// Parses `fn f() -> i64 { <source> }` and returns the block's tail
+    /// expression.
+    fn tail_expr(source: &str) -> Expr {
+        let source = format!("fn f() -> i64 {{ {source} }}");
+        let program = parse_program(&source).unwrap();
+        let ItemKind::Function(func) = &program.items[0].kind else {
+            panic!("expected function");
+        };
+        func.body
+            .as_ref()
+            .expect("function body")
+            .tail
+            .as_ref()
+            .expect("tail expression")
+            .as_ref()
+            .clone()
+    }
+
+    fn match_parts(source: &str) -> (Expr, Vec<MatchArm>) {
+        let value = tail_expr(source);
+        let ExprKind::Match { scrutinee, arms } = value.kind else {
+            panic!("expected match expression, got {value:?}");
+        };
+        (*scrutinee, arms)
+    }
+
+    #[test]
+    fn parses_match_guards_and_wildcard() {
+        // §5.2: guards sit between the pattern and `=>`.
+        let (scrutinee, arms) = match_parts(
+            "match age { n if n < 13 => \"child\", n if n < 20 => \"teen\", n if n < 65 => \"adult\", _ => \"senior\", }",
+        );
+        assert!(path_named(&scrutinee, "age"));
+        assert_eq!(arms.len(), 4);
+        assert!(matches!(
+            &arms[0].pattern.kind,
+            PatternKind::Binding { name, is_ref: false } if name == "n"
+        ));
+        assert!(arms[0].guard.is_some());
+        assert!(arms[3].guard.is_none());
+        assert!(matches!(&arms[3].pattern.kind, PatternKind::Wildcard));
+    }
+
+    #[test]
+    fn parses_match_tuple_destructuring() {
+        // §5.2: tuple patterns with literal and binding elements. `(x)` is a
+        // parenthesized pattern and `()` a unit tuple — degenerate `Tuple`s.
+        let (_, arms) = match_parts(
+            "match point { (0, 0) => \"origin\", (x, 0) => 1, (x, y) => 2, (z) => 3, () => 4, }",
+        );
+        let PatternKind::Tuple(elems) = &arms[0].pattern.kind else {
+            panic!("expected tuple pattern");
+        };
+        assert!(matches!(
+            &elems[0].kind,
+            PatternKind::Literal(Literal::Int(text)) if text == "0"
+        ));
+        let PatternKind::Tuple(elems) = &arms[1].pattern.kind else {
+            panic!("expected tuple pattern");
+        };
+        assert!(matches!(
+            &elems[0].kind,
+            PatternKind::Binding { name, .. } if name == "x"
+        ));
+        let PatternKind::Tuple(elems) = &arms[3].pattern.kind else {
+            panic!("expected tuple pattern");
+        };
+        assert_eq!(elems.len(), 1);
+        let PatternKind::Tuple(elems) = &arms[4].pattern.kind else {
+            panic!("expected tuple pattern");
+        };
+        assert!(elems.is_empty());
+    }
+
+    #[test]
+    fn parses_match_variant_call_patterns() {
+        // §5.2: variant patterns, including qualified nesting like
+        // `Err(AppError::Timeout { after })`.
+        let (_, arms) = match_parts(
+            "match result { Ok(user) => user, Err(AppError::NotFound) => 0, Err(AppError::Timeout { after }) => after, Err(e) => e, }",
+        );
+        let PatternKind::Call { path, args } = &arms[0].pattern.kind else {
+            panic!("expected call pattern");
+        };
+        assert_eq!(path.segments, ["Ok"]);
+        assert!(matches!(
+            &args[0].kind,
+            PatternKind::Binding { name, .. } if name == "user"
+        ));
+        let PatternKind::Call { path, args } = &arms[1].pattern.kind else {
+            panic!("expected call pattern");
+        };
+        assert_eq!(path.segments, ["Err"]);
+        assert!(matches!(
+            &args[0].kind,
+            PatternKind::Path(path) if path.segments == ["AppError", "NotFound"]
+        ));
+        let PatternKind::Call { args, .. } = &arms[2].pattern.kind else {
+            panic!("expected call pattern");
+        };
+        let PatternKind::Struct { path, fields, rest } = &args[0].kind else {
+            panic!("expected struct pattern");
+        };
+        assert_eq!(path.segments, ["AppError", "Timeout"]);
+        assert_eq!(fields.len(), 1);
+        assert!(matches!(
+            &fields[0].1.kind,
+            PatternKind::Binding { name, .. } if name == "after"
+        ));
+        assert!(!rest);
+    }
+
+    #[test]
+    fn parses_struct_pattern_rest_and_or_patterns() {
+        let (_, arms) = match_parts(
+            "match role { Role::Editor { level } => 1, Role::Viewer | Role::Guest => 2, Role::Mod { name, .. } => 3, Role::None { .. } => 4, A | B | C => 5, }",
+        );
+        let PatternKind::Struct { fields, .. } = &arms[0].pattern.kind else {
+            panic!("expected struct pattern");
+        };
+        assert_eq!(fields.len(), 1);
+        let PatternKind::Or { left, right } = &arms[1].pattern.kind else {
+            panic!("expected or-pattern");
+        };
+        assert!(matches!(
+            &left.kind,
+            PatternKind::Path(path) if path.segments == ["Role", "Viewer"]
+        ));
+        assert!(matches!(
+            &right.kind,
+            PatternKind::Path(path) if path.segments == ["Role", "Guest"]
+        ));
+        let PatternKind::Struct { fields, rest, .. } = &arms[2].pattern.kind else {
+            panic!("expected struct pattern");
+        };
+        assert_eq!(fields.len(), 1);
+        assert!(*rest);
+        let PatternKind::Struct { fields, rest, .. } = &arms[3].pattern.kind else {
+            panic!("expected struct pattern");
+        };
+        assert!(fields.is_empty());
+        assert!(*rest);
+        // `A | B | C` parses right-associatively: `A | (B | C)`. Single bare
+        // identifiers are bindings, so `A` binds and `B | C` stays an `Or`.
+        let PatternKind::Or { left, right } = &arms[4].pattern.kind else {
+            panic!("expected or-pattern");
+        };
+        assert!(matches!(
+            &left.kind,
+            PatternKind::Binding { name, .. } if name == "A"
+        ));
+        assert!(matches!(&right.kind, PatternKind::Or { .. }));
+    }
+
+    #[test]
+    fn parses_match_mixed_arm_bodies() {
+        // §8.10.1: expression bodies carry the trailing comma, block bodies
+        // none; `return` inside a block arm is a return_stmt.
+        let (scrutinee, arms) = match_parts(
+            "match worker.process(data) { Ok(result) => use_result(result), Err(ActorError::Dead) => { let fallback = default(); use_result(fallback) } Err(e) => { return Err(AppError::from(e)); } }",
+        );
+        assert!(matches!(&scrutinee.kind, ExprKind::Call { .. }));
+        assert_eq!(arms.len(), 3);
+        assert!(matches!(&arms[0].body.kind, ExprKind::Call { .. }));
+        let ExprKind::Block(block) = &arms[1].body.kind else {
+            panic!("expected block body");
+        };
+        assert_eq!(block.statements.len(), 1);
+        assert!(block.tail.is_some());
+        let ExprKind::Block(block) = &arms[2].body.kind else {
+            panic!("expected block body");
+        };
+        assert!(matches!(block.statements[0], Stmt::Return(_)));
+    }
+
+    #[test]
+    fn parses_match_ref_binding_and_wildcard_ident() {
+        // `ref` borrows (§3.7); `_unused` is a regular identifier binding,
+        // only bare `_` discards (§2.7).
+        let (_, arms) =
+            match_parts("match opt { Some(ref name) => name.len(), Some(_unused) => 0, _ => 1, }");
+        let PatternKind::Call { args, .. } = &arms[0].pattern.kind else {
+            panic!("expected call pattern");
+        };
+        assert!(matches!(
+            &args[0].kind,
+            PatternKind::Binding { name, is_ref: true } if name == "name"
+        ));
+        let PatternKind::Call { args, .. } = &arms[1].pattern.kind else {
+            panic!("expected call pattern");
+        };
+        assert!(matches!(
+            &args[0].kind,
+            PatternKind::Binding { name, is_ref: false } if name == "_unused"
+        ));
+    }
+
+    #[test]
+    fn parses_nested_match_and_string_literal_pattern() {
+        // §3.10: string literal patterns; a match arm body may itself be a
+        // match (grammar nests without restriction).
+        let source = "match kind { \"circle\" => match kind { \"unit\" => 1, _ => 2, }, _ => 3, }";
+        let (_, arms) = match_parts(source);
+        let PatternKind::Literal(Literal::String(text)) = &arms[0].pattern.kind else {
+            panic!("expected string literal pattern");
+        };
+        assert_eq!(text, "\"circle\"");
+        assert!(matches!(&arms[0].body.kind, ExprKind::Match { .. }));
+    }
+
+    #[test]
+    fn match_scrutinee_struct_literal_restriction() {
+        // §5.2: the scrutinee is a block-head position — an outermost struct
+        // literal is rejected there, parenthesized is accepted, and nested
+        // occurrences in delimited groups are fine.
+        assert!(parse_program("fn f() -> bool { match x { on: true } { _ => true, } }").is_err());
+        assert!(parse_program("fn f() -> bool { match (x { on: true }) { _ => true, } }").is_ok());
+        assert!(
+            parse_program("fn f() -> bool { match takes(Cfg { on: true }) { _ => true, } }")
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn match_as_tail_and_non_tail_statement() {
+        // A tail match needs no semicolon; a non-tail match statement is a
+        // block-like expression and needs its `;`, like `if` and blocks.
+        assert!(parse_program("fn f(x: i64) -> i64 { match x { _ => 1, } }").is_ok());
+        // §16: `{ match_arm }` is zero-or-more; exhaustiveness is semantic.
+        assert!(parse_program("fn f(x: i64) { match x {} }").is_ok());
+        assert!(parse_program("fn f(x: i64) { match x { _ => 1, }; let y = 2; }").is_ok());
+        let errors = parse_program("fn f(x: i64) { match x { _ => 1, } let y = 2; }").unwrap_err();
+        assert!(
+            errors
+                .iter()
+                .any(|err| err.message.contains("expected `RBrace`")),
+            "expected a missing-terminator error, got {errors:?}"
+        );
+    }
+
+    #[test]
+    fn match_heads_pipe_and_pipe_in_arm_body() {
+        // A match may head a pipe chain; an arm body may itself be a pipe
+        // (§5.6), including the stage-trailing `?` (§5.7).
+        let value = let_value("match kind { \"circle\" => 1, _ => 2, } |> double");
+        let ExprKind::Binary {
+            op: BinaryOp::Pipe, ..
+        } = &value.kind
+        else {
+            panic!("expected pipe at the top, got {value:?}");
+        };
+        assert!(
+            parse_program(
+                "fn f(v: String) -> i64 { match v { Ok(s) => s |> parse::<i64>?, _ => 0, } }"
+            )
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn match_arm_grammar_violations() {
+        for (source, needle) in [
+            // Expression bodies require the trailing comma, even the last arm
+            // (§16 `match_arm`).
+            ("fn f() -> i64 { match x { _ => 1 } }", "expected `Comma`"),
+            ("fn f() -> i64 { match x { _ 1 } }", "expected `FatArrow`"),
+            // The pattern grammar's `literal` is unsigned — no `-1` patterns.
+            ("fn f() { match x { -1 => 1, } }", "expected pattern"),
+            // `[ "ref" ] IDENT` — `ref` prefixes a bare binding only.
+            ("fn f() { match x { ref 1 => 2, } }", "expected identifier"),
+            // `return` is a statement, not an `expr` alternative (§16), so it
+            // cannot be an expression arm body; §5.2's own example shows this
+            // form — spec debt tracked in #89.
+            (
+                "fn f() { match r { Err(e) => return Err(e), } }",
+                "expected expression",
+            ),
+            // `field_pat = IDENT [ ":" pattern ]` has no `ref` shorthand;
+            // §3.7's `Role::Editor { ref level }` example shows this form —
+            // spec debt tracked in #89.
+            (
+                "fn f() { match r { Role::Editor { ref level } => 1, } }",
+                "expected `RBrace`",
+            ),
+        ] {
+            let errors = parse_program(source).unwrap_err();
+            assert!(
+                errors.iter().any(|err| err.message.contains(needle)),
+                "{source}: expected an error containing {needle:?}, got {errors:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn match_arm_error_recovery_does_not_cascade() {
+        // A failed arm records one diagnostic and the following arm still
+        // parses — recovery must not swallow the rest of the match.
+        let errors =
+            parse_program("fn f(x: i64) -> i64 { match x { 1 => , 2 => 3, } }").unwrap_err();
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(errors[0].message.contains("expected expression"));
     }
 }
