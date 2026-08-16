@@ -998,6 +998,11 @@ impl<'src> Parser<'src> {
             TokenKind::Keyword(Keyword::While) => self.while_expr(),
             TokenKind::Keyword(Keyword::For) => self.for_expr(),
             TokenKind::Keyword(Keyword::Loop) => self.loop_expr(),
+            // A `|`/`||` in prefix position can only open a closure — the
+            // binding-power loop consumes infix `||` before prefix ever sees
+            // it (§4.6; see #89 item 4 for the missing spec rule).
+            TokenKind::Pipe | TokenKind::PipePipe => self.closure_expr(),
+            TokenKind::Keyword(Keyword::Move) => self.closure_expr(),
             _ => {
                 self.error_here("expected expression");
                 None
@@ -1021,26 +1026,39 @@ impl<'src> Parser<'src> {
     }
 
     /// `pipe_stage = stage_callee [ "(" args ")" ]` with
-    /// `stage_callee = path_expr [ turbofish ] { "." IDENT [ turbofish ] }` (§16).
-    /// The stage-trailing `?` is consumed by the caller so it can wrap the
-    /// accumulated pipe application (§5.7). The `"(" closure ")"` stage form is
-    /// not yet implemented — closures have no parse production.
+    /// `stage_callee = path_expr [ turbofish ] { "." IDENT [ turbofish ] }
+    /// | "(" closure ")"` (§16). The stage-trailing `?` is consumed by the
+    /// caller so it can wrap the accumulated pipe application (§5.7).
     fn pipe_stage(&mut self) -> Option<Expr> {
-        if self.at(TokenKind::LParen) {
-            self.error_here("closure pipe stages are not yet implemented");
-            return None;
-        }
-        if !matches!(
-            self.peek_kind(),
-            Some(TokenKind::Ident | TokenKind::Keyword(Keyword::SelfValue | Keyword::SelfType))
-        ) {
-            self.error_here("expected pipe stage: a function path or method chain");
-            return None;
-        }
-        let path = self.path()?;
-        let mut callee = Expr {
-            span: path.span,
-            kind: ExprKind::Path(path),
+        let mut callee = if self.at(TokenKind::LParen) {
+            // §16 stage_callee: parens in a pipe stage exist only to wrap a
+            // closure — `x |> (|v| ...)`.
+            self.bump();
+            if !matches!(
+                self.peek_kind(),
+                Some(TokenKind::Pipe | TokenKind::PipePipe)
+            ) && !self.at_keyword(Keyword::Move)
+            {
+                self.error_here("a parenthesized pipe stage must contain a closure");
+                return None;
+            }
+            let closure = self.closure_expr()?;
+            let end = self.expect(TokenKind::RParen)?.span.end;
+            let span = Span::new(closure.span.start, end);
+            Expr { span, ..closure }
+        } else {
+            if !matches!(
+                self.peek_kind(),
+                Some(TokenKind::Ident | TokenKind::Keyword(Keyword::SelfValue | Keyword::SelfType))
+            ) {
+                self.error_here("expected pipe stage: a function path or method chain");
+                return None;
+            }
+            let path = self.path()?;
+            Expr {
+                span: path.span,
+                kind: ExprKind::Path(path),
+            }
         };
         let mut type_args = self.turbofish();
         while type_args.is_none() && self.eat(TokenKind::Dot).is_some() {
@@ -1212,6 +1230,72 @@ impl<'src> Parser<'src> {
         Some(Expr {
             kind: ExprKind::Loop { body },
             span: Span::new(start, end),
+        })
+    }
+
+    /// `closure = [ "move" ] "|" closure_params "|" ( expr | block )` (§16).
+    /// Consumes the optional `move` and the opening delimiter, then parses
+    /// params and body via `closure_rest`. A `||` reaching prefix position is
+    /// expression-start by construction (infix `||` never leaves the binding
+    /// loop), so it opens a zero-param closure; §16 gives closures no
+    /// return-type annotation.
+    fn closure_expr(&mut self) -> Option<Expr> {
+        let is_move = self.eat_keyword(Keyword::Move).is_some();
+        let start = self.prev_span().start;
+        if self.eat(TokenKind::Pipe).is_some() {
+            self.closure_rest(start, is_move, true)
+        } else if self.eat(TokenKind::PipePipe).is_some() {
+            self.closure_rest(start, is_move, false)
+        } else if is_move {
+            self.error_here("expected closure after `move`");
+            None
+        } else {
+            self.error_here("expected closure");
+            None
+        }
+    }
+
+    /// Params and body of a closure whose opening delimiter was consumed.
+    /// `opening_pipe`: the opener was a single `|` (a params list and closing
+    /// `|` follow); false: it was a `||` zero-param token.
+    fn closure_rest(&mut self, start: usize, is_move: bool, opening_pipe: bool) -> Option<Expr> {
+        let mut params = Vec::new();
+        if opening_pipe {
+            while !self.at(TokenKind::Pipe) && !self.eof() {
+                // `closure_param = pattern` collides with the closing `|`:
+                // the or-alternative would swallow it as a separator. Parse
+                // the non-or pattern here — a top-level or-pattern param must
+                // parenthesize (`|(A | B)|`), Rust's rule (see #89, item 4).
+                let pattern = self.pattern_atom()?;
+                let ty = if self.eat(TokenKind::Colon).is_some() {
+                    Some(self.ty()?)
+                } else {
+                    None
+                };
+                params.push(ClosureParam { pattern, ty });
+                if self.eat(TokenKind::Comma).is_none() {
+                    break;
+                }
+            }
+            self.expect(TokenKind::Pipe)?;
+        }
+        let body = if self.at(TokenKind::LBrace) {
+            let block = self.block()?;
+            Expr {
+                span: block.span,
+                kind: ExprKind::Block(block),
+            }
+        } else {
+            self.expr(0)?
+        };
+        let span = Span::new(start, body.span.end);
+        Some(Expr {
+            kind: ExprKind::Closure {
+                is_move,
+                params,
+                body: Box::new(body),
+            },
+            span,
         })
     }
 
@@ -1829,7 +1913,10 @@ fn can_begin_expr(kind: TokenKind) -> bool {
                     | Keyword::While
                     | Keyword::For
                     | Keyword::Loop
+                    | Keyword::Move
             )
+            | TokenKind::Pipe
+            | TokenKind::PipePipe
             | TokenKind::Bang
             | TokenKind::Minus
             | TokenKind::Star
@@ -2431,12 +2518,15 @@ mod tests {
     }
 
     #[test]
-    fn pipe_rejects_closure_stage_for_now() {
+    fn pipe_paren_stage_requires_closure() {
+        // §16 stage_callee: parens in a pipe stage exist only to wrap a
+        // closure — `x |> (v)` has no derivation.
         let errors = parse_program("fn f() { let r = x |> (v); }").unwrap_err();
         assert!(
             errors
                 .iter()
-                .any(|err| err.message.contains("not yet implemented"))
+                .any(|err| err.message.contains("must contain a closure")),
+            "expected a closure-required error, got {errors:?}"
         );
     }
 
@@ -3151,6 +3241,198 @@ mod tests {
             ("fn f() { while x < 3 }", "LBrace"),
             ("fn f(x: i64) { while let Some(x) x { } }", "Eq"),
             ("fn f() { loop }", "LBrace"),
+        ] {
+            let errors = parse_program(source).unwrap_err();
+            assert!(
+                errors.iter().any(|err| err.message.contains(needle)),
+                "{source}: expected an error containing {needle:?}, got {errors:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn parses_zero_arg_closures() {
+        // §4.6: `||` is a zero-param closure in prefix position; the spaced
+        // `| |` form lexes as two pipes and derives identically.
+        let value = let_value("|| { counter = counter + 1; }");
+        let ExprKind::Closure {
+            is_move,
+            params,
+            body,
+        } = &value.kind
+        else {
+            panic!("expected closure, got {value:?}");
+        };
+        assert!(!is_move);
+        assert!(params.is_empty());
+        assert!(matches!(body.kind, ExprKind::Block(_)));
+
+        let value = let_value("| | 5");
+        let ExprKind::Closure { params, body, .. } = &value.kind else {
+            panic!("expected closure, got {value:?}");
+        };
+        assert!(params.is_empty());
+        assert!(matches!(
+            &body.kind,
+            ExprKind::Literal(Literal::Int(text)) if text == "5"
+        ));
+    }
+
+    #[test]
+    fn parses_closure_param_forms() {
+        // `closure_param = pattern [ ":" type ]` (§16): inferred, typed,
+        // wildcard, tuple/ref patterns, and a trailing comma.
+        let value = let_value("|n: i64| n * 2");
+        let ExprKind::Closure { params, .. } = &value.kind else {
+            panic!("expected closure, got {value:?}");
+        };
+        assert_eq!(params.len(), 1);
+        assert!(matches!(
+            &params[0].pattern.kind,
+            PatternKind::Binding { name, .. } if name == "n"
+        ));
+        assert!(matches!(&params[0].ty, Some(Type::Primitive(t)) if t == "i64"));
+
+        let value = let_value("|u| u.active");
+        let ExprKind::Closure { params, .. } = &value.kind else {
+            panic!("expected closure, got {value:?}");
+        };
+        assert!(params[0].ty.is_none());
+
+        let value = let_value("|_| spawn_worker()");
+        let ExprKind::Closure { params, .. } = &value.kind else {
+            panic!("expected closure, got {value:?}");
+        };
+        assert!(matches!(&params[0].pattern.kind, PatternKind::Wildcard));
+
+        let value = let_value("|(a, b), ref r, x: &str,| combine(a, b, r, x)");
+        let ExprKind::Closure { params, .. } = &value.kind else {
+            panic!("expected closure, got {value:?}");
+        };
+        assert_eq!(params.len(), 3);
+        assert!(matches!(&params[0].pattern.kind, PatternKind::Tuple(e) if e.len() == 2));
+        assert!(matches!(
+            &params[1].pattern.kind,
+            PatternKind::Binding { is_ref: true, .. }
+        ));
+        assert!(matches!(&params[2].ty, Some(Type::Reference { .. })));
+    }
+
+    #[test]
+    fn parses_move_closures() {
+        // §4.6: `move` is reserved and prefixes the closure opener.
+        let value = let_value("move || { process(data); }");
+        let ExprKind::Closure { is_move, .. } = &value.kind else {
+            panic!("expected closure, got {value:?}");
+        };
+        assert!(is_move);
+
+        let value = let_value("move |v| v + 1");
+        let ExprKind::Closure {
+            is_move, params, ..
+        } = &value.kind
+        else {
+            panic!("expected closure, got {value:?}");
+        };
+        assert!(is_move);
+        assert_eq!(params.len(), 1);
+    }
+
+    #[test]
+    fn infix_pipe_pipe_is_still_logical_or() {
+        // The `||` closure reading is prefix-position only (§4.6/#89 item 4);
+        // after a complete expression `||` remains Logical OR (§2.4).
+        let value = let_value("a || b");
+        let ExprKind::Binary { op, .. } = &value.kind else {
+            panic!("expected binary, got {value:?}");
+        };
+        assert_eq!(*op, BinaryOp::Or);
+    }
+
+    #[test]
+    fn parses_closure_pipe_stage() {
+        // §5.6: the piped value lands outside first position via a closure
+        // stage — `10 |> (|v| multiply(3, v))`.
+        let value = let_value("10 |> (|v| multiply(3, v))");
+        let ExprKind::Binary {
+            op: BinaryOp::Pipe,
+            right,
+            ..
+        } = &value.kind
+        else {
+            panic!("expected pipe, got {value:?}");
+        };
+        // The stage is the bare closure callee (application is implicit in
+        // the pipe node, like `x |> count` keeping a Path stage); its body
+        // carries the real call — multiply(3, v).
+        let ExprKind::Closure { params, body, .. } = &right.kind else {
+            panic!("expected closure stage, got {right:?}");
+        };
+        assert_eq!(params.len(), 1);
+        assert!(matches!(&body.kind, ExprKind::Call { .. }));
+
+        // A `move` closure is a valid stage callee too.
+        assert!(parse_program("fn f() { let r = x |> (move |v| v + 1); }").is_ok());
+    }
+
+    #[test]
+    fn closures_in_let_bindings_and_call_args() {
+        // §4.6/§7.3 shapes: closures as let values and as call arguments in
+        // both method-chain and pipe styles.
+        let source = r#"
+            fn active_names(users: Vec<User>) -> Vec<String> {
+                let double = |n: i64| n * 2;
+                let names: Vec<String> = users.iter()
+                    .filter(|u| u.active)
+                    .map(|u| u.name.clone())
+                    .collect();
+                let piped = users.iter()
+                    |> filter(|u| u.active)
+                    |> map(|u| u.name.clone())
+                    |> collect();
+                names
+            }
+        "#;
+        let program = parse_program(source).unwrap();
+        let ItemKind::Function(func) = &program.items[0].kind else {
+            panic!("expected function");
+        };
+        let block = func.body.as_ref().unwrap();
+        let Stmt::Let { value, .. } = &block.statements[0] else {
+            panic!("expected let");
+        };
+        assert!(matches!(value.kind, ExprKind::Closure { .. }));
+    }
+
+    #[test]
+    fn send_head_before_closure_is_keyword() {
+        // §2.7: `send` opens a send-statement whenever the next token can
+        // begin an expression, and a closure can — so `send || x` is a
+        // send-statement with a closure operand (and fails the method-call
+        // check), never an identifier OR-expr.
+        let errors = parse_program("fn f() -> bool { send || x; }").unwrap_err();
+        assert!(
+            errors.iter().any(|err| err.message.contains("method call")),
+            "expected a method-call error, got {errors:?}"
+        );
+    }
+
+    #[test]
+    fn closure_grammar_violations() {
+        for (source, needle) in [
+            // `move` is reserved for closures — it cannot prefix anything else.
+            (
+                "fn f() { let g = move x; }",
+                "expected closure after `move`",
+            ),
+            // Unclosed params list.
+            ("fn f() { let g = |x; }", "Pipe"),
+            // §16 closures take no return-type annotation (issue #61 asked
+            // for `-> T`; amend the grammar first if wanted).
+            (
+                "fn f() { let g = |x: i64| -> i64 x; }",
+                "expected expression",
+            ),
         ] {
             let errors = parse_program(source).unwrap_err();
             assert!(
