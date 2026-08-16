@@ -879,28 +879,14 @@ impl<'src> Parser<'src> {
     fn prefix(&mut self) -> Option<Expr> {
         let token = *self.peek()?;
         match token.kind {
-            TokenKind::IntLit | TokenKind::FloatLit | TokenKind::StringLit | TokenKind::CharLit => {
-                self.bump();
-                let text = self.text(&token).to_string();
-                let lit = match token.kind {
-                    TokenKind::IntLit => Literal::Int(text),
-                    TokenKind::FloatLit => Literal::Float(text),
-                    TokenKind::StringLit => Literal::String(text),
-                    TokenKind::CharLit => Literal::Char(text),
-                    _ => unreachable!(),
-                };
-                Some(Expr {
-                    kind: ExprKind::Literal(lit),
-                    span: token.span,
-                })
-            }
-            TokenKind::Keyword(Keyword::True | Keyword::False) => {
+            TokenKind::IntLit
+            | TokenKind::FloatLit
+            | TokenKind::StringLit
+            | TokenKind::CharLit
+            | TokenKind::Keyword(Keyword::True | Keyword::False) => {
                 self.bump();
                 Some(Expr {
-                    kind: ExprKind::Literal(Literal::Bool(matches!(
-                        token.kind,
-                        TokenKind::Keyword(Keyword::True)
-                    ))),
+                    kind: ExprKind::Literal(self.literal_from_token(&token)),
                     span: token.span,
                 })
             }
@@ -1007,6 +993,21 @@ impl<'src> Parser<'src> {
                 self.error_here("expected expression");
                 None
             }
+        }
+    }
+
+    /// Canonicalizes a literal token (`IntLit`/`FloatLit`/`StringLit`/
+    /// `CharLit`, `true`/`false`) to its `Literal` node (§16 `literal`) —
+    /// shared by the expression and pattern grammars so both stay aligned.
+    fn literal_from_token(&self, token: &Token) -> Literal {
+        match token.kind {
+            TokenKind::IntLit => Literal::Int(self.text(token).to_string()),
+            TokenKind::FloatLit => Literal::Float(self.text(token).to_string()),
+            TokenKind::StringLit => Literal::String(self.text(token).to_string()),
+            TokenKind::CharLit => Literal::Char(self.text(token).to_string()),
+            TokenKind::Keyword(Keyword::True) => Literal::Bool(true),
+            TokenKind::Keyword(Keyword::False) => Literal::Bool(false),
+            _ => unreachable!("literal_from_token on a non-literal token"),
         }
     }
 
@@ -1196,28 +1197,14 @@ impl<'src> Parser<'src> {
                     span: token.span,
                 })
             }
-            TokenKind::IntLit | TokenKind::FloatLit | TokenKind::StringLit | TokenKind::CharLit => {
-                self.bump();
-                let text = self.text(&token).to_string();
-                let lit = match token.kind {
-                    TokenKind::IntLit => Literal::Int(text),
-                    TokenKind::FloatLit => Literal::Float(text),
-                    TokenKind::StringLit => Literal::String(text),
-                    TokenKind::CharLit => Literal::Char(text),
-                    _ => unreachable!(),
-                };
-                Some(Pattern {
-                    kind: PatternKind::Literal(lit),
-                    span: token.span,
-                })
-            }
-            TokenKind::Keyword(Keyword::True | Keyword::False) => {
+            TokenKind::IntLit
+            | TokenKind::FloatLit
+            | TokenKind::StringLit
+            | TokenKind::CharLit
+            | TokenKind::Keyword(Keyword::True | Keyword::False) => {
                 self.bump();
                 Some(Pattern {
-                    kind: PatternKind::Literal(Literal::Bool(matches!(
-                        token.kind,
-                        TokenKind::Keyword(Keyword::True)
-                    ))),
+                    kind: PatternKind::Literal(self.literal_from_token(&token)),
                     span: token.span,
                 })
             }
