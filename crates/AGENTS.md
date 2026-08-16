@@ -50,24 +50,33 @@ the accepted list as **not yet implemented** — add a corpus fixture when it la
   #89 item 3), `break`/`continue` take no value and have no labels (§16,
   Appendix D), and the loop-context check on break/continue is semantic (no
   §18 code yet), so the parser accepts them in any statement position;
+  closures (§4.6) — inferred/typed/wildcard/pattern params (top-level
+  or-pattern params must parenthesize: the bare form collides with the closing
+  delimiter, #89 item 4b), zero-arg `||` (`|`/`||` in prefix position opens a
+  closure, infix `||` stays Logical OR — #89 item 4a), `move` closures, and no
+  return-type annotation per §16; `send` followed by a closure opener now
+  opens a send-statement (the closure operand then fails the method-call
+  check) since a closure can begin an expression per §2.7;
   `|>` with §16
   `pipe_stage` stages (`callee [args] [?]` — a stage's trailing `?` wraps the
-  accumulated pipe application per §5.7); `let`, `return`,
+  accumulated pipe application per §5.7), including the `"(" closure ")"`
+  stage form (parens in a stage exist only to wrap a closure — `x |> (v)` is a
+  parse error); `let`, `return`,
   `break`, `continue`, `send` (statement-head rule per §2.7 — opens a
   send-statement only when the next token can begin an expression, and the
   operand must be a method call), and expression/tail statements.
-- **Not yet implemented:** closures (the keyword lexes but has no parse
-  production); `spawn`, `select`,
+- **Not yet implemented:** `spawn`, `select`,
   and `emit` (reserved keywords with no expression/statement production yet, so
-  §8 actor spawns and §11.5 event emission do not parse); patterns outside
-  `match`/`if let`/`while let`/`for` — `let` binds a single identifier only,
-  no destructuring (`let (a, b) = ...` and `let Some(x) = ...` are rejected),
-  and closure-param patterns wait on closures; `#[...]` compiler directives are not parsed
+  §8 actor spawns and §11.5 event emission do not parse — §4.6's
+  `spawn move || { ... }` example therefore does not parse either); patterns
+  outside `match`/`if let`/`while let`/`for`/closure params — `let` binds a
+  single identifier only, no destructuring (`let (a, b) = ...` and
+  `let Some(x) = ...` are rejected); `#[...]` compiler directives are not parsed
   in any position (`#[cfg(test)]`, `#[target(...)]`, `#[indexed]` all fail);
   `storage { }` blocks inside `onchain mod` are consumed but discarded, not
-  stored in the AST; closure pipe stages (`x |> (|v| ...)`) and turbofish on a
-  non-final pipe-stage segment are rejected with explicit
-  not-yet-implemented parse errors; literal-overflow checking (a parse-time
+  stored in the AST; turbofish on a non-final pipe-stage segment is rejected
+  with an explicit not-yet-implemented parse error; literal-overflow checking
+  (a parse-time
   error per `docs/reference/grammar.md`) is deferred to semantic analysis,
   where literals gain types; generic parameters and
   `trait`/`impl` bodies are skipped, not stored in the AST; `let mut` / `&mut`

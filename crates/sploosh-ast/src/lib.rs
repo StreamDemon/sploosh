@@ -422,6 +422,13 @@ pub struct MatchArm {
     pub body: Expr,
 }
 
+/// `closure_param = pattern [ ":" type ]` (§16).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ClosureParam {
+    pub pattern: Pattern,
+    pub ty: Option<Type>,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum ExprKind {
     Literal(Literal),
@@ -490,6 +497,14 @@ pub enum ExprKind {
     /// `"loop" block` (§16) — infinite loop; exits via `break` (no value).
     Loop {
         body: Block,
+    },
+    /// `closure = [ "move" ] "|" closure_params "|" ( expr | block )` (§16).
+    /// Block bodies are wrapped as `ExprKind::Block`. §16 has no closure
+    /// return-type annotation.
+    Closure {
+        is_move: bool,
+        params: Vec<ClosureParam>,
+        body: Box<Expr>,
     },
     StructLiteral {
         path: Path,
