@@ -368,6 +368,60 @@ pub struct Expr {
     pub span: Span,
 }
 
+/// `pattern` (§16) — the pattern grammar shared by `match_arm`,
+/// `if_let_expr`, `while_let_expr`, `let_stmt`, `closure_param`, and
+/// `select_arm`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Pattern {
+    pub kind: PatternKind,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum PatternKind {
+    /// `_` — discards the value and introduces no binding (§2.7).
+    Wildcard,
+    Literal(Literal),
+    /// `[ "ref" ] IDENT` — `ref` borrows instead of copying/moving (§3.7).
+    Binding {
+        name: String,
+        is_ref: bool,
+    },
+    /// Bare `path_expr` — unit-variant patterns like `Role::Admin`.
+    Path(Path),
+    /// `"(" patterns ")"` — covers the unit pattern `()`, a parenthesized
+    /// `(p)`, and tuple destructuring `(a, b)`.
+    Tuple(Vec<Pattern>),
+    /// `path_expr "(" patterns ")"` — variant / tuple-struct patterns like
+    /// `Ok(user)`, `Err(AppError::NotFound)`.
+    Call {
+        path: Path,
+        args: Vec<Pattern>,
+    },
+    /// `path_expr "{" field_pats [ ".." ] "}"` — struct patterns;
+    /// `rest` marks a trailing `..`. Shorthand fields bind their own name.
+    Struct {
+        path: Path,
+        fields: Vec<(String, Pattern)>,
+        rest: bool,
+    },
+    /// `pattern "|" pattern`, right-associative per the production's
+    /// right-recursing derivation (§16).
+    Or {
+        left: Box<Pattern>,
+        right: Box<Pattern>,
+    },
+}
+
+/// `match_arm = pattern [ "if" expr ] "=>" ( expr "," | block )` (§16).
+/// Block bodies are wrapped as `ExprKind::Block`, like `if`'s else-branch.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MatchArm {
+    pub pattern: Pattern,
+    pub guard: Option<Expr>,
+    pub body: Expr,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum ExprKind {
     Literal(Literal),
@@ -403,6 +457,10 @@ pub enum ExprKind {
         condition: Box<Expr>,
         then_block: Block,
         else_branch: Option<Box<Expr>>,
+    },
+    Match {
+        scrutinee: Box<Expr>,
+        arms: Vec<MatchArm>,
     },
     StructLiteral {
         path: Path,

@@ -34,18 +34,27 @@ the accepted list as **not yet implemented** — add a corpus fixture when it la
   are a parse error), assignment (targets validated per §16
   `assign_target`), `?`, `.await`, `as`, struct literals (with the
   §5.1 block-head restriction), `vec!` (square brackets required —
-  `vec!(...)` is a parse error), and `if`/`else`; `|>` with §16
+  `vec!(...)` is a parse error), and `if`/`else`; `match` (§5.2) with the
+  full §16 pattern grammar — literals, `_`, `[ref] IDENT` bindings, paths,
+  tuple/call/struct destructuring incl. `..` rest, or-patterns, and `if`
+  guards; the scrutinee is under the §5.2 block-head restriction, expression
+  bodies need their trailing comma and block bodies none, and a non-tail
+  `match` statement needs its `;` like `if`/blocks; patterns are wired into
+  `match` arms only today, and the two spec-example forms §16 cannot derive
+  (`return` arm bodies, `ref` field-pat shorthand) are rejected pending #89;
+  `|>` with §16
   `pipe_stage` stages (`callee [args] [?]` — a stage's trailing `?` wraps the
   accumulated pipe application per §5.7); `let`, `return`,
   `break`, `continue`, `send` (statement-head rule per §2.7 — opens a
   send-statement only when the next token can begin an expression, and the
   operand must be a method call), and expression/tail statements.
-- **Not yet implemented:** `match`, `while`, `for`, `loop`, `if let`, and
-  closures (their keywords lex but have no parse production); `spawn`, `select`,
+- **Not yet implemented:** `while`, `for`, `loop`, `if let`, and closures
+  (their keywords lex but have no parse production); `spawn`, `select`,
   and `emit` (reserved keywords with no expression/statement production yet, so
-  §8 actor spawns and §11.5 event emission do not parse); patterns — `let` binds
-  a single identifier only, no destructuring (`let (a, b) = ...` and
-  `let Some(x) = ...` are rejected); `#[...]` compiler directives are not parsed
+  §8 actor spawns and §11.5 event emission do not parse); patterns outside
+  `match` arms — `let` binds a single identifier only, no destructuring
+  (`let (a, b) = ...` and `let Some(x) = ...` are rejected), and
+  `if let`/`while let`/closure-param patterns wait on their constructs; `#[...]` compiler directives are not parsed
   in any position (`#[cfg(test)]`, `#[target(...)]`, `#[indexed]` all fail);
   `storage { }` blocks inside `onchain mod` are consumed but discarded, not
   stored in the AST; closure pipe stages (`x |> (|v| ...)`) and turbofish on a
@@ -55,7 +64,8 @@ the accepted list as **not yet implemented** — add a corpus fixture when it la
   where literals gain types; generic parameters and
   `trait`/`impl` bodies are skipped, not stored in the AST; `let mut` / `&mut`
   mutability and the `send` keyword are parsed but not preserved; a block-like
-  expression (`if`/block) used as a non-tail statement needs a trailing `;`.
+  expression (`if`/`match`/block) used as a non-tail statement needs a
+  trailing `;`.
 - **Intentionally absent:** block comments — §2.2 keeps one way to comment
   (`//`, `///`).
 
