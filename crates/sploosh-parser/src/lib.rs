@@ -1130,7 +1130,7 @@ impl<'src> Parser<'src> {
     fn if_let_expr(&mut self) -> Option<Expr> {
         let start = self.expect_keyword(Keyword::If)?.span.start;
         self.expect_keyword(Keyword::Let)?;
-        let pattern = self.pattern();
+        let pattern = self.pattern()?;
         self.expect(TokenKind::Eq)?;
         let scrutinee = self.cond_expr()?;
         let then_block = self.block()?;
@@ -1144,7 +1144,7 @@ impl<'src> Parser<'src> {
             .map_or(then_block.span.end, |b| b.span.end);
         Some(Expr {
             kind: ExprKind::IfLet {
-                pattern: pattern?,
+                pattern,
                 scrutinee: Box::new(scrutinee),
                 then_block,
                 else_block,
@@ -1159,14 +1159,14 @@ impl<'src> Parser<'src> {
     fn while_expr(&mut self) -> Option<Expr> {
         let start = self.expect_keyword(Keyword::While)?.span.start;
         if self.eat_keyword(Keyword::Let).is_some() {
-            let pattern = self.pattern();
+            let pattern = self.pattern()?;
             self.expect(TokenKind::Eq)?;
             let scrutinee = self.cond_expr()?;
             let body = self.block()?;
             let end = body.span.end;
             return Some(Expr {
                 kind: ExprKind::WhileLet {
-                    pattern: pattern?,
+                    pattern,
                     scrutinee: Box::new(scrutinee),
                     body,
                 },
@@ -1189,14 +1189,14 @@ impl<'src> Parser<'src> {
     /// position (§5.2, §16 `struct_literal` side condition).
     fn for_expr(&mut self) -> Option<Expr> {
         let start = self.expect_keyword(Keyword::For)?.span.start;
-        let pattern = self.pattern();
+        let pattern = self.pattern()?;
         self.expect_keyword(Keyword::In)?;
         let iterable = self.cond_expr()?;
         let body = self.block()?;
         let end = body.span.end;
         Some(Expr {
             kind: ExprKind::For {
-                pattern: pattern?,
+                pattern,
                 iterable: Box::new(iterable),
                 body,
             },

@@ -86,16 +86,16 @@ fn event_loop() {
     }
 }
 
-// §7.3: consuming vs borrowing iteration — .iter() borrows, bare for
-// consumes, .iter_mut() borrows mutably.
-fn iteration_modes(items: &Vec<i64>) {
+// §7.3: .iter() borrows, .iter_mut() borrows mutably, and bare for consumes
+// the binding — the consuming form comes last since the value is moved.
+fn iteration_modes(items: Vec<i64>) {
     for x in items.iter() {
-        print(x);
-    };
-    for x in items {
         print(x);
     };
     for x in items.iter_mut() {
         *x = *x + 1;
+    };
+    for x in items {
+        print(x);
     }
 }
