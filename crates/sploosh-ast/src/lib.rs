@@ -264,6 +264,13 @@ pub enum Stmt {
     },
     Expr(Expr),
     Return(Option<Expr>),
+    /// `emit_stmt = "emit" IDENT "{" field_inits "}" ";"` (§16) — the
+    /// on-chain restriction (§11.1) is semantic, not syntactic. Like the
+    /// other name-carrying statements, spanless per Stmt convention.
+    Emit {
+        event: String,
+        fields: Vec<(String, Option<Expr>)>,
+    },
     Break,
     Continue,
 }
@@ -429,6 +436,16 @@ pub struct ClosureParam {
     pub ty: Option<Type>,
 }
 
+/// `select_arm = pattern "=" expr "=>" ( expr "," | block )` (§16).
+/// `source` is the receive-source expression (`rx.recv()`, `timeout(ms)`);
+/// block bodies are wrapped as `ExprKind::Block`, like `MatchArm`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SelectArm {
+    pub pattern: Pattern,
+    pub source: Expr,
+    pub body: Expr,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum ExprKind {
     Literal(Literal),
@@ -498,6 +515,10 @@ pub enum ExprKind {
     Loop {
         body: Block,
     },
+    /// Unit `()` and tuple expressions `(a, b)`. §16's expr list carries no
+    /// explicit alternative for these, yet `Ok(())` and tuple literals appear
+    /// throughout the spec's own examples — see #89.
+    Tuple(Vec<Expr>),
     /// `closure = [ "move" ] "|" closure_params "|" ( expr | block )` (§16).
     /// Block bodies are wrapped as `ExprKind::Block`. §16 has no closure
     /// return-type annotation.
@@ -505,6 +526,18 @@ pub enum ExprKind {
         is_move: bool,
         params: Vec<ClosureParam>,
         body: Box<Expr>,
+    },
+    /// `"spawn" expr` (§16) — typically `Actor::init(...)` (§8.2) or a
+    /// `move` closure (§4.6). The operand is an unrestricted expression.
+    Spawn(Box<Expr>),
+    /// `"spawn" "async" block` (§16, §8.9) — a raw block by production,
+    /// like `Loop`'s body.
+    SpawnAsync {
+        body: Block,
+    },
+    /// `select_expr = "select" "{" { select_arm } "}"` (§16, §8.6).
+    Select {
+        arms: Vec<SelectArm>,
     },
     StructLiteral {
         path: Path,

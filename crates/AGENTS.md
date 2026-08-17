@@ -40,8 +40,10 @@ the accepted list as **not yet implemented** — add a corpus fixture when it la
   guards; the scrutinee is under the §5.2 block-head restriction, expression
   bodies need their trailing comma and block bodies none, and a non-tail
   `match` statement needs its `;` like `if`/blocks; patterns are wired into
-  `match` arms only today, and the two spec-example forms §16 cannot derive
-  (`return` arm bodies, `ref` field-pat shorthand) are rejected pending #89;
+  `match` arms, `select` arms, `if let`, `while let`, `for`, and closure
+  params, and the two spec-example forms §16 cannot derive
+  (`return` arm bodies — match §5.2/§8.8 and select §8.6 alike — and `ref`
+  field-pat shorthand) are rejected pending #89;
   `if let` (§5.4, else is a plain block only — no `else if` chains after an
   if let, though `if`'s else chains into `if` and `if let`), `while`,
   `while let`, `for` (tuple/struct destructuring, range and pipe iterables),
@@ -54,9 +56,20 @@ the accepted list as **not yet implemented** — add a corpus fixture when it la
   or-pattern params must parenthesize: the bare form collides with the closing
   delimiter, #89 item 4b), zero-arg `||` (`|`/`||` in prefix position opens a
   closure, infix `||` stays Logical OR — #89 item 4a), `move` closures, and no
-  return-type annotation per §16; `send` followed by a closure opener now
-  opens a send-statement (the closure operand then fails the method-call
-  check) since a closure can begin an expression per §2.7;
+  return-type annotation per §16; `spawn` (§8.2) — operand is an
+  unrestricted expression (a struct-literal operand parses: spawn is not a
+  block-head position) that greedily binds trailing pipes (`spawn (x |> f)`,
+  §16-ambiguous pending #89), `spawn async` (§8.9) with a raw block, `select`
+  (§8.6) with match-style arms (`pattern "=" expr "=>"` — full patterns
+  allowed, the `=` delimiter means no closure-param collision; `timeout(ms)`
+  is an ordinary call syntactically), and `emit` statements (§11.1/§11.3)
+  reusing field-init shorthand — statement-only (no expression production),
+  the on-chain-only restriction is semantic, and emit is spanless per the
+  Stmt convention; `send` followed by a closure opener, `spawn`, or `select`
+  now opens a send-statement (the operand then fails the method-call check)
+  since those can begin an expression per §2.7; unit `()` and tuple `(a, b)`
+  expressions (`Ok(())` pervades the spec's examples; §16 has no explicit
+  alternative — pending #89 item 5), with `(a)` still grouping;
   `|>` with §16
   `pipe_stage` stages (`callee [args] [?]` — a stage's trailing `?` wraps the
   accumulated pipe application per §5.7), including the `"(" closure ")"`
@@ -65,13 +78,9 @@ the accepted list as **not yet implemented** — add a corpus fixture when it la
   `break`, `continue`, `send` (statement-head rule per §2.7 — opens a
   send-statement only when the next token can begin an expression, and the
   operand must be a method call), and expression/tail statements.
-- **Not yet implemented:** `spawn`, `select`,
-  and `emit` (reserved keywords with no expression/statement production yet, so
-  §8 actor spawns and §11.5 event emission do not parse — §4.6's
-  `spawn move || { ... }` example therefore does not parse either); patterns
-  outside `match`/`if let`/`while let`/`for`/closure params — `let` binds a
-  single identifier only, no destructuring (`let (a, b) = ...` and
-  `let Some(x) = ...` are rejected); `#[...]` compiler directives are not parsed
+- **Not yet implemented:** patterns in `let`
+  bindings — `let` binds a single identifier only, no destructuring
+  (`let (a, b) = ...` and `let Some(x) = ...` are rejected); `#[...]` compiler directives are not parsed
   in any position (`#[cfg(test)]`, `#[target(...)]`, `#[indexed]` all fail);
   `storage { }` blocks inside `onchain mod` are consumed but discarded, not
   stored in the AST; turbofish on a non-final pipe-stage segment is rejected
@@ -81,8 +90,10 @@ the accepted list as **not yet implemented** — add a corpus fixture when it la
   where literals gain types; generic parameters and
   `trait`/`impl` bodies are skipped, not stored in the AST; `let mut` / `&mut`
   mutability and the `send` keyword are parsed but not preserved; a block-like
-  expression (`if`/`if let`/`match`/`while`/`for`/`loop`/block) used as a
-  non-tail statement needs a trailing `;` (loosening that is #62's call).
+  expression (`if`/`if let`/`match`/`while`/`for`/`loop`/`select`/`spawn
+  async`/block) used as a non-tail statement needs a trailing `;` (loosening
+  that is #62's call — that issue's set must decide whether the newly
+  brace-final `select`/`spawn async` join it).
 - **Intentionally absent:** block comments — §2.2 keeps one way to comment
   (`//`, `///`).
 

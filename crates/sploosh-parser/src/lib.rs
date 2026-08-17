@@ -662,6 +662,16 @@ impl<'src> Parser<'src> {
             } else if self.eat_keyword(Keyword::Continue).is_some() {
                 self.expect(TokenKind::Semi)?;
                 statements.push(Stmt::Continue);
+            } else if self.eat_keyword(Keyword::Emit).is_some() {
+                // `emit_stmt = "emit" IDENT "{" field_inits "}" ";"` (§16) —
+                // reserved keyword, so the statement head is unambiguous. The
+                // on-chain-only restriction (§11.1) is semantic.
+                let event = self.ident()?.name;
+                self.expect(TokenKind::LBrace)?;
+                let fields = self.field_inits()?;
+                self.expect(TokenKind::RBrace)?;
+                self.expect(TokenKind::Semi)?;
+                statements.push(Stmt::Emit { event, fields });
             } else if self.at_ident_text("send") && self.peek_kind_at(1).is_some_and(can_begin_expr)
             {
                 // §2.7: `send` at statement head followed by any token that can
@@ -976,7 +986,32 @@ impl<'src> Parser<'src> {
             }
             TokenKind::LParen => {
                 self.bump();
+                if self.eat(TokenKind::RParen).is_some() {
+                    // `()` — unit. §16's expr list has no explicit unit/tuple
+                    // alternative, but `Ok(())` pervades the spec's own
+                    // examples (§11.1's emit example among them); see #89.
+                    let end = self.prev_span().end;
+                    return Some(Expr {
+                        kind: ExprKind::Tuple(Vec::new()),
+                        span: Span::new(token.span.start, end),
+                    });
+                }
                 let expr = self.delimited_expr()?;
+                if self.eat(TokenKind::Comma).is_some() {
+                    // Tuple expression `(a, b)` — same #89 gap as `()`.
+                    let mut items = vec![expr];
+                    while !self.at(TokenKind::RParen) && !self.eof() {
+                        items.push(self.delimited_expr()?);
+                        if self.eat(TokenKind::Comma).is_none() {
+                            break;
+                        }
+                    }
+                    let end = self.expect(TokenKind::RParen)?.span.end;
+                    return Some(Expr {
+                        kind: ExprKind::Tuple(items),
+                        span: Span::new(token.span.start, end),
+                    });
+                }
                 let end = self.expect(TokenKind::RParen)?.span.end;
                 Some(Expr {
                     span: Span::new(token.span.start, end),
@@ -1003,6 +1038,8 @@ impl<'src> Parser<'src> {
             // it (§4.6; see #89 item 4 for the missing spec rule).
             TokenKind::Pipe | TokenKind::PipePipe => self.closure_expr(),
             TokenKind::Keyword(Keyword::Move) => self.closure_expr(),
+            TokenKind::Keyword(Keyword::Spawn) => self.spawn_expr(),
+            TokenKind::Keyword(Keyword::Select) => self.select_expr(),
             _ => {
                 self.error_here("expected expression");
                 None
@@ -1298,6 +1335,79 @@ impl<'src> Parser<'src> {
                 body: Box::new(body),
             },
             span,
+        })
+    }
+
+    /// `"spawn" expr | "spawn" "async" block` (§16). The operand is an
+    /// unrestricted expression — spawn is not a block-head-restricted
+    /// position, so `spawn Worker { count: 0 }` parses (§16 side condition
+    /// enumerates only if/while conditions, match scrutinees, for iterables).
+    /// A trailing pipe binds greedily into the operand (`spawn (x |> f)`,
+    /// consistent with match scrutinees — see #89).
+    fn spawn_expr(&mut self) -> Option<Expr> {
+        let start = self.expect_keyword(Keyword::Spawn)?.span.start;
+        if self.eat_keyword(Keyword::Async).is_some() {
+            let body = self.block()?;
+            let end = body.span.end;
+            return Some(Expr {
+                kind: ExprKind::SpawnAsync { body },
+                span: Span::new(start, end),
+            });
+        }
+        let operand = self.expr(0)?;
+        let span = Span::new(start, operand.span.end);
+        Some(Expr {
+            kind: ExprKind::Spawn(Box::new(operand)),
+            span,
+        })
+    }
+
+    /// `select_expr = "select" "{" { select_arm } "}"` (§16) — deterministic
+    /// multiplexed receive (§8.6). Arm loop mirrors `match_expr`.
+    fn select_expr(&mut self) -> Option<Expr> {
+        let start = self.expect_keyword(Keyword::Select)?.span.start;
+        self.expect(TokenKind::LBrace)?;
+        let mut arms = Vec::new();
+        while !self.at(TokenKind::RBrace) && !self.eof() {
+            match self.select_arm() {
+                Some(arm) => arms.push(arm),
+                None => self.recover_until(&[TokenKind::Comma, TokenKind::RBrace]),
+            }
+            // Same comma discipline as match arms: expression bodies consume
+            // their required comma inside `select_arm`, block bodies take
+            // none. Eating a stray separator keeps the loop advancing.
+            let _ = self.eat(TokenKind::Comma);
+        }
+        let end = self.expect(TokenKind::RBrace)?.span.end;
+        Some(Expr {
+            kind: ExprKind::Select { arms },
+            span: Span::new(start, end),
+        })
+    }
+
+    /// `select_arm = pattern "=" expr "=>" ( expr "," | block )` (§16). The
+    /// arm delimiter is `=`, so full patterns (incl. or-patterns) terminate
+    /// cleanly — no closure-param-style delimiter collision.
+    fn select_arm(&mut self) -> Option<SelectArm> {
+        let pattern = self.pattern();
+        self.expect(TokenKind::Eq)?;
+        let source = self.expr(0)?;
+        self.expect(TokenKind::FatArrow)?;
+        let body = if self.at(TokenKind::LBrace) {
+            let block = self.block()?;
+            Expr {
+                span: block.span,
+                kind: ExprKind::Block(block),
+            }
+        } else {
+            let body = self.expr(0)?;
+            self.expect(TokenKind::Comma)?;
+            body
+        };
+        Some(SelectArm {
+            pattern: pattern?,
+            source,
+            body,
         })
     }
 
@@ -1916,6 +2026,8 @@ fn can_begin_expr(kind: TokenKind) -> bool {
                     | Keyword::For
                     | Keyword::Loop
                     | Keyword::Move
+                    | Keyword::Spawn
+                    | Keyword::Select
             )
             | TokenKind::Pipe
             | TokenKind::PipePipe
@@ -3463,5 +3575,285 @@ mod tests {
         };
         let paren = "fn f() { let r = 10 |> ".len();
         assert_eq!(right.span.start, paren);
+    }
+
+    #[test]
+    fn parses_spawn_forms() {
+        // §8.2: spawn of an actor constructor call; §4.6: spawn of a move
+        // closure — finally parseable verbatim.
+        let value = let_value("spawn Worker::init(0)");
+        let ExprKind::Spawn(operand) = &value.kind else {
+            panic!("expected spawn, got {value:?}");
+        };
+        assert!(matches!(&operand.kind, ExprKind::Call { .. }));
+
+        let value = let_value("spawn move || { process(data); }");
+        let ExprKind::Spawn(operand) = &value.kind else {
+            panic!("expected spawn, got {value:?}");
+        };
+        assert!(matches!(
+            &operand.kind,
+            ExprKind::Closure { is_move: true, .. }
+        ));
+
+        // Degenerate but grammar-derivable: spawn of a plain block.
+        let value = let_value("spawn { work(); }");
+        let ExprKind::Spawn(operand) = &value.kind else {
+            panic!("expected spawn, got {value:?}");
+        };
+        assert!(matches!(&operand.kind, ExprKind::Block(_)));
+    }
+
+    #[test]
+    fn parses_spawn_async() {
+        // §8.9: non-actor task, JoinHandle-typed let.
+        let source = "let handle: JoinHandle<String> = spawn async { fetch(url).await };";
+        let value = {
+            let src = format!("fn f() {{ {source} }}");
+            let program = parse_program(&src).unwrap();
+            let ItemKind::Function(func) = &program.items[0].kind else {
+                panic!("expected function");
+            };
+            let Stmt::Let { value, .. } = &func.body.as_ref().unwrap().statements[0] else {
+                panic!("expected let");
+            };
+            value.clone()
+        };
+        let ExprKind::SpawnAsync { body } = &value.kind else {
+            panic!("expected spawn async, got {value:?}");
+        };
+        assert_eq!(body.statements.len(), 0);
+        assert!(matches!(
+            body.tail.as_deref().map(|tail| &tail.kind),
+            Some(ExprKind::Await(_))
+        ));
+    }
+
+    #[test]
+    fn parses_select_8_6_shape() {
+        // §8.6 verbatim, with the return-arm body adapted to a block
+        // (`return` in an expression arm is #89 item 1; third occurrence).
+        let source = r#"
+            select {
+                msg = rx1.recv() => handle_a(msg),
+                msg = rx2.recv() => handle_b(msg),
+                _ = timeout(5000) => { return Err(AppError::Timeout); }
+            }
+        "#;
+        let value = tail_expr(source);
+        let ExprKind::Select { arms } = &value.kind else {
+            panic!("expected select, got {value:?}");
+        };
+        assert_eq!(arms.len(), 3);
+        assert!(matches!(
+            &arms[0].pattern.kind,
+            PatternKind::Binding { name, .. } if name == "msg"
+        ));
+        assert!(matches!(&arms[0].source.kind, ExprKind::Call { .. }));
+        assert!(matches!(&arms[0].body.kind, ExprKind::Call { .. }));
+        assert!(matches!(&arms[2].pattern.kind, PatternKind::Wildcard));
+        // `timeout(ms)` is an ordinary call syntactically (§8.6 intrinsic).
+        let ExprKind::Call { callee, .. } = &arms[2].source.kind else {
+            panic!("expected timeout call");
+        };
+        assert!(matches!(&callee.kind, ExprKind::Path(p) if p.segments == ["timeout"]));
+        let ExprKind::Block(block) = &arms[2].body.kind else {
+            panic!("expected block body");
+        };
+        assert!(matches!(block.statements[0], Stmt::Return(_)));
+    }
+
+    #[test]
+    fn select_arm_takes_full_patterns() {
+        // The arm delimiter is `=`, so or-patterns and call patterns
+        // terminate cleanly — no closure-param-style collision (#89 4b).
+        let value = tail_expr("select { Some(x) | None = poll() => x, _ = tick() => wait(), }");
+        let ExprKind::Select { arms } = &value.kind else {
+            panic!("expected select, got {value:?}");
+        };
+        let PatternKind::Or { left, right } = &arms[0].pattern.kind else {
+            panic!("expected or-pattern arm");
+        };
+        assert!(matches!(&left.kind, PatternKind::Call { .. }));
+        // Single bare identifiers are bindings, not paths (the #90 rule).
+        assert!(matches!(
+            &right.kind,
+            PatternKind::Binding { name, .. } if name == "None"
+        ));
+    }
+
+    #[test]
+    fn spawn_and_select_struct_literal_pins() {
+        // Spawn's operand is NOT a block-head-restricted position (§16 side
+        // condition enumerates only if/while conditions, match scrutinees,
+        // for iterables) — a struct-literal operand must parse. Same for a
+        // select arm's source: the `=>` disambiguates.
+        let value = let_value("spawn Worker { count: 0 }");
+        let ExprKind::Spawn(operand) = &value.kind else {
+            panic!("expected spawn, got {value:?}");
+        };
+        assert!(matches!(&operand.kind, ExprKind::StructLiteral { .. }));
+        assert!(parse_program("fn f() -> i64 { select { x = Foo { a: 1 } => 0, } }").is_ok());
+    }
+
+    #[test]
+    fn spawn_pipe_binds_greedily_into_operand() {
+        // §16 derives both `(spawn x) |> f` and `spawn (x |> f)`; the parser
+        // takes the greedy reading, consistent with match scrutinees. The
+        // ambiguity is noted on #89.
+        let value = let_value("spawn x |> f");
+        let ExprKind::Spawn(operand) = &value.kind else {
+            panic!("expected greedy spawn operand, got {value:?}");
+        };
+        assert!(matches!(
+            &operand.kind,
+            ExprKind::Binary {
+                op: BinaryOp::Pipe,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn select_heads_pipe_and_pipe_in_arm_body() {
+        let value = let_value("select { _ = rx.recv() => 0, } |> done");
+        let ExprKind::Binary {
+            op: BinaryOp::Pipe, ..
+        } = &value.kind
+        else {
+            panic!("expected pipe, got {value:?}");
+        };
+        assert!(
+            parse_program("fn f() -> i64 { select { msg = rx.recv() => msg |> parse::<i64>?, } }")
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn parses_emit_statement() {
+        // §11.1: field shorthand (`to`); §11.3: two-field emit.
+        let program = parse_program(
+            "fn f(sender: Address) { emit Transfer { from: sender, to, amount: 1 }; }",
+        )
+        .unwrap();
+        let ItemKind::Function(func) = &program.items[0].kind else {
+            panic!("expected function");
+        };
+        let Stmt::Emit { event, fields } = &func.body.as_ref().unwrap().statements[0] else {
+            panic!("expected emit statement");
+        };
+        assert_eq!(event, "Transfer");
+        assert_eq!(fields.len(), 3);
+        assert!(fields[1].1.is_none(), "expected `to` shorthand");
+        assert!(parse_program("fn f() { emit Deposit { sender, amount }; }").is_ok());
+    }
+
+    #[test]
+    fn emit_is_statement_only() {
+        // `emit` has no expression production — pin that it cannot appear in
+        // expression position.
+        let errors = parse_program("fn f() { let x = emit E {}; }").unwrap_err();
+        assert!(
+            errors
+                .iter()
+                .any(|err| err.message.contains("expected expression")),
+            "expected an expression error, got {errors:?}"
+        );
+    }
+
+    #[test]
+    fn send_head_before_spawn_and_select_is_keyword() {
+        // §2.7: spawn/select can begin an expression, so `send` before them
+        // opens a send-statement; the operands fail the method-call check.
+        for source in [
+            "fn f() { send spawn Worker::init(0); }",
+            "fn f() { send select { _ = rx.recv() => 0, }; }",
+        ] {
+            let errors = parse_program(source).unwrap_err();
+            assert!(
+                errors.iter().any(|err| err.message.contains("method call")),
+                "{source}: expected a method-call error, got {errors:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn spawn_select_spans_anchor_at_keyword() {
+        // #92 lesson: spans anchor at the construct's own keyword, never the
+        // preceding token.
+        let value = let_value("spawn x");
+        let spawn_at = "fn f() { let r = ".len();
+        assert_eq!(value.span.start, spawn_at);
+
+        let value = let_value("select { _ = rx.recv() => 0, }");
+        let select_at = "fn f() { let r = ".len();
+        assert_eq!(value.span.start, select_at);
+    }
+
+    #[test]
+    fn spawn_select_grammar_violations() {
+        for (source, needle) in [
+            ("fn f() { let h = spawn; }", "expected expression"),
+            ("fn f() { let h = spawn async x; }", "LBrace"),
+            ("fn f() { let s = select { 1 => 0, }; }", "Eq"),
+            ("fn f() { let s = select { _ rx.recv() => 0, }; }", "Eq"),
+            (
+                "fn f() { let s = select { _ = rx.recv() 0, }; }",
+                "FatArrow",
+            ),
+            ("fn f() { emit E; }", "LBrace"),
+            ("fn f() { emit E { x: 1 } }", "Semi"),
+        ] {
+            let errors = parse_program(source).unwrap_err();
+            assert!(
+                errors.iter().any(|err| err.message.contains(needle)),
+                "{source}: expected an error containing {needle:?}, got {errors:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn select_error_recovery_does_not_cascade() {
+        let errors =
+            parse_program("fn f() -> i64 { select { 1 => , _ = rx.recv() => 0, } }").unwrap_err();
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(errors[0].message.contains("Eq"));
+    }
+
+    #[test]
+    fn non_tail_spawn_and_select_need_semi() {
+        assert!(parse_program("fn f() { select { _ = rx.recv() => 0, }; let y = 2; }").is_ok());
+        assert!(parse_program("fn f() { spawn async {}; let y = 2; }").is_ok());
+        let errors =
+            parse_program("fn f() { select { _ = rx.recv() => 0, } let y = 2; }").unwrap_err();
+        assert!(
+            errors
+                .iter()
+                .any(|err| err.message.contains("expected `RBrace`")),
+            "expected a missing-terminator error, got {errors:?}"
+        );
+    }
+
+    #[test]
+    fn unit_and_tuple_expressions_parse() {
+        // `Ok(())` pervades the spec's examples (§11.1's emit example among
+        // them) but §16's expr list has no unit/tuple alternative — the
+        // parser adds the obvious productions; gap recorded on #89.
+        let value = let_value("Ok(())");
+        let ExprKind::Call { args, .. } = &value.kind else {
+            panic!("expected call, got {value:?}");
+        };
+        assert!(matches!(&args[0].kind, ExprKind::Tuple(items) if items.is_empty()));
+
+        let value = let_value("(\"a\", 1)");
+        let ExprKind::Tuple(items) = &value.kind else {
+            panic!("expected tuple, got {value:?}");
+        };
+        assert_eq!(items.len(), 2);
+
+        // Grouping stays grouping — a single parenthesized expression is
+        // itself, not a one-element tuple.
+        let value = let_value("(x)");
+        assert!(!matches!(value.kind, ExprKind::Tuple(_)));
     }
 }
