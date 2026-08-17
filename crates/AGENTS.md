@@ -90,10 +90,11 @@ the accepted list as **not yet implemented** — add a corpus fixture when it la
   where literals gain types; generic parameters and
   `trait`/`impl` bodies are skipped, not stored in the AST; `let mut` / `&mut`
   mutability and the `send` keyword are parsed but not preserved; a block-like
-  expression (`if`/`if let`/`match`/`while`/`for`/`loop`/`select`/`spawn
-  async`/block) used as a non-tail statement needs a trailing `;` (loosening
-  that is #62's call — that issue's set must decide whether the newly
-  brace-final `select`/`spawn async` join it).
+  expression used as a non-tail statement needs a trailing `;` — `if`/`if
+  let`/`match`/`while`/`for`/`loop`/`select`, `spawn async`, plain `spawn`
+  with a brace-final operand (`spawn { ... }`, `spawn Worker { ... }`), and
+  blocks (loosening that is #62's call — that issue's set must decide whether
+  the newly brace-final `select`/`spawn` forms join it).
 - **Intentionally absent:** block comments — §2.2 keeps one way to comment
   (`//`, `///`).
 
